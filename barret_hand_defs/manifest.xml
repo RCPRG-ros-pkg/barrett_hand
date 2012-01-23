@@ -1,0 +1,14 @@
+<package>
+  <description brief="barret_hand_defs">
+
+     barret_hand_defs
+
+  </description>
+  <author>Konrad Banachowicz</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/barret_hand_defs</url>
+
+</package>
+
+
