@@ -33,10 +33,6 @@
     <xacro:property name="highResModelDirectory" value="${homeDirectory}/meshes/splitModels" />
     <xacro:property name="PI" value="3.1415926535897931" />
     
-    <material name="DarpaGrey">
-        <color rgba="0.9 0.9 0.9 1.0"/>
-    </material>
-
     <xacro:macro name="palm" params="prefix parent">
 
         <link name="${prefix}_HandPalmLink" >
@@ -48,10 +44,9 @@
                                                          izz="0.00068788" />
         </inertial>
         <visual>
-            <material name="DarpaGrey" />
-            <origin xyz="0 0 0" rpy="0 0 0" />
+            <origin xyz="0 0 0" rpy="${PI} 0 0" />
             <geometry>
-                    <mesh filename="${homeDirectory}/meshes/palm.DAE"/>
+                    <mesh filename="${homeDirectory}/meshes/HandPalmLink.dae"/>
             </geometry>
         </visual>
             <collision>
@@ -65,7 +60,7 @@
         <joint name="${prefix}_HandPalmJoint" type="fixed">
             <parent link="${parent}"/>
             <child link="${prefix}_HandPalmLink"/>
-            <origin xyz="0 0 0.04" rpy="0 0 -${0.5 * PI}"/>
+            <origin xyz="0.0 0 0.0" rpy="0 0 0"/>
             <provideFeedback value="true"/> 
         </joint>
     </xacro:macro>
@@ -74,11 +69,9 @@
 
         <link name="${prefix}_HandFinger${number}KnuckleOneLink">
         <visual>
-            <material name="DarpaGrey" />
-
-            <origin xyz="0 0 0" rpy="${0.5 * PI} 0 -${0.5 * PI}" />
+            <origin xyz="0 0 -0.017" rpy="${0.5 * PI} 0 -${0.5 * PI}" />
             <geometry>
-                <mesh filename="${homeDirectory}/meshes/firstFingerLink.DAE"/>
+                <mesh filename="${homeDirectory}/meshes/KnuckleOneLink.dae"/>
             </geometry>
         </visual>
         <inertial>
@@ -91,7 +84,7 @@
         <collision>
             <origin xyz="0 0 0" rpy="${0.5 * PI} 0 -${0.5 * PI}" />
             <geometry>
-            <mesh filename="${homeDirectory}/meshes/firstFingerLink.stl"/>
+                    <mesh filename="${homeDirectory}/meshes/firstFingerLink.stl"/>
             </geometry>
             <mu1 value="50000.0" />
             <mu2 value="50000.0" />
@@ -106,7 +99,7 @@
             <origin xyz="${xyz}" rpy="${rpy}"/>
             <axis xyz="${axis}"/>
             <limit effort="1" lower="0" upper="${PI}" velocity="3.27"/>
-            <dynamics damping="0.005" friction="100.0"/>
+            <dynamics damping="0.05" friction="100.0"/>
         </joint>
     </xacro:macro>
 
@@ -115,10 +108,9 @@
 
         <link name="${prefix}_HandFinger${number}KnuckleTwoLink">
             <visual>
-                <material name="DarpaGrey" />
                 <origin xyz="0 0 0" rpy="${PI} ${0.5 * PI} 0" />
                 <geometry>
-                    <mesh filename="${homeDirectory}/meshes/secondFingerLink.DAE"/>
+                    <mesh filename="${homeDirectory}/meshes/KnuckleTwoLink.dae"/>
                 </geometry>
             </visual>
             <inertial>
@@ -155,11 +147,9 @@
 
         <link name="${prefix}_HandFinger${number}KnuckleThreeLink">
           <visual>
-            <material name="DarpaGrey" />
-
             <origin xyz="0 0 0" rpy="0 ${0.5 * PI} 0" />
             <geometry>
-                <mesh filename="${homeDirectory}/meshes/thirdFingerLink.DAE"/>
+                <mesh filename="${homeDirectory}/meshes/KnuckleThreeLink.dae"/>
             </geometry>
           </visual>
           <inertial>
@@ -173,7 +163,7 @@
           <collision>
             <origin xyz="0 0 0" rpy="0 ${0.5 * PI} 0" />
             <geometry>
-              <mesh filename="${homeDirectory}/meshes/thirdFingerLink.stl"/>
+                    <mesh filename="${homeDirectory}/meshes/thirdFingerLink.stl"/>
             </geometry>
             <mu1 value="50000.0" />
             <mu2 value="50000.0" />
