@@ -1,0 +1,13 @@
+#goal definition
+float64[3] finger
+float64 spread
+float64 fingerVel
+float64 spreadVel
+bool fingerHold
+bool spreadHold
+---
+#result definition
+int32[] sequence
+---
+#feedback
+int32[] sequence

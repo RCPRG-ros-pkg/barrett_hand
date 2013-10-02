@@ -1,0 +1,18 @@
+<package>
+  <description brief="barrett_hand_controller">
+
+     barrett_hand_controller
+
+  </description>
+  <author>Konrad Banachowicz</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/barrett_hand_controller</url>
+  <depend package="roscpp"/>
+  <depend package="actionlib"/>
+  <depend package="actionlib_msgs"/>
+  <depend package="sensor_msgs"/>
+
+</package>
+
+
