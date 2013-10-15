@@ -32,7 +32,7 @@
     <xacro:property name="homeDirectory" value="package://barret_hand_defs" />
     <xacro:property name="highResModelDirectory" value="${homeDirectory}/meshes/splitModels" />
     <xacro:property name="PI" value="3.1415926535897931" />
-    
+
     <xacro:macro name="palm" params="prefix parent">
 
         <link name="${prefix}_HandPalmLink" >

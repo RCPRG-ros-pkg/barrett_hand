@@ -10,6 +10,7 @@
 #define PROP_OT 54
 #define PROP_E 52
 #define PROP_MODE 8
+#define PROP_TACT 106
 
 const int MODE_IDLE      = 0;
 const int MODE_TORQUE    = 2;
@@ -28,6 +29,7 @@ const int MODE_TRAPEZOID = 5;
 #define ALL_GROUP 0
 #define PFEEDBACK_GROUP 3
 #define HAND_GROUP 5
+#define TACTILE_FULL_GROUP 9
 
 #define GROUP(from, to) 0x400 | ((from) << 5) | (to)
 
@@ -84,6 +86,18 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 		p = 4194303 - p;
 	if(jp > 2097152)
 		jp = 4194303 - jp;
+}
+
+void MotorController::recTact(int id, int32_t &gr, int32_t &a, int32_t &b, int32_t &c, int32_t &d, int32_t &e) {
+	uint8_t data[8];
+	int ret = dev.waitForReply(GROUP(id, TACTILE_FULL_GROUP), data);
+
+	gr = (data[0]>>4)&0x0F;
+	a = ((data[0]&0x0F)<<8) | data[1];
+	b = (data[2]<<4) | ((data[3]>>4)&0x0F);
+	c = ((data[3]&0x0F)<<8) | data[4];
+	d = (data[5]<<4) | ((data[6]>>4)&0x0F);
+	e = ((data[6]&0x0F)<<8) | data[7];
 }
 
 void MotorController::recProperty(int id, int32_t &value) {
@@ -163,5 +177,33 @@ void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int3
 	recEncoder2(11 + 1, p2, jp2);
 	recEncoder2(11 + 2, p3, jp3);
 	recEncoder2(11 + 3, s, jp);
+}
+
+void MotorController::getTactile(int id, tact_array_t &tact)
+{
+	setProperty(11 + id, PROP_TACT, 2);
+	int gr, a, b, c, d, e;
+	recTact(11 + id, gr, tact[0], tact[1], tact[2], tact[3], tact[4]);
+	recTact(11 + id, gr, tact[5], tact[6], tact[7], tact[8], tact[9]);
+	recTact(11 + id, gr, tact[10], tact[11], tact[12], tact[13], tact[14]);
+	recTact(11 + id, gr, tact[15], tact[16], tact[17], tact[18], tact[19]);
+	recTact(11 + id, gr, tact[20], tact[21], tact[22], tact[23], tact[24]);
+}
+
+int32_t MotorController::getParameter(int32_t id, int32_t prop_id)
+{
+	int32_t value;
+	reqProperty(11+id, prop_id);
+	recProperty(11+id, value);
+	return value;
+}
+
+void MotorController::setParameter(int32_t id, int32_t prop_id, int32_t value, bool save)
+{
+	setProperty(11 + id, prop_id, value);
+	if (save)
+	{
+		setProperty(11 + id, 30, prop_id);
+	}
 }
 

@@ -6,6 +6,7 @@
 
 class MotorController {
 public:
+	typedef int32_t tact_array_t[24];
 	MotorController(std::string dev_name = "can0");
 	~MotorController();
 	void initHand();
@@ -22,6 +23,10 @@ public:
 	void moveAll();
 	void getStatus(int id, int32_t &mode);
 	void getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4);
+	void recTact(int id, int32_t &gr, int32_t &a, int32_t &b, int32_t &c, int32_t &d, int32_t &e);
+	void getTactile(int id, tact_array_t &tact);
+	int32_t getParameter(int32_t id, int32_t prop_id);
+	void setParameter(int32_t id, int32_t prop_id, int32_t value, bool save);
 protected:
 	void setProperty(int id, uint32_t property, int32_t value);
 	void reqProperty(int id, uint32_t property);
