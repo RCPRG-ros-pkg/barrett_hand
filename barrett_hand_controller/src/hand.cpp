@@ -2,16 +2,26 @@
 #include "ros/ros.h"
 #include "tf/transform_datatypes.h"
 #include "sensor_msgs/JointState.h"
+#include "geometry_msgs/Vector3.h"
 #include <actionlib/server/simple_action_server.h>
 #include <barrett_hand_controller/BHMoveAction.h>
 #include <barrett_hand_controller/BHPressureState.h>
 #include <barrett_hand_controller/BHPressureInfo.h>
 #include <barrett_hand_controller/BHPressureInfoElement.h>
 #include <barrett_hand_controller/BHGetPressureInfo.h>
+#include <barrett_hand_controller/BHCalibrateTactileSensors.h>
+#include <barrett_hand_controller/BHFingerVel.h>
+#include <barrett_hand_controller/BHTemp.h>
 
 #include <iostream>
 #include <math.h>
 #include "MotorController.h"
+#include "tactile_geometry.h"
+
+#include <fcntl.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 using namespace std;
 
@@ -21,20 +31,134 @@ using namespace std;
 #define RAD2P(x) ((x) * 180.0/3.1416 / 140.0 * 199111.1)
 #define RAD2S(x) (x * 35840.0/M_PI)
 
+#define min_avg_steps (40)
+
+class Tactile
+{
+public:
+	typedef double RawTactileData[24][3];
+
+	Tactile()
+	{
+		memset(min_avg_, 0, min_avg_steps);
+		min_avg_i_ = 0;
+		min_avg_curr_ = 0.0;
+	}
+
+	void setGeometry(string name, const RawTactileData &center, const RawTactileData &halfside1, const RawTactileData &halfside2, double scale = 1)
+	{
+		sensor_name_ = name;
+		for (int i=0; i<24; ++i)
+		{
+			sensor_center_[i].x = center[i][0]*scale;	sensor_center_[i].y = center[i][1]*scale;	sensor_center_[i].z = center[i][2]*scale;
+			sensor_halfside1_[i].x = halfside1[i][0]*scale;	sensor_halfside1_[i].y = halfside1[i][1]*scale;	sensor_halfside1_[i].z = halfside1[i][2]*scale;
+			sensor_halfside2_[i].x = halfside2[i][0]*scale;	sensor_halfside2_[i].y = halfside2[i][1]*scale;	sensor_halfside2_[i].z = halfside2[i][2]*scale;
+		}
+	}
+
+	string getName()
+	{
+		return sensor_name_;
+	}
+
+	geometry_msgs::Vector3 getCenter(int i)
+	{
+		if (i>=0 && i<24)
+			return sensor_center_[i];
+		return geometry_msgs::Vector3();
+	}
+
+	geometry_msgs::Vector3 getHalfside1(int i)
+	{
+		if (i>=0 && i<24)
+			return sensor_halfside1_[i];
+		return geometry_msgs::Vector3();
+	}
+
+	geometry_msgs::Vector3 getHalfside2(int i)
+	{
+		if (i>=0 && i<24)
+			return sensor_halfside2_[i];
+		return geometry_msgs::Vector3();
+	}
+
+	void updatePressure(const MotorController::tact_array_t &tact)
+	{
+		memcpy(tact_, tact, sizeof(MotorController::tact_array_t));
+		min = 32000;
+		for (int i=0; i<24; ++i)
+		{
+			if (tact_[i] < min)
+				min = tact_[i];
+		}
+		min_avg_[min_avg_i_] = min;
+		min_avg_i_ = (min_avg_i_+1)%min_avg_steps;
+
+		for (int i=0; i<min_avg_steps; ++i)
+		{
+			min_avg_curr_ += min_avg_[i];
+		}
+		min_avg_curr_ /= (double)min_avg_steps;
+	}
+
+	void printMin()
+	{
+		cout<<"min: "<<min<<"   min_avg: "<<min_avg_curr_<<endl;
+	}
+
+	int32_t getPressure(int i)
+	{
+		double result = (double)tact_[i];
+		if (result < 0)
+			result = 0;
+		return (int32_t)result;
+	}
+
+private:
+	string sensor_name_;
+	
+	geometry_msgs::Vector3 sensor_center_[24];
+	geometry_msgs::Vector3 sensor_halfside1_[24];
+	geometry_msgs::Vector3 sensor_halfside2_[24];
+
+	double offsets_[24];
+	int32_t tact_[24];
+
+	int32_t min_avg_[min_avg_steps];
+	int min_avg_i_;
+	double min_avg_curr_;
+	int32_t min;
+};
+
 class Hand {
 public:
 	Hand(string port) : 
 			ctrl_(port),
 			as_(nh_, "move_hand", false)
 	{
+		instance_ = this;
+
+		ts_[0].setGeometry("finger1_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
+		ts_[1].setGeometry("finger2_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
+		ts_[2].setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
+		ts_[3].setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
+
+		temp_pub_ = nh_.advertise<barrett_hand_controller::BHTemp>("/barrett_hand_controller/BHTemp", 1);
+
 		joint_pub_ = nh_.advertise<sensor_msgs::JointState>("/joint_states", 1);
 		
 		tactile_pub_ = nh_.advertise<barrett_hand_controller::BHPressureState>("barrett_hand_controller/BHPressureState", 1);
 		
 		pressure_info_service_ = nh_.advertiseService("barrett_hand_controller/get_pressure_info", getPressureInfo);
 
+		calibration_service_ = nh_.advertiseService("barrett_hand_controller/calibrate_tactile_sensors", calibrateTactileSensors);
+
+		finger_vel_sub_ = nh_.subscribe("barrett_hand_controller/finger_vel", 10, fingerVelCallback);
+
 		as_.start();
 		
+		temp_.temp.resize(9);
+
 		pressure_states_.finger1_tip.resize(24);
 		pressure_states_.finger2_tip.resize(24);
 		pressure_states_.finger3_tip.resize(24);
@@ -53,10 +177,19 @@ public:
 		
 		joint_states_.name[6] = "right_HandFingerThreeKnuckleTwoJoint";
 		joint_states_.name[7] = "right_HandFingerThreeKnuckleThreeJoint";
+
+		tempc_ = 0;
+		fifo_ = open("/tmp/TEMPer1_temp",O_RDONLY | O_NONBLOCK);//WR);
+		if (fifo_<0)
+		{
+			printf("Could not open fifo (%d)\n", errno);
+			fifo_ = 0;
+		}
+
 	}
 	
 	~Hand() {
-	
+		instance_ = NULL;
 	}
 	
 	void run() {
@@ -95,7 +228,7 @@ public:
 			joint_states_.position[7] = P2RAD(p3);
 	
 			joint_pub_.publish(joint_states_);
-		
+
 			ros::Duration time_diff = joint_states_.header.stamp - last_tact_read_;
 			// tactile data is updated with 40Hz freq
 			// we read tactile data with bigger freq (50Hz) to get all changes
@@ -103,28 +236,84 @@ public:
 			{
 				last_tact_read_ = joint_states_.header.stamp - (time_diff - ros::Duration(0.025));
 
-				MotorController::tact_array_t tact[4];
-				ctrl_.getTactile(0, tact[0]);
-				ctrl_.getTactile(1, tact[1]);
-				ctrl_.getTactile(2, tact[2]);
-				ctrl_.getTactile(3, tact[3]);
-				if (memcmp(&tact_, &tact, sizeof(MotorController::tact_array_t)*4) != 0)
-				{
-					memcpy(&tact_, &tact, sizeof(MotorController::tact_array_t)*4);
+				MotorController::tact_array_t tact;
+				ctrl_.getTactile(0, tact);
+				ts_[0].updatePressure(tact);
 
-					pressure_states_.header.stamp = joint_states_.header.stamp;
-					for (int i=0; i<24; ++i)
-					{
-						pressure_states_.finger1_tip[i] = tact[0][i];
-						pressure_states_.finger2_tip[i] = tact[1][i];
-						pressure_states_.finger3_tip[i] = tact[2][i];
-						pressure_states_.palm_tip[i] = tact[3][i];
-						//cout<<tact[i]<<" ";
-					}
-					tactile_pub_.publish(pressure_states_);
-					//cout<<endl;
+				ctrl_.getTactile(1, tact);
+				ts_[1].updatePressure(tact);
+
+				ctrl_.getTactile(2, tact);
+				ts_[2].updatePressure(tact);
+
+				ctrl_.getTactile(3, tact);
+				ts_[3].updatePressure(tact);
+
+				//ts_[3].printMin();
+
+				pressure_states_.header.stamp = joint_states_.header.stamp;
+
+				for (int i=0; i<24; ++i)
+				{
+					pressure_states_.finger1_tip[i] = ts_[0].getPressure(i);
+					pressure_states_.finger2_tip[i] = ts_[1].getPressure(i);
+					pressure_states_.finger3_tip[i] = ts_[2].getPressure(i);
+					pressure_states_.palm_tip[i] = ts_[3].getPressure(i);
 				}
+
+				tactile_pub_.publish(pressure_states_);
 			}
+
+			if (fifo_>0)
+			{
+				float tempc;
+				if (!(read(fifo_, &tempc, sizeof(float)) < 0 && errno == EAGAIN))
+				{
+					tempc_ = tempc;
+				}
+				cout<<"tempc_: "<<tempc_<<endl;
+			}
+
+			int32_t temp[4], therm[4];
+//			cout<<"temp: ";
+			for (int i=0; i<4; ++i)
+			{
+				int32_t val = 0;
+		        	ctrl_.getTemp(i, val);
+//				cout<<val<<" ";
+			}
+
+//			cout<<"therm: ";
+			for (int i=0; i<4; ++i)
+			{
+				int32_t val = 0;
+		        	ctrl_.getTherm(i, val);
+//				cout<<val<<" ";
+			}
+//			cout<<endl;
+
+	        	ctrl_.getTemp(0, temp[0]);
+		        ctrl_.getTemp(1, temp[1]);
+		        ctrl_.getTemp(2, temp[2]);
+		        ctrl_.getTemp(3, temp[3]);
+		        ctrl_.getTherm(0, therm[0]);
+		        ctrl_.getTherm(1, therm[1]);
+		        ctrl_.getTherm(2, therm[2]);
+		        ctrl_.getTherm(3, therm[3]);
+//			cout<<"temp: "<<temp[0]<<" "<<temp[1]<<" "<<temp[2]<<" "<<temp[3]<<" ";
+//			cout<<"therm: "<<therm[0]<<" "<<therm[1]<<" "<<therm[2]<<" "<<therm[3]<<endl;
+
+			temp_.header.stamp = ros::Time::now();
+			temp_.temp[0] = temp[0];
+			temp_.temp[1] = temp[1];
+			temp_.temp[2] = temp[2];
+			temp_.temp[3] = temp[3];
+			temp_.temp[4] = therm[0];
+			temp_.temp[5] = therm[1];
+			temp_.temp[6] = therm[2];
+			temp_.temp[7] = therm[3];
+			temp_.temp[8] = tempc_;
+			temp_pub_.publish(temp_);
 
 			ros::spinOnce();
 
@@ -144,7 +333,7 @@ public:
 				ctrl_.setTargetPos(1, RAD2P(gh_->finger[1]));
 				ctrl_.setTargetPos(2, RAD2P(gh_->finger[2]));
 				ctrl_.setTargetPos(3, RAD2S(gh_->spread));
-	
+
 				ctrl_.moveAll();
 			}
 		
@@ -162,14 +351,24 @@ public:
 	
 		ctrl_.stopHand();
 	}
-	
+
+	static void fingerVelCallback(const barrett_hand_controller::BHFingerVel& msg)
+	{
+		instance_->ctrl_.setTargetVel(0, RAD2P(msg.vel[0]/1000.0));
+		instance_->ctrl_.setTargetVel(1, RAD2P(msg.vel[1]/1000.0));
+		instance_->ctrl_.setTargetVel(2, RAD2P(msg.vel[2]/1000.0));
+		instance_->ctrl_.setTargetVel(3, RAD2P(msg.vel[3]/1000.0));
+		instance_->ctrl_.moveAllVel();
+
+	}
+
 	static bool getPressureInfo(barrett_hand_controller::BHGetPressureInfo::Request  &req,
 	         barrett_hand_controller::BHGetPressureInfo::Response &res)
 	{
 		res.info.sensor.resize(4);
 		for (int id=0; id<4; ++id)
 		{
-			res.info.sensor[id].frame_id = string(pressureSensorName_[id]);
+			res.info.sensor[id].frame_id = instance_->ts_[id].getName();
 			res.info.sensor[id].center.resize(24);
 			res.info.sensor[id].halfside1.resize(24);
 			res.info.sensor[id].halfside2.resize(24);
@@ -180,34 +379,31 @@ public:
 			}
 		}
 
-		for (int id=0; id<3; ++id)
+		for (int id=0; id<4; ++id)
 		{
 			for (int i=0; i<24; ++i)
 			{
-				res.info.sensor[id].center[i].x = finger_sensor_center_[i][0]*0.001;
-				res.info.sensor[id].center[i].y = finger_sensor_center_[i][1]*0.001;
-				res.info.sensor[id].center[i].z = finger_sensor_center_[i][2]*0.001;
-				res.info.sensor[id].halfside1[i].x = finger_sensor_halfside1_[i][0]*0.001;
-				res.info.sensor[id].halfside1[i].y = finger_sensor_halfside1_[i][1]*0.001;
-				res.info.sensor[id].halfside1[i].z = finger_sensor_halfside1_[i][2]*0.001;
-				res.info.sensor[id].halfside2[i].x = finger_sensor_halfside2_[i][0]*0.001;
-				res.info.sensor[id].halfside2[i].y = finger_sensor_halfside2_[i][1]*0.001;
-				res.info.sensor[id].halfside2[i].z = finger_sensor_halfside2_[i][2]*0.001;
+				res.info.sensor[id].center[i] = instance_->ts_[id].getCenter(i);
+				res.info.sensor[id].halfside1[i] = instance_->ts_[id].getHalfside1(i);
+				res.info.sensor[id].halfside2[i] = instance_->ts_[id].getHalfside2(i);
 			}
 		}
 
-		for (int i=0; i<24; ++i)
-		{
-			res.info.sensor[3].center[i].x = palm_sensor_center_[i][0]*0.001;
-			res.info.sensor[3].center[i].y = palm_sensor_center_[i][1]*0.001;
-			res.info.sensor[3].center[i].z = palm_sensor_center_[i][2]*0.001;
-			res.info.sensor[3].halfside1[i].x = palm_sensor_halfside1_[i][0]*0.001;
-			res.info.sensor[3].halfside1[i].y = palm_sensor_halfside1_[i][1]*0.001;
-			res.info.sensor[3].halfside1[i].z = palm_sensor_halfside1_[i][2]*0.001;
-			res.info.sensor[3].halfside2[i].x = palm_sensor_halfside2_[i][0]*0.001;
-			res.info.sensor[3].halfside2[i].y = palm_sensor_halfside2_[i][1]*0.001;
-			res.info.sensor[3].halfside2[i].z = palm_sensor_halfside2_[i][2]*0.001;
-		}
+		return true;
+	}
+
+	void startCalibration()
+	{
+	}
+
+	void finishCalibration()
+	{
+	}
+
+	static bool calibrateTactileSensors(barrett_hand_controller::BHCalibrateTactileSensors::Request  &req,
+	         barrett_hand_controller::BHCalibrateTactileSensors::Response &res)
+	{
+		instance_->startCalibration();
 
 		return true;
 	}
@@ -222,197 +418,29 @@ private:
 		return true;
 	}
 
-	static const string pressureSensorName_[4];
- 	static const double palm_sensor_center_[24][3];
- 	static const double palm_sensor_halfside1_[24][3];
- 	static const double palm_sensor_halfside2_[24][3];
- 	static const double finger_sensor_center_[24][3];
- 	static const double finger_sensor_halfside1_[24][3];
- 	static const double finger_sensor_halfside2_[24][3];
+	Tactile ts_[4];
 
+	static Hand *instance_;
 	MotorController ctrl_;
 	ros::NodeHandle nh_;
 	actionlib::SimpleActionServer<barrett_hand_controller::BHMoveAction> as_;
 	ros::ServiceServer pressure_info_service_;
+	ros::ServiceServer calibration_service_;
 	barrett_hand_controller::BHMoveGoal::ConstPtr gh_;
 	barrett_hand_controller::BHMoveResult result_;
+	ros::Publisher temp_pub_;
 	ros::Publisher joint_pub_;
 	ros::Publisher tactile_pub_;
+	ros::Subscriber finger_vel_sub_;
 	sensor_msgs::JointState joint_states_;
 	barrett_hand_controller::BHPressureState pressure_states_;
+	barrett_hand_controller::BHTemp temp_;
 	ros::Time last_tact_read_;
-	MotorController::tact_array_t tact_[4];
+	int fifo_;
+	float tempc_;
 };
 
-const string Hand::pressureSensorName_[4] =
-{
-	"finger1_tip_info",
-	"finger2_tip_info",
-	"finger3_tip_info",
-	"palm_info",
-};
-
-const double Hand::palm_sensor_center_[24][3] = {	// in mm
-	{ 22, 15.9, 77.5 },
-	{ 11, 15.9, 77.5 },
-	{ 0, 15.9, 77.5 },
-	{ -11, 15.9, 77.5 },
-	{ -22, 15.9, 77.5 },
-	{ 33, 5.3, 77.5 },
-	{ 22, 5.3, 77.5 },
-	{ 11, 5.3, 77.5 },
-	{ 0, 5.3, 77.5 },
-	{ -11, 5.3, 77.5 },
-	{ -22, 5.3, 77.5 },
-	{ -33, 5.3, 77.5 },
-	{ 33, -5.3, 77.5 },
-	{ 22, -5.3, 77.5 },
-	{ 11, -5.3, 77.5 },
-	{ 0, -5.3, 77.5 },
-	{ -11, -5.3, 77.5 },
-	{ -22, -5.3, 77.5 },
-	{ -33, -5.3, 77.5 },
-	{ 22, -15.9, 77.5 },
-	{ 11, -15.9, 77.5 },
-	{ 0, -15.9, 77.5 },
-	{ -11, -15.9, 77.5 },
-	{ -22, -15.9, 77.5 }
-};
-
-const double Hand::palm_sensor_halfside1_[24][3] = {	// in mm
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 },
-	{ 5, 0, 0 }
-};
-
-const double Hand::palm_sensor_halfside2_[24][3] = {	// in mm
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 },
-	{ 0, 4.85, 0 }
-};
-
-const double Hand::finger_sensor_center_[24][3] = {	// in mm
-	{ 22.25, -9.5, 5.2 },
-	{ 22.25, -9.5, 0 },
-	{ 22.25, -9.5, -5.2 },
-	{ 28.25, -9.5, 5.2 },
-	{ 28.25, -9.5, 0 },
-	{ 28.25, -9.5, -5.2 },
-	{ 34.2484, -9.41371, 5.2 },
-	{ 34.2484, -9.41371, 0 },
-	{ 34.2484, -9.41371, -5.2 },
-	{ 40.2349, -9.05695, 5.2 },
-	{ 40.2349, -9.05695, 0 },
-	{ 40.2349, -9.05695, -5.2 },
-	{ 46.1912, -8.35887, 5.2 },
-	{ 46.1912, -8.35887, 0 },
-	{ 46.1912, -8.35887, -5.2 },
-	{ 51.0813, -7.1884, 5.2 },
-	{ 51.0813, -7.1884, 0 },
-	{ 51.0813, -7.1884, -5.2 },
-	{ 53.8108, -5.14222, 5.2 },
-	{ 53.8108, -5.14222, 0 },
-	{ 53.8108, -5.14222, -5.2 },
-	{ 55.4163, -2.13234, 5.2 },
-	{ 55.4163, -2.13234, 0 },
-	{ 55.4163, -2.13234, -5.2 }
-};
-
-const double Hand::finger_sensor_halfside1_[24][3] = {	// in mm
-	{ 2.75, 0, 0 },
-	{ 2.75, 0, 0 },
-	{ 2.75, 0, 0 },
-	{ 2.75, 0, 0 },
-	{ 2.75, 0, 0 },
-	{ 2.75, 0, 0 },
-	{ 2.74837, 0.085096, 0 },
-	{ 2.74837, 0.085096, 0 },
-	{ 2.74837, 0.085096, 0 },
-	{ 2.73902, 0.241919, 0 },
-	{ 2.73902, 0.241919, 0 },
-	{ 2.73902, 0.241919, 0 },
-	{ 2.72073, 0.397956, 0 },
-	{ 2.72073, 0.397956, 0 },
-	{ 2.72073, 0.397956, 0 },
-	{ 1.35885, 0.614231, 0 },
-	{ 1.35885, 0.614231, 0 },
-	{ 1.35885, 0.614231, 0 },
-	{ 0.970635, 1.13209, 0 },
-	{ 0.970635, 1.13209, 0 },
-	{ 0.970635, 1.13209, 0 },
-	{ 0.399575, 1.4367, 0 },
-	{ 0.399575, 1.4367, 0 },
-	{ 0.399575, 1.4367, 0 }
-};
-
-const double Hand::finger_sensor_halfside2_[24][3] = {	// in mm
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 },
-	{ 0, 0, 2.35 }
-};
+Hand *Hand::instance_ = NULL;
 
 int main(int argc, char **argv) {
 
@@ -423,3 +451,4 @@ int main(int argc, char **argv) {
 
 	return 0;
 }
+

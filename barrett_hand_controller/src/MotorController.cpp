@@ -3,13 +3,27 @@
 
 #include <cstring>
 
+// For commands w/o values: RESET,HOME,KEEP,PASS,LOOP,HI,IC,IO,TC,TO,C,O,T 5
 #define PROP_CMD 29
+// 32-Bit Position. R=Act, W=Cmd
 #define PROP_P 48
+// Velocity (cts/ms). R=Act, W=Cmd
+#define PROP_V 44
+// Max velocity (cts/ms)
 #define PROP_MV 45
+// 32-Bit Close Target
 #define PROP_CT 56
+// 32-Bit Open Target
 #define PROP_OT 54
+// 32-Bit Endpoint
 #define PROP_E 52
+// Mode: 0=Idle, 2=Torque, 3=PID, 4=Vel, 5=Trap
 #define PROP_MODE 8
+// Temperature (puck internal)
+#define PROP_TEMP 9
+// Thermistor (motor) temperature
+#define PROP_THERM 20
+// Tactile sensor array access (special)
 #define PROP_TACT 106
 
 const int MODE_IDLE      = 0;
@@ -24,7 +38,6 @@ const int MODE_TRAPEZOID = 5;
 #define CMD_CLOSE 18
 #define CMD_OPEN 20
 #define CMD_STOP 21
-#define CMD_TACT 106
 
 #define ALL_GROUP 0
 #define PFEEDBACK_GROUP 3
@@ -148,8 +161,16 @@ void MotorController::setTargetPos(int id, int32_t pos) {
 	setProperty(11 + id, PROP_E, pos);
 }
 
+void MotorController::setTargetVel(int id, int32_t vel) {
+	setProperty(11 + id, PROP_V, vel);
+}
+
 void MotorController::moveAll() {
 	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_TRAPEZOID);
+}
+
+void MotorController::moveAllVel() {
+	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_VELOCITY);
 }
 
 void MotorController::getPosition(int id, int32_t &p, int32_t &jp) {
@@ -205,5 +226,17 @@ void MotorController::setParameter(int32_t id, int32_t prop_id, int32_t value, b
 	{
 		setProperty(11 + id, 30, prop_id);
 	}
+}
+
+void MotorController::getTemp(int id, int32_t &temp)
+{
+	reqProperty(11+id, PROP_TEMP);
+	recProperty(11+id, temp);
+}
+
+void MotorController::getTherm(int id, int32_t &temp)
+{
+	reqProperty(11+id, PROP_THERM);
+	recProperty(11+id, temp);
 }
 
