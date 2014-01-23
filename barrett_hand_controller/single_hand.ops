@@ -1,0 +1,31 @@
+import("rtt_ros")
+ros.import("barrett_hand_controller")
+
+## Load a BarrettHand component
+loadComponent("BarrettHand","BarrettHand")
+
+## Give it a periodic activity
+setActivity("BarrettHand",0.001,HighestPriority,ORO_SCHED_RT)
+
+## Create connections
+stream("BarrettHand.BHTemp", rostopic.connection("/barrett_hand_controller/BHTemp"))
+stream("BarrettHand.joint_states", rostopic.connection("/joint_states"))
+stream("BarrettHand.BHPressureState", rostopic.connection("/barrett_hand_controller/BHPressureState"))
+#stream("BarrettHand.string_in", rostopic.connection("string_in"))
+
+## Connect the 
+loadService("BarrettHand","rosservice")
+#BarrettHand.rosservice.connect( "increment", "/increment", "std_srvs/Empty")
+BarrettHand.rosservice.connect( "get_pressure_info", "/barrett_hand_controller/get_pressure_info", "barrett_hand_controller_srvs/BHGetPressureInfo")
+#BarrettHand.rosservice.connect( "calibrate", "/barrett_hand_controller/calibrate_tactile_sensors", "barrett_hand_controller_srvs/BHCalibrateTactileSensors")
+
+loadService("BarrettHand","actionlib");
+BarrettHand.actionlib.connect("/move_hand");
+
+## Configure the HelloRobot component
+BarrettHand.configure()
+
+## Start it
+BarrettHand.start()
+
+
