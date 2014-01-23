@@ -1,32 +1,31 @@
-cmake_minimum_required(VERSION 2.4.6)
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+cmake_minimum_required(VERSION 2.8.3)
+project(barrett_hand_controller)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(ROS_BUILD_TYPE RelWithDebInfo)
-rosbuild_find_ros_package(actionlib_msgs)
-include(${actionlib_msgs_PACKAGE_PATH}/cmake/actionbuild.cmake)
-genaction()
+find_package(catkin REQUIRED COMPONENTS
+  roscpp rtt_ros actionlib rtt_actionlib actionlib_msgs rtt_actionlib_msgs sensor_msgs rtt_sensor_msgs visualization_msgs rtt_visualization_msgs genmsg rtt_roscomm)
 
-rosbuild_init()
+add_action_files(DIRECTORY action FILES BHMove.action)
+add_message_files(DIRECTORY msg FILES BHFingerVel.msg BHPressureState.msg BHTemp.msg)
+#add_message_files(DIRECTORY msg FILES BHFingerVel.msg BHPressureInfo.msg BHPressureState.msg BHPressureInfoElement.msg BHTemp.msg)
+#add_service_files(DIRECTORY srv FILES BHCalibrateTactileSensors.srv BHGetPressureInfo.srv)
+generate_messages(DEPENDENCIES actionlib_msgs geometry_msgs sensor_msgs)
 
-#set the default path for built executables to the "bin" directory
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-#set the default path for built libraries to the "lib" directory
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+ros_generate_rtt_typekit(${PROJECT_NAME})
 
-rosbuild_genmsg()
-#uncomment if you have defined services
-rosbuild_gensrv()
+catkin_package()
 
-#common commands for building c++ executables and libraries
-#rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
-#target_link_libraries(${PROJECT_NAME} another_library)
-#rosbuild_add_boost_directories()
-#rosbuild_link_boost(${PROJECT_NAME} thread)
-rosbuild_add_executable(hand src/hand.cpp src/MotorController.cpp src/CANDev.cpp)
-#target_link_libraries(example ${PROJECT_NAME})
+#ros_generate_rtt_service_proxies(${PROJECT_NAME})
+
+include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
+
+add_definitions(-DRTT_COMPONENT)
+orocos_component(${PROJECT_NAME} src/CANDev.cpp src/MotorController.cpp src/hand.cpp)
+target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
+
+orocos_generate_package()
+
+install(FILES 
+  single_hand.launch 
+  single_hand.ops 
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+

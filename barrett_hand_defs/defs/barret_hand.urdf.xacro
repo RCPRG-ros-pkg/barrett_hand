@@ -29,7 +29,7 @@
        xmlns:interface="http://playerstage.sourceforge.net/gazebo/xmlschema/#interface"
        xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-    <xacro:property name="homeDirectory" value="package://barret_hand_defs" />
+    <xacro:property name="homeDirectory" value="package://barrett_hand_defs" />
     <xacro:property name="highResModelDirectory" value="${homeDirectory}/meshes/splitModels" />
     <xacro:property name="PI" value="3.1415926535897931" />
 

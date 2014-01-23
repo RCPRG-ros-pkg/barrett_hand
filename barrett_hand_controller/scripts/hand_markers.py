@@ -7,7 +7,7 @@ import math
 
 import std_msgs.msg
 from barrett_hand_controller.msg import *
-from barrett_hand_controller.srv import *
+from barrett_hand_controller_srvs.srv import *
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
 from geometry_msgs.msg import Point
@@ -19,9 +19,9 @@ from tf.transformations import euler_from_quaternion
 from tf2_msgs.msg import *
 
 def get_pressure_sensors_info_client():
-    rospy.wait_for_service('barrett_hand_controller/get_pressure_info')
+    rospy.wait_for_service('/barrett_hand_controller/get_pressure_info')
     try:
-        get_pressure_sensors_info = rospy.ServiceProxy('barrett_hand_controller/get_pressure_info', BHGetPressureInfo)
+        get_pressure_sensors_info = rospy.ServiceProxy('/barrett_hand_controller/get_pressure_info', BHGetPressureInfo)
         resp1 = get_pressure_sensors_info()
         return resp1.info
     except rospy.ServiceException, e:
