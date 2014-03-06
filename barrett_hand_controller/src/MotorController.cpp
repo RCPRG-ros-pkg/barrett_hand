@@ -25,6 +25,8 @@
 #define PROP_THERM 20
 // Tactile sensor array access (special)
 #define PROP_TACT 106
+// Flag to hold position after move
+#define PROP_HOLD 77
 
 const int MODE_IDLE      = 0;
 const int MODE_TORQUE    = 2;
@@ -95,10 +97,10 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 		jp = 0;
 	}
 	
-	if(p > 2097152)
-		p = 4194303 - p;
-	if(jp > 2097152)
-		jp = 4194303 - jp;
+	if(p > 0x200000)
+		p = 0x3FFFFF - p;
+	if(jp > 0x200000)
+		jp = 0x3FFFFF - jp;
 }
 
 void MotorController::recTact(int id, int32_t &gr, int32_t &a, int32_t &b, int32_t &c, int32_t &d, int32_t &e) {
@@ -239,4 +241,13 @@ void MotorController::getTherm(int id, int32_t &temp)
 	reqProperty(11+id, PROP_THERM);
 	recProperty(11+id, temp);
 }
+
+void MotorController::setHoldPosition(int id, bool hold)
+{
+	int32_t value = 0;
+	if (hold)
+		value = 1;
+	setProperty(11 + id, PROP_HOLD, value);
+}
+
 

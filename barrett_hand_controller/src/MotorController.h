@@ -21,6 +21,7 @@ public:
 	void setOpenTarget(int id, uint32_t ot);
 	void setTargetPos(int id, int32_t pos);
 	void setTargetVel(int id, int32_t pos);
+	void setHoldPosition(int id, bool hold);
 	void moveAll();
 	void moveAllVel();
 	void getStatus(int id, int32_t &mode);

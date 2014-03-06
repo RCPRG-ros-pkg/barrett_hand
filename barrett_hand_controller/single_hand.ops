@@ -17,7 +17,8 @@ stream("BarrettHand.BHPressureState", rostopic.connection("/barrett_hand_control
 loadService("BarrettHand","rosservice")
 #BarrettHand.rosservice.connect( "increment", "/increment", "std_srvs/Empty")
 BarrettHand.rosservice.connect( "get_pressure_info", "/barrett_hand_controller/get_pressure_info", "barrett_hand_controller_srvs/BHGetPressureInfo")
-#BarrettHand.rosservice.connect( "calibrate", "/barrett_hand_controller/calibrate_tactile_sensors", "barrett_hand_controller_srvs/BHCalibrateTactileSensors")
+BarrettHand.rosservice.connect( "calibrate", "/barrett_hand_controller/calibrate_tactile_sensors", "barrett_hand_controller_srvs/BHCalibrateTactileSensors")
+BarrettHand.rosservice.connect( "reset_fingers", "/barrett_hand_controller/reset_fingers", "barrett_hand_controller_srvs/BHResetFingers")
 
 loadService("BarrettHand","actionlib");
 BarrettHand.actionlib.connect("/move_hand");

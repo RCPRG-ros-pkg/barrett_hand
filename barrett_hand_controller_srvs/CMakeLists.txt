@@ -4,7 +4,7 @@ project(barrett_hand_controller_srvs)
 find_package(catkin REQUIRED COMPONENTS genmsg rtt_roscomm geometry_msgs)
 
 add_message_files(DIRECTORY msg FILES BHPressureInfo.msg BHPressureInfoElement.msg)
-add_service_files(DIRECTORY srv FILES BHCalibrateTactileSensors.srv BHGetPressureInfo.srv)
+add_service_files(DIRECTORY srv FILES BHCalibrateTactileSensors.srv BHGetPressureInfo.srv BHResetFingers.srv)
 generate_messages(DEPENDENCIES geometry_msgs)# sensor_msgs)
 
 ros_generate_rtt_typekit(${PROJECT_NAME})
