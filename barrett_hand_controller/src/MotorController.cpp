@@ -27,6 +27,8 @@
 #define PROP_TACT 106
 // Flag to hold position after move
 #define PROP_HOLD 77
+// Max torque
+#define PROP_MT 43
 
 const int MODE_IDLE      = 0;
 const int MODE_TORQUE    = 2;
@@ -149,6 +151,10 @@ void MotorController::setCloseTarget(int id, uint32_t ct) {
 
 void MotorController::setMaxVel(int id, uint32_t vel) {
 	setProperty(11 + id, PROP_MV, vel);
+}
+
+void MotorController::setMaxTorque(int id, uint32_t vel) {
+	setProperty(11 + id, PROP_MT, vel);
 }
 
 void MotorController::open(int id) {

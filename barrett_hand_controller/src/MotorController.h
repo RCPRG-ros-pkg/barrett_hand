@@ -17,6 +17,7 @@ public:
 	void getPosition(int id, int32_t &p, int32_t &jp);
 	void getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int32_t &jp1, int32_t &jp2, int32_t &jp3, int32_t &s);
 	void setMaxVel(int id, uint32_t vel);
+	void setMaxTorque(int id, uint32_t vel);
 	void setCloseTarget(int id, uint32_t ct);
 	void setOpenTarget(int id, uint32_t ot);
 	void setTargetPos(int id, int32_t pos);

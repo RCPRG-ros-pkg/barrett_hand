@@ -174,6 +174,10 @@ private:
 	int32_t loop_counter_;
 	MotorController ctrl_;
 
+	int32_t maxStaticTorque_;
+	int32_t maxDynamicTorque_;
+	int torqueSwitch_;
+
 	rtt_actionlib::RTTActionServer<barrett_hand_controller::BHMoveAction> as_;
 	actionlib::ServerGoalHandle<barrett_hand_controller::BHMoveAction> gh_;
 	Result result_;
@@ -201,7 +205,10 @@ public:
 		tactile_pub_("BHPressureState"),
 		ctrl_(string("can0")),
 		loop_counter_(0),
-		resetFingersCounter_(0)
+		resetFingersCounter_(0),
+		maxStaticTorque_(4700),
+		maxDynamicTorque_(600),
+		torqueSwitch_(-1)
 	{
 		ts_[0].setGeometry("finger1_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[1].setGeometry("finger2_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
@@ -404,12 +411,22 @@ public:
 		// Pursue goal...
 		if(gh_.isValid() && gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE)
 		{
+			if (torqueSwitch_>0)
+			{
+				--torqueSwitch_;
+			}
+			else if (torqueSwitch_ == 0)
+			{
+				ctrl_.setMaxTorque(0, maxDynamicTorque_);
+				ctrl_.setMaxTorque(1, maxDynamicTorque_);
+				ctrl_.setMaxTorque(2, maxDynamicTorque_);
+				ctrl_.setMaxTorque(3, maxDynamicTorque_);
+				--torqueSwitch_;
+			}
 			ctrl_.getStatusAll(mode1, mode2, mode3, mode4);
 
 			if((mode1 == 0) && (mode2 == 0) && (mode3 == 0) && (mode4 == 3))
 				gh_.setSucceeded(result_);
-
-
 		}
 
 		loop_counter_ = (loop_counter_+1)%1000;
@@ -434,6 +451,12 @@ public:
 		}
 		gh.setAccepted();
 		gh_ = gh;
+
+		ctrl_.setMaxTorque(0, maxStaticTorque_);
+		ctrl_.setMaxTorque(1, maxStaticTorque_);
+		ctrl_.setMaxTorque(2, maxStaticTorque_);
+		ctrl_.setMaxTorque(3, maxStaticTorque_);
+		torqueSwitch_ = 5;
 
 		ctrl_.setMaxVel(0, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
 		ctrl_.setMaxVel(1, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
