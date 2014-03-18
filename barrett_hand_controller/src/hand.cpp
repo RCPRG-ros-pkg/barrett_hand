@@ -1,8 +1,8 @@
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
 #include <rtt/RTT.hpp>
-#include <rtt_actionlib/rtt_actionlib.h>
-#include <rtt_actionlib/rtt_action_server.h>
+//#include <rtt_actionlib/rtt_actionlib.h>
+//#include <rtt_actionlib/rtt_action_server.h>
 #include <std_msgs/Float64.h>
 #include <std_msgs/String.h>
 #include <rtt/Component.hpp>
@@ -12,15 +12,15 @@
 #include "tf/transform_datatypes.h"
 #include "sensor_msgs/JointState.h"
 #include "geometry_msgs/Vector3.h"
-#include <actionlib/server/simple_action_server.h>
-#include <barrett_hand_controller/BHMoveAction.h>
+//#include <actionlib/server/simple_action_server.h>
+//#include <barrett_hand_controller/BHMoveAction.h>
+#include <barrett_hand_controller/BHCmd.h>
 #include <barrett_hand_controller/BHPressureState.h>
 #include <barrett_hand_controller_srvs/BHPressureInfo.h>
 #include <barrett_hand_controller_srvs/BHPressureInfoElement.h>
 #include <barrett_hand_controller_srvs/BHResetFingers.h>
 #include <barrett_hand_controller_srvs/BHGetPressureInfo.h>
 #include <barrett_hand_controller_srvs/BHCalibrateTactileSensors.h>
-#include <barrett_hand_controller/BHFingerVel.h>
 #include <barrett_hand_controller/BHTemp.h>
 
 #include <iostream>
@@ -167,22 +167,23 @@ using namespace RTT;
 
 class BarrettHand : public RTT::TaskContext{
 private:
-	ACTION_DEFINITION(barrett_hand_controller::BHMoveAction);
+//	ACTION_DEFINITION(barrett_hand_controller::BHMoveAction);
 
 	const int TEMP_MAX_HI;
 	const int TEMP_MAX_LO;
 	int32_t loop_counter_;
-	MotorController ctrl_;
+	MotorController *ctrl_;
 
 	int32_t maxStaticTorque_;
 	int32_t maxDynamicTorque_;
 	int torqueSwitch_;
 
-	rtt_actionlib::RTTActionServer<barrett_hand_controller::BHMoveAction> as_;
-	actionlib::ServerGoalHandle<barrett_hand_controller::BHMoveAction> gh_;
-	Result result_;
+//	rtt_actionlib::RTTActionServer<barrett_hand_controller::BHMoveAction> as_;
+//	rtt_actionlib::RTTActionServer<barrett_hand_controller::BHMoveAction>::GoalHandle gh_;
+//	Result result_;
 
 	Tactile ts_[4];
+	barrett_hand_controller::BHCmd cmd_;
 	barrett_hand_controller::BHTemp temp_;
 	sensor_msgs::JointState joint_states_;
 	barrett_hand_controller::BHPressureState pressure_states_;
@@ -190,31 +191,44 @@ private:
 	bool hold_;
 	bool holdEnabled_;
 
-	OutputPort<barrett_hand_controller::BHTemp>		temp_pub_;
-	OutputPort<sensor_msgs::JointState>			joint_pub_;
-	OutputPort<barrett_hand_controller::BHPressureState>	tactile_pub_;
+	InputPort<barrett_hand_controller::BHCmd>		cmd_in_;
+	OutputPort<barrett_hand_controller::BHTemp>		temp_out_;
+	OutputPort<sensor_msgs::JointState>			joint_out_;
+	OutputPort<barrett_hand_controller::BHPressureState>	tactile_out_;
+
+	int32_t temp[4], therm[4];
 
 	int resetFingersCounter_;
 public:
 	BarrettHand(const std::string& name):
-		TaskContext(name),
-		TEMP_MAX_HI(60),
-		TEMP_MAX_LO(55),
-		temp_pub_("BHTemp"),
-		joint_pub_("joint_states"),
-		tactile_pub_("BHPressureState"),
-		ctrl_(string("can0")),
+		TaskContext(name, PreOperational),
+		TEMP_MAX_HI(65),
+		TEMP_MAX_LO(60),
+		temp_out_("BHTemp"),
+		joint_out_("joint_states"),
+		tactile_out_("BHPressureState"),
+		cmd_in_("BHCmd"),
 		loop_counter_(0),
 		resetFingersCounter_(0),
 		maxStaticTorque_(4700),
-		maxDynamicTorque_(600),
-		torqueSwitch_(-1)
+		maxDynamicTorque_(700),
+		torqueSwitch_(-1),
+		ctrl_(NULL)
 	{
 		ts_[0].setGeometry("finger1_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[1].setGeometry("finger2_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[2].setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[3].setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
 
+		temp[0] = 0;
+		temp[1] = 0;
+		temp[2] = 0;
+		temp[3] = 0;
+		therm[0] = 0;
+		therm[1] = 0;
+		therm[2] = 0;
+		therm[3] = 0;
+		
 		pressure_states_.finger1_tip.resize(24);
 		pressure_states_.finger2_tip.resize(24);
 		pressure_states_.finger3_tip.resize(24);
@@ -235,31 +249,45 @@ public:
 		joint_states_.name[7] = "right_HandFingerThreeKnuckleThreeJoint";
 
 		// Bind action server goal and cancel callbacks (see below)
-		as_.registerGoalCallback(boost::bind(&BarrettHand::goalCallback, this, _1));
-		as_.registerCancelCallback(boost::bind(&BarrettHand::cancelCallback, this, _1));
+//		as_.registerGoalCallback(boost::bind(&BarrettHand::goalCallback, this, _1));
+//		as_.registerCancelCallback(boost::bind(&BarrettHand::cancelCallback, this, _1));
 
 		temp_.temp.resize(9);
 
-		this->addPort(temp_pub_).doc("Sends out BH temperature.");
-		this->addPort(joint_pub_).doc("Sends out BH joint states.");
-		this->addPort(tactile_pub_).doc("Sends out BH tactile data.");
+		this->addPort(temp_out_).doc("Sends out BH temperature.");
+		this->addPort(joint_out_).doc("Sends out BH joint states.");
+		this->addPort(tactile_out_).doc("Sends out BH tactile data.");
+		this->addPort(cmd_in_).doc("Input command.");
 
 		this->provides()->addOperation("reset_fingers",&BarrettHand::resetFingers,this,RTT::OwnThread);
 		this->provides()->addOperation("calibrate",&BarrettHand::calibrateTactileSensors,this,RTT::OwnThread);
 		this->provides()->addOperation("get_pressure_info",&BarrettHand::getPressureInfo,this,RTT::OwnThread);
 
 		// Add action server ports to this task's root service
-		as_.addPorts(this->provides());
+//		as_.addPorts(this->provides());
 	}
 
 	~BarrettHand()
 	{
-		ctrl_.stopHand();
+		ctrl_->stopHand();
+	}
+
+	void cleanupHook()
+	{
+		if (ctrl_ != NULL)
+		{
+			delete ctrl_;
+		}
 	}
 
 	// RTT configure hook
 	bool configureHook()
 	{
+		if (ctrl_ == NULL)
+		{
+			ctrl_ = new MotorController("rtcan1");
+		}
+
 		return true;
 	}
 
@@ -268,29 +296,24 @@ public:
 	{
 		holdEnabled_ = true;
 		hold_ = true;
-		ctrl_.setHoldPosition(0, false);
-		ctrl_.setHoldPosition(1, false);
-		ctrl_.setHoldPosition(2, false);
-		ctrl_.setHoldPosition(3, holdEnabled_ && hold_);
+		ctrl_->setHoldPosition(0, false);
+		ctrl_->setHoldPosition(1, false);
+		ctrl_->setHoldPosition(2, false);
+		ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 
-/*		ctrl_.resetFinger(0);
-		ctrl_.resetFinger(1);
-		ctrl_.resetFinger(2);
-	
-		sleep(2);
-	
-		ctrl_.resetFinger(3);
-	
-		sleep(2);
-*/
+		ctrl_->setMaxVel(0, RAD2P(1)/1000.0);
+		ctrl_->setMaxVel(1, RAD2P(1)/1000.0);
+		ctrl_->setMaxVel(2, RAD2P(1)/1000.0);
+		ctrl_->setMaxVel(3, RAD2S(0.7)/1000.0);
+
 		// Start action server
-		as_.start();
+//		as_.start();
 		return true;
 	}
 
 	void stopHook()
 	{
-		ctrl_.stopHand();
+		ctrl_->stopHand();
 	}
 
 	// RTT update hook
@@ -303,15 +326,32 @@ public:
 	{
 		int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s, mode1, mode2, mode3, mode4;
 
+		if (NewData == cmd_in_.read(cmd_))
+		{
+//cout<<"move: " << cmd_.cmd[0] << " " << cmd_.cmd[1] << " " << cmd_.cmd[2] << " " << cmd_.cmd[3] << endl;
+			ctrl_->setMaxTorque(0, maxStaticTorque_);
+			ctrl_->setMaxTorque(1, maxStaticTorque_);
+			ctrl_->setMaxTorque(2, maxStaticTorque_);
+			ctrl_->setMaxTorque(3, maxStaticTorque_);
+			torqueSwitch_ = 5;
+
+			ctrl_->setTargetPos(0, RAD2P(cmd_.cmd[0]));
+			ctrl_->setTargetPos(1, RAD2P(cmd_.cmd[1]));
+			ctrl_->setTargetPos(2, RAD2P(cmd_.cmd[2]));
+			ctrl_->setTargetPos(3, RAD2S(cmd_.cmd[3]));
+			ctrl_->moveAll();
+		}
+
 		// on 0, 10, 20, 30, 40, ... step
 		if ( (loop_counter_%10) == 0)
 		{
-			//ctrl_.getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
-			int32_t tmp;
-			ctrl_.getPosition(0,p1,jp1);
-			ctrl_.getPosition(1,p2,jp2);
-			ctrl_.getPosition(2,p3,jp3);
-			ctrl_.getPosition(3,s,tmp);
+			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
+/*			int32_t tmp;
+			ctrl_->getPosition(0,p1,jp1);
+			ctrl_->getPosition(1,p2,jp2);
+			ctrl_->getPosition(2,p3,jp3);
+			ctrl_->getPosition(3,s,tmp);
+*/
 			joint_states_.header.stamp = ros::Time::now();
 
 			joint_states_.position[0] = s * M_PI/ 35840.0;
@@ -324,29 +364,37 @@ public:
 
 			joint_states_.position[6] = JP2RAD(jp3);
 			joint_states_.position[7] = P2RAD(p3);
-	
-			joint_pub_.write(joint_states_);
+
+			joint_out_.write(joint_states_);
 		}
 
 		// on 1, 101, 201, 301, 401, ... step
 		if ( (loop_counter_%100) == 1)
 		{
-			int32_t temp[4], therm[4];
-			ctrl_.getTemp(0, temp[0]);
-			ctrl_.getTemp(1, temp[1]);
-			ctrl_.getTemp(2, temp[2]);
-			ctrl_.getTemp(3, temp[3]);
-			ctrl_.getTherm(0, therm[0]);
-			ctrl_.getTherm(1, therm[1]);
-			ctrl_.getTherm(2, therm[2]);
-			ctrl_.getTherm(3, therm[3]);
+			ctrl_->getTemp(0, temp[0]);
+			ctrl_->getTemp(1, temp[1]);
+			ctrl_->getTemp(2, temp[2]);
+			ctrl_->getTemp(3, temp[3]);
+			ctrl_->getTherm(0, therm[0]);
+			ctrl_->getTherm(1, therm[1]);
+			ctrl_->getTherm(2, therm[2]);
+			ctrl_->getTherm(3, therm[3]);
 
+/*			temp[0] = 50;
+			temp[1] = 50;
+			temp[2] = 50;
+			temp[3] = 50;
+			therm[0] = 50;
+			therm[1] = 50;
+			therm[2] = 50;
+			therm[3] = 50;
+*/
 			if (	(temp[0] > TEMP_MAX_HI || temp[1] > TEMP_MAX_HI || temp[2] > TEMP_MAX_HI || temp[3] > TEMP_MAX_HI ||
 				therm[0] > TEMP_MAX_HI || therm[1] > TEMP_MAX_HI || therm[2] > TEMP_MAX_HI || therm[3] > TEMP_MAX_HI) &&
 				hold_ == true)
 			{
 				hold_ = false;
-				ctrl_.setHoldPosition(3, holdEnabled_ && hold_);
+				ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 				RTT::log(RTT::Warning) << "Temperature is too high. Disabled spread hold." << RTT::endlog();
 			}
 
@@ -355,7 +403,7 @@ public:
 				hold_ == false)
 			{
 				hold_ = true;
-				ctrl_.setHoldPosition(3, holdEnabled_ && hold_);
+				ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 				RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
 			}
 
@@ -368,7 +416,7 @@ public:
 			temp_.temp[5] = therm[1];
 			temp_.temp[6] = therm[2];
 			temp_.temp[7] = therm[3];
-			temp_pub_.write(temp_);
+			temp_out_.write(temp_);
 		}
 
 		int i=((loop_counter_+2)%25);
@@ -376,25 +424,25 @@ public:
 		if ( i == 0)
 		{
 			MotorController::tact_array_t tact;
-			ctrl_.getTactile(0, tact);
+			ctrl_->getTactile(0, tact);
 			ts_[0].updatePressure(tact);
 		}
 		else if (i==6)
 		{
 			MotorController::tact_array_t tact;
-			ctrl_.getTactile(1, tact);
+			ctrl_->getTactile(1, tact);
 			ts_[1].updatePressure(tact);
 		}
 		else if (i==12)
 		{
 			MotorController::tact_array_t tact;
-			ctrl_.getTactile(2, tact);
+			ctrl_->getTactile(2, tact);
 			ts_[2].updatePressure(tact);
 		}
 		else if (i==18)
 		{
 			MotorController::tact_array_t tact;
-			ctrl_.getTactile(3, tact);
+			ctrl_->getTactile(3, tact);
 			ts_[3].updatePressure(tact);
 
 			for (int i=0; i<24; ++i)
@@ -405,41 +453,48 @@ public:
 				pressure_states_.palm_tip[i] = ts_[3].getForce(i);
 			}
 
-			tactile_pub_.write(pressure_states_);
+			tactile_out_.write(pressure_states_);
+		}
+
+		if (torqueSwitch_>0)
+		{
+			--torqueSwitch_;
+		}
+		else if (torqueSwitch_ == 0)
+		{
+			ctrl_->setMaxTorque(0, maxDynamicTorque_);
+			ctrl_->setMaxTorque(1, maxDynamicTorque_);
+			ctrl_->setMaxTorque(2, maxDynamicTorque_);
+			ctrl_->setMaxTorque(3, maxDynamicTorque_);
+			--torqueSwitch_;
 		}
 
 		// Pursue goal...
-		if(gh_.isValid() && gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE)
+/*		if(gh_.isValid() && gh_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE)
 		{
-			if (torqueSwitch_>0)
-			{
-				--torqueSwitch_;
-			}
-			else if (torqueSwitch_ == 0)
-			{
-				ctrl_.setMaxTorque(0, maxDynamicTorque_);
-				ctrl_.setMaxTorque(1, maxDynamicTorque_);
-				ctrl_.setMaxTorque(2, maxDynamicTorque_);
-				ctrl_.setMaxTorque(3, maxDynamicTorque_);
-				--torqueSwitch_;
-			}
-			ctrl_.getStatusAll(mode1, mode2, mode3, mode4);
+			ctrl_->getStatusAll(mode1, mode2, mode3, mode4);
 
 			if((mode1 == 0) && (mode2 == 0) && (mode3 == 0) && (mode4 == 3))
 				gh_.setSucceeded(result_);
 		}
-
+*/
 		loop_counter_ = (loop_counter_+1)%1000;
 
 		if (resetFingersCounter_ > 0)
 		{
 			--resetFingersCounter_;
+			if (resetFingersCounter_ == 2500)
+			{
+				ctrl_->resetFinger(0);
+				ctrl_->resetFinger(1);
+				ctrl_->resetFinger(2);
+			}
 			if (resetFingersCounter_ == 2000)
-			ctrl_.resetFinger(3);
+				ctrl_->resetFinger(3);
 		}
 	}
 
-	// Accept/reject goal requests here
+/*	// Accept/reject goal requests here
 	void goalCallback(actionlib::ServerGoalHandle<barrett_hand_controller::BHMoveAction> gh)
 	{
 		// Always preempt the current goal and accept the new one
@@ -452,27 +507,23 @@ public:
 		gh.setAccepted();
 		gh_ = gh;
 
-		ctrl_.setMaxTorque(0, maxStaticTorque_);
-		ctrl_.setMaxTorque(1, maxStaticTorque_);
-		ctrl_.setMaxTorque(2, maxStaticTorque_);
-		ctrl_.setMaxTorque(3, maxStaticTorque_);
+		ctrl_->setMaxTorque(0, maxStaticTorque_);
+		ctrl_->setMaxTorque(1, maxStaticTorque_);
+		ctrl_->setMaxTorque(2, maxStaticTorque_);
+		ctrl_->setMaxTorque(3, maxStaticTorque_);
 		torqueSwitch_ = 5;
 
-		ctrl_.setMaxVel(0, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
-		ctrl_.setMaxVel(1, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
-		ctrl_.setMaxVel(2, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
-		ctrl_.setMaxVel(3, RAD2S(gh_.getGoal()->spreadVel)/1000.0);
+		ctrl_->setMaxVel(0, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
+		ctrl_->setMaxVel(1, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
+		ctrl_->setMaxVel(2, RAD2P(gh_.getGoal()->fingerVel)/1000.0);
+		ctrl_->setMaxVel(3, RAD2S(gh_.getGoal()->spreadVel)/1000.0);
 				
-//		cout << " : " << gh_.getGoal()->finger[0] << " - " << RAD2P(gh_.getGoal()->finger[0])
-//							<< " : " << gh_.getGoal()->finger[1] << " - " << RAD2P(gh_.getGoal()->finger[1])
-//							<< " : " << gh_.getGoal()->finger[2] << " - " << RAD2P(gh_.getGoal()->finger[2]) << endl;
-			
-		ctrl_.setTargetPos(0, RAD2P(gh_.getGoal()->finger[0]));
-		ctrl_.setTargetPos(1, RAD2P(gh_.getGoal()->finger[1]));
-		ctrl_.setTargetPos(2, RAD2P(gh_.getGoal()->finger[2]));
-		ctrl_.setTargetPos(3, RAD2S(gh_.getGoal()->spread));
+		ctrl_->setTargetPos(0, RAD2P(gh_.getGoal()->finger[0]));
+		ctrl_->setTargetPos(1, RAD2P(gh_.getGoal()->finger[1]));
+		ctrl_->setTargetPos(2, RAD2P(gh_.getGoal()->finger[2]));
+		ctrl_->setTargetPos(3, RAD2S(gh_.getGoal()->spread));
 
-		ctrl_.moveAll();
+		ctrl_->moveAll();
 	}
 
 	// Handle preemption here
@@ -483,14 +534,12 @@ public:
 			gh_.setCanceled(result_);
 		}
 	}
-
+*/
 	bool resetFingers(barrett_hand_controller_srvs::BHResetFingers::Request  &req,
 	         barrett_hand_controller_srvs::BHResetFingers::Response &res)
 	{
+//cout<<"reset fingers" <<endl;
 		resetFingersCounter_ = 3000;
-		ctrl_.resetFinger(0);
-		ctrl_.resetFinger(1);
-		ctrl_.resetFinger(2);
 		return true;
 	}
 
@@ -537,5 +586,4 @@ public:
 
 };
 ORO_CREATE_COMPONENT(BarrettHand)
-
 

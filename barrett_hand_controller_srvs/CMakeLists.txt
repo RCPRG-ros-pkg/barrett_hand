@@ -9,7 +9,7 @@ generate_messages(DEPENDENCIES geometry_msgs)# sensor_msgs)
 
 ros_generate_rtt_typekit(${PROJECT_NAME})
 
-catkin_package(CATKIN_DEPENDS genmsg rtt_roscomm)
+#catkin_package(CATKIN_DEPENDS genmsg rtt_roscomm)
 
 ros_generate_rtt_service_proxies(barrett_hand_controller_srvs)
 

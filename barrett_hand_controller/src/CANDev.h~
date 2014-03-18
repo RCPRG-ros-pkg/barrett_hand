@@ -4,12 +4,18 @@
 #include <string>
 #include <vector>
 
-#if !defined(HAVE_RTNET)
-#include <linux/can.h>
-#include <linux/can/raw.h>
-#else
+//#include <linux/can.h>
+//#include <linux/can/raw.h>
+
 #include <rtdm/rtcan.h> // Defines for the RT CAN socket
-#endif
+
+//#define socket rt_dev_socket
+//#define setsockopt rt_dev_setsockopt
+//#define ioctl rt_dev_ioctl
+//#define bind rt_dev_bind
+//#define send rt_dev_send
+//#define recv rt_dev_recv
+
 
 class CANDev {
 public:
