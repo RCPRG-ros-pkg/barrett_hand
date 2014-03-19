@@ -9,6 +9,8 @@ generate_messages(DEPENDENCIES actionlib_msgs geometry_msgs sensor_msgs)
 
 ros_generate_rtt_typekit(${PROJECT_NAME})
 
+ros_generate_rtt_service_proxies(barrett_hand_controller)
+
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
 
 add_definitions(-DRTT_COMPONENT)

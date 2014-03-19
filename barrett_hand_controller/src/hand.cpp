@@ -6,7 +6,7 @@
 #include <std_msgs/Float64.h>
 #include <std_msgs/String.h>
 #include <rtt/Component.hpp>
-#include <std_srvs/Empty.h>
+//#include <std_srvs/Empty.h>
 #include <ros/ros.h>
 
 #include "tf/transform_datatypes.h"
@@ -18,9 +18,10 @@
 #include <barrett_hand_controller/BHPressureState.h>
 #include <barrett_hand_controller_srvs/BHPressureInfo.h>
 #include <barrett_hand_controller_srvs/BHPressureInfoElement.h>
-#include <barrett_hand_controller_srvs/BHResetFingers.h>
+#include <barrett_hand_controller_srvs/Empty.h>
 #include <barrett_hand_controller_srvs/BHGetPressureInfo.h>
-#include <barrett_hand_controller_srvs/BHCalibrateTactileSensors.h>
+#include <barrett_hand_controller_srvs/BHMoveHand.h>
+//#include <barrett_hand_controller_srvs/BHCalibrateTactileSensors.h>
 #include <barrett_hand_controller/BHTemp.h>
 
 #include <iostream>
@@ -167,8 +168,6 @@ using namespace RTT;
 
 class BarrettHand : public RTT::TaskContext{
 private:
-//	ACTION_DEFINITION(barrett_hand_controller::BHMoveAction);
-
 	const int TEMP_MAX_HI;
 	const int TEMP_MAX_LO;
 	int32_t loop_counter_;
@@ -177,10 +176,6 @@ private:
 	int32_t maxStaticTorque_;
 	int32_t maxDynamicTorque_;
 	int torqueSwitch_;
-
-//	rtt_actionlib::RTTActionServer<barrett_hand_controller::BHMoveAction> as_;
-//	rtt_actionlib::RTTActionServer<barrett_hand_controller::BHMoveAction>::GoalHandle gh_;
-//	Result result_;
 
 	Tactile ts_[4];
 	barrett_hand_controller::BHCmd cmd_;
@@ -195,6 +190,13 @@ private:
 	OutputPort<barrett_hand_controller::BHTemp>		temp_out_;
 	OutputPort<sensor_msgs::JointState>			joint_out_;
 	OutputPort<barrett_hand_controller::BHPressureState>	tactile_out_;
+	string dev_name_;
+	string prefix_;
+
+	double sp_torque_;
+	double f1_torque_;
+	double f2_torque_;
+	double f3_torque_;
 
 	int32_t temp[4], therm[4];
 
@@ -212,6 +214,10 @@ public:
 		resetFingersCounter_(0),
 		maxStaticTorque_(4700),
 		maxDynamicTorque_(700),
+		sp_torque_(700),
+		f1_torque_(700),
+		f2_torque_(700),
+		f3_torque_(700),
 		torqueSwitch_(-1),
 		ctrl_(NULL)
 	{
@@ -237,21 +243,6 @@ public:
 		joint_states_.name.resize(8);
 		joint_states_.position.resize(8);
 		
-		joint_states_.name[0] = "right_HandFingerOneKnuckleOneJoint";
-		joint_states_.name[1] = "right_HandFingerOneKnuckleTwoJoint";
-		joint_states_.name[2] = "right_HandFingerOneKnuckleThreeJoint";
-		
-		joint_states_.name[3] = "right_HandFingerTwoKnuckleOneJoint";
-		joint_states_.name[4] = "right_HandFingerTwoKnuckleTwoJoint";
-		joint_states_.name[5] = "right_HandFingerTwoKnuckleThreeJoint";
-		
-		joint_states_.name[6] = "right_HandFingerThreeKnuckleTwoJoint";
-		joint_states_.name[7] = "right_HandFingerThreeKnuckleThreeJoint";
-
-		// Bind action server goal and cancel callbacks (see below)
-//		as_.registerGoalCallback(boost::bind(&BarrettHand::goalCallback, this, _1));
-//		as_.registerCancelCallback(boost::bind(&BarrettHand::cancelCallback, this, _1));
-
 		temp_.temp.resize(9);
 
 		this->addPort(temp_out_).doc("Sends out BH temperature.");
@@ -260,11 +251,17 @@ public:
 		this->addPort(cmd_in_).doc("Input command.");
 
 		this->provides()->addOperation("reset_fingers",&BarrettHand::resetFingers,this,RTT::OwnThread);
+		this->provides()->addOperation("reset_fingers_ros",&BarrettHand::resetFingersRos,this,RTT::OwnThread);
 		this->provides()->addOperation("calibrate",&BarrettHand::calibrateTactileSensors,this,RTT::OwnThread);
-		this->provides()->addOperation("get_pressure_info",&BarrettHand::getPressureInfo,this,RTT::OwnThread);
+		this->provides()->addOperation("calibrate_ros",&BarrettHand::calibrateTactileSensorsRos,this,RTT::OwnThread);
+		this->provides()->addOperation("get_pressure_info_ros",&BarrettHand::getPressureInfoRos,this,RTT::OwnThread);
+		this->provides()->addOperation("set_max_torque",&BarrettHand::setMaxTorque,this,RTT::OwnThread);
+		this->provides()->addOperation("set_max_vel",&BarrettHand::setMaxVel,this,RTT::OwnThread);
+		this->provides()->addOperation("move_hand",&BarrettHand::moveHand,this,RTT::OwnThread);
+		this->provides()->addOperation("move_hand_ros",&BarrettHand::moveHandRos,this,RTT::OwnThread);
 
-		// Add action server ports to this task's root service
-//		as_.addPorts(this->provides());
+		this->addProperty("device_name", dev_name_);
+		this->addProperty("prefix", prefix_);
 	}
 
 	~BarrettHand()
@@ -283,9 +280,20 @@ public:
 	// RTT configure hook
 	bool configureHook()
 	{
-		if (ctrl_ == NULL)
+		if (ctrl_ == NULL && !dev_name_.empty() && !prefix_.empty())
 		{
-			ctrl_ = new MotorController("rtcan1");
+			ctrl_ = new MotorController(dev_name_);
+
+			joint_states_.name[0] = prefix_ + "_HandFingerOneKnuckleOneJoint";
+			joint_states_.name[1] = prefix_ + "_HandFingerOneKnuckleTwoJoint";
+			joint_states_.name[2] = prefix_ + "_HandFingerOneKnuckleThreeJoint";
+		
+			joint_states_.name[3] = prefix_ + "_HandFingerTwoKnuckleOneJoint";
+			joint_states_.name[4] = prefix_ + "_HandFingerTwoKnuckleTwoJoint";
+			joint_states_.name[5] = prefix_ + "_HandFingerTwoKnuckleThreeJoint";
+		
+			joint_states_.name[6] = prefix_ + "_HandFingerThreeKnuckleTwoJoint";
+			joint_states_.name[7] = prefix_ + "_HandFingerThreeKnuckleThreeJoint";
 		}
 
 		return true;
@@ -306,8 +314,6 @@ public:
 		ctrl_->setMaxVel(2, RAD2P(1)/1000.0);
 		ctrl_->setMaxVel(3, RAD2S(0.7)/1000.0);
 
-		// Start action server
-//		as_.start();
 		return true;
 	}
 
@@ -326,32 +332,16 @@ public:
 	{
 		int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s, mode1, mode2, mode3, mode4;
 
-		if (NewData == cmd_in_.read(cmd_))
+/*		if (NewData == cmd_in_.read(cmd_))
 		{
-//cout<<"move: " << cmd_.cmd[0] << " " << cmd_.cmd[1] << " " << cmd_.cmd[2] << " " << cmd_.cmd[3] << endl;
-			ctrl_->setMaxTorque(0, maxStaticTorque_);
-			ctrl_->setMaxTorque(1, maxStaticTorque_);
-			ctrl_->setMaxTorque(2, maxStaticTorque_);
-			ctrl_->setMaxTorque(3, maxStaticTorque_);
-			torqueSwitch_ = 5;
 
-			ctrl_->setTargetPos(0, RAD2P(cmd_.cmd[0]));
-			ctrl_->setTargetPos(1, RAD2P(cmd_.cmd[1]));
-			ctrl_->setTargetPos(2, RAD2P(cmd_.cmd[2]));
-			ctrl_->setTargetPos(3, RAD2S(cmd_.cmd[3]));
-			ctrl_->moveAll();
 		}
-
+*/
 		// on 0, 10, 20, 30, 40, ... step
 		if ( (loop_counter_%10) == 0)
 		{
 			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
-/*			int32_t tmp;
-			ctrl_->getPosition(0,p1,jp1);
-			ctrl_->getPosition(1,p2,jp2);
-			ctrl_->getPosition(2,p3,jp3);
-			ctrl_->getPosition(3,s,tmp);
-*/
+
 			joint_states_.header.stamp = ros::Time::now();
 
 			joint_states_.position[0] = s * M_PI/ 35840.0;
@@ -380,15 +370,6 @@ public:
 			ctrl_->getTherm(2, therm[2]);
 			ctrl_->getTherm(3, therm[3]);
 
-/*			temp[0] = 50;
-			temp[1] = 50;
-			temp[2] = 50;
-			temp[3] = 50;
-			therm[0] = 50;
-			therm[1] = 50;
-			therm[2] = 50;
-			therm[3] = 50;
-*/
 			if (	(temp[0] > TEMP_MAX_HI || temp[1] > TEMP_MAX_HI || temp[2] > TEMP_MAX_HI || temp[3] > TEMP_MAX_HI ||
 				therm[0] > TEMP_MAX_HI || therm[1] > TEMP_MAX_HI || therm[2] > TEMP_MAX_HI || therm[3] > TEMP_MAX_HI) &&
 				hold_ == true)
@@ -462,10 +443,10 @@ public:
 		}
 		else if (torqueSwitch_ == 0)
 		{
-			ctrl_->setMaxTorque(0, maxDynamicTorque_);
-			ctrl_->setMaxTorque(1, maxDynamicTorque_);
-			ctrl_->setMaxTorque(2, maxDynamicTorque_);
-			ctrl_->setMaxTorque(3, maxDynamicTorque_);
+			ctrl_->setMaxTorque(0, f1_torque_);
+			ctrl_->setMaxTorque(1, f2_torque_);
+			ctrl_->setMaxTorque(2, f3_torque_);
+			ctrl_->setMaxTorque(3, sp_torque_);
 			--torqueSwitch_;
 		}
 
@@ -535,15 +516,18 @@ public:
 		}
 	}
 */
-	bool resetFingers(barrett_hand_controller_srvs::BHResetFingers::Request  &req,
-	         barrett_hand_controller_srvs::BHResetFingers::Response &res)
+	void resetFingers()
 	{
-//cout<<"reset fingers" <<endl;
 		resetFingersCounter_ = 3000;
+	}
+
+	bool resetFingersRos(barrett_hand_controller_srvs::Empty::Request &req, barrett_hand_controller_srvs::Empty::Response &res)
+	{
+		resetFingers();
 		return true;
 	}
 
-	bool getPressureInfo(barrett_hand_controller_srvs::BHGetPressureInfo::Request  &req,
+	bool getPressureInfoRos(barrett_hand_controller_srvs::BHGetPressureInfo::Request  &req,
 	         barrett_hand_controller_srvs::BHGetPressureInfo::Response &res)
 	{
 		res.info.sensor.resize(4);
@@ -573,16 +557,67 @@ public:
 		return true;
 	}
 
-	bool calibrateTactileSensors(barrett_hand_controller_srvs::BHCalibrateTactileSensors::Request  &req,
-	         barrett_hand_controller_srvs::BHCalibrateTactileSensors::Response &res)
+	void calibrateTactileSensors()
 	{
 		for (int id=0; id<4; ++id)
 		{
 			ts_[id].startCalibration();
 		}
+	}
+
+	bool calibrateTactileSensorsRos(barrett_hand_controller_srvs::Empty::Request &req,
+	         barrett_hand_controller_srvs::Empty::Response &res)
+	{
+		calibrateTactileSensors();
+
 		return true;
 	}
 
+	bool setMaxTorque(double f1_t, double f2_t, double f3_t, double sp_t)
+	{
+		f1_torque_ = f1_t;
+		f2_torque_ = f2_t;
+		f3_torque_ = f3_t;
+		sp_torque_ = sp_t;
+
+		return true;
+	}
+
+	bool setMaxVel(double f1_s, double f2_s, double f3_s, double sp_s)
+	{
+		ctrl_->setMaxVel(0, RAD2P(f1_s)/1000.0);
+		ctrl_->setMaxVel(1, RAD2P(f2_s)/1000.0);
+		ctrl_->setMaxVel(2, RAD2P(f3_s)/1000.0);
+		ctrl_->setMaxVel(3, RAD2S(sp_s)/1000.0);
+
+		return true;
+	}
+
+	bool moveHand(double f1, double f2, double f3, double sp)
+	{
+		ctrl_->setMaxTorque(0, maxStaticTorque_);
+		ctrl_->setMaxTorque(1, maxStaticTorque_);
+		ctrl_->setMaxTorque(2, maxStaticTorque_);
+		ctrl_->setMaxTorque(3, maxStaticTorque_);
+		torqueSwitch_ = 5;
+
+		ctrl_->setTargetPos(0, RAD2P(f1));
+		ctrl_->setTargetPos(1, RAD2P(f2));
+		ctrl_->setTargetPos(2, RAD2P(f3));
+		ctrl_->setTargetPos(3, RAD2S(sp));
+		ctrl_->moveAll();
+
+		return true;
+	}
+
+	bool moveHandRos(barrett_hand_controller_srvs::BHMoveHand::Request  &req,
+	         barrett_hand_controller_srvs::BHMoveHand::Response &res)
+	{
+		setMaxTorque(req.f1_torque, req.f2_torque, req.f3_torque, req.sp_torque);
+		setMaxVel(req.f1_speed, req.f2_speed, req.f3_speed, req.sp_speed);		
+		res.result = moveHand(req.f1, req.f2, req.f3, req.sp);
+		return true;
+	}
 
 };
 ORO_CREATE_COMPONENT(BarrettHand)

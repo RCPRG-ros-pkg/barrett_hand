@@ -20,12 +20,13 @@
   <build_depend>ocl</build_depend>
   <build_depend>rtt</build_depend>
   <build_depend>rtt_roscomm</build_depend>
-  <build_depend>rtt_actionlib</build_depend>
-  <build_depend>rtt_actionlib_msgs</build_depend>
+<!--  <build_depend>rtt_actionlib</build_depend>
+  <build_depend>rtt_actionlib_msgs</build_depend>-->
   <build_depend>rtt_sensor_msgs</build_depend>
+  <build_depend>std_srvs</build_depend>
   <build_depend>roscpp</build_depend>
-  <build_depend>actionlib</build_depend>
-  <build_depend>actionlib_msgs</build_depend>
+<!--  <build_depend>actionlib</build_depend>
+  <build_depend>actionlib_msgs</build_depend>-->
   <build_depend>sensor_msgs</build_depend>
   <build_depend>visualization_msgs</build_depend>
   <build_depend>message_generation</build_depend>
@@ -38,27 +39,30 @@
   <run_depend>rtt_ros</run_depend>
   <run_depend>rtt_rosnode</run_depend> 
   <run_depend>rtt_roscomm</run_depend>
-  <run_depend>rtt_actionlib</run_depend>
-  <run_depend>rtt_actionlib_msgs</run_depend>
+<!--  <run_depend>rtt_actionlib</run_depend>
+  <run_depend>rtt_actionlib_msgs</run_depend>-->
   <run_depend>rtt_sensor_msgs</run_depend>
   <run_depend>roscpp</run_depend>
-  <run_depend>actionlib</run_depend>
-  <run_depend>actionlib_msgs</run_depend>
+<!--  <run_depend>actionlib</run_depend>
+  <run_depend>actionlib_msgs</run_depend>-->
 <!--  <run_depend>sensor_msgs</run_depend>-->
   <run_depend>visualization_msgs</run_depend>
   <run_depend>message_runtime</run_depend>
-  <run_depend>rtt_std_msgs</run_depend> 
+  <run_depend>rtt_std_msgs</run_depend>
+  <run_depend>rosgraph_msgs</run_depend>
+  <run_depend>std_srvs</run_depend> 
   <run_depend>rtt_std_srvs</run_depend> 
-  <run_depend>barrett_hand_controller_srvs</run_depend> 
+  <run_depend>barrett_hand_controller_srvs</run_depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <rtt_ros>
-      <plugin_depend>rtt_actionlib</plugin_depend>
+<!--      <plugin_depend>rtt_actionlib</plugin_depend>-->
       <plugin_depend>rtt_rosnode</plugin_depend>
       <plugin_depend>rtt_roscomm</plugin_depend>
       <plugin_depend>rtt_sensor_msgs</plugin_depend>
       <plugin_depend>rtt_std_msgs</plugin_depend>
+      <plugin_depend>rtt_std_srvs</plugin_depend>
       <plugin_depend>barrett_hand_controller_srvs</plugin_depend>
 <!--      <plugin_depend>rtt_std_srvs</plugin_depend>
 -->    </rtt_ros>

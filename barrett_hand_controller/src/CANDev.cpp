@@ -12,12 +12,10 @@
 #include "CANDev.h"
 
 #if !defined(HAVE_RTNET)
-#define socket rt_dev_socket
-#define ioctl rt_dev_ioctl
-#define bind rt_dev_bind
-#define close rt_dev_close
-#define send rt_dev_send
-#define recv rt_dev_recv
+#define rt_dev_socket socket
+#define rt_dev_ioctl ioctl
+#define rt_dev_bind bind
+#define rt_dev_close close
 #endif
 
 CANDev::CANDev(std::string dev_name) {
@@ -55,7 +53,11 @@ void CANDev::send(const uint32_t can_id, const uint8_t len, const uint8_t *data)
   frame.can_dlc = len;
   
   memcpy(frame.data, data, len);
+#if !defined(HAVE_RTNET)
+  write(dev, (void *)&frame, sizeof(frame));
+#else
   rt_dev_send(dev, (void *)&frame, sizeof(frame), 0);
+#endif
 }
 
 uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
@@ -73,7 +75,11 @@ uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
   
   // wait for new data
   while(1) {
+#if !defined(HAVE_RTNET)
+    size_t ret = read(dev, (void *)&frame, sizeof(frame));
+#else
     size_t ret = rt_dev_recv(dev, (void *)&frame, sizeof(frame), 0);
+#endif
     if(ret != sizeof(frame)) {
       continue;
     }
