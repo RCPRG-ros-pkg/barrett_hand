@@ -2,19 +2,12 @@ cmake_minimum_required(VERSION 2.8.3)
 project(barrett_hand_controller)
 
 find_package(catkin REQUIRED COMPONENTS
-  roscpp rtt_ros actionlib rtt_actionlib actionlib_msgs rtt_actionlib_msgs sensor_msgs rtt_sensor_msgs visualization_msgs rtt_visualization_msgs genmsg rtt_roscomm)
-
-add_message_files(DIRECTORY msg FILES BHCmd.msg BHPressureState.msg BHTemp.msg)
-generate_messages(DEPENDENCIES actionlib_msgs geometry_msgs sensor_msgs)
-
-ros_generate_rtt_typekit(${PROJECT_NAME})
-
-ros_generate_rtt_service_proxies(barrett_hand_controller)
+  roscpp rtt_ros sensor_msgs rtt_sensor_msgs visualization_msgs rtt_visualization_msgs genmsg rtt_roscomm)
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
 
 add_definitions(-DRTT_COMPONENT)
-orocos_component(barrett_hand_controller src/CANDev.cpp src/MotorController.cpp src/hand.cpp)
+orocos_component(barrett_hand_controller src/CANDev.cpp src/MotorController.cpp src/Tactile.cpp src/hand.cpp)
 target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES})
 
 #Start of user code user_build
