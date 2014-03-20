@@ -6,7 +6,7 @@ import rospy
 import math
 
 import std_msgs.msg
-from barrett_hand_controller.msg import *
+from barrett_hand_controller_srvs.msg import *
 from barrett_hand_controller_srvs.srv import *
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
@@ -19,9 +19,10 @@ from tf.transformations import euler_from_quaternion
 from tf2_msgs.msg import *
 
 def get_pressure_sensors_info_client():
-    rospy.wait_for_service('/barrett_hand_controller/get_pressure_info')
+    global prefix
+    rospy.wait_for_service('/' + prefix + '_hand/get_pressure_info')
     try:
-        get_pressure_sensors_info = rospy.ServiceProxy('/barrett_hand_controller/get_pressure_info', BHGetPressureInfo)
+        get_pressure_sensors_info = rospy.ServiceProxy('/' + prefix + '_hand/get_pressure_info', BHGetPressureInfo)
         resp1 = get_pressure_sensors_info()
         return resp1.info
     except rospy.ServiceException, e:
@@ -54,25 +55,26 @@ def convertToRGB(value):
     return result
 
 def callback(data):
+    global prefix
     global pressure_info
     m = MarkerArray()
 
     frame_id = []
-    frame_id.append("right_HandFingerOneKnuckleThreeLink")
-    frame_id.append("right_HandFingerTwoKnuckleThreeLink")
-    frame_id.append("right_HandFingerThreeKnuckleThreeLink")
-    frame_id.append("right_HandPalmLink")
+    frame_id.append(prefix+"_HandFingerOneKnuckleThreeLink")
+    frame_id.append(prefix+"_HandFingerTwoKnuckleThreeLink")
+    frame_id.append(prefix+"_HandFingerThreeKnuckleThreeLink")
+    frame_id.append(prefix+"_HandPalmLink")
 
 
     tran = []
     rotat = []
-    (transl, rot) = tf_listener.lookupTransform('right_HandPalmLink', frame_id[0], rospy.Time(0))
+    (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[0], rospy.Time(0))
     tran.append(transl)
     rotat.append(rot)
-    (transl, rot) = tf_listener.lookupTransform('right_HandPalmLink', frame_id[1], rospy.Time(0))
+    (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[1], rospy.Time(0))
     tran.append(transl)
     rotat.append(rot)
-    (transl, rot) = tf_listener.lookupTransform('right_HandPalmLink', frame_id[2], rospy.Time(0))
+    (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[2], rospy.Time(0))
     tran.append(transl)
     rotat.append(rot)
 
@@ -267,16 +269,24 @@ def callback(data):
     tactileImagepub.publish(im)
 
 if __name__ == "__main__":
-    print "Requesting pressure sensors info"
-    pressure_info = get_pressure_sensors_info_client()
-    print "sensor[0].center[0]: %s, %s, %s"%(pressure_info.sensor[0].center[0].x, pressure_info.sensor[0].center[0].y, pressure_info.sensor[0].center[0].z)
+    a = []
+    for arg in sys.argv:
+        a.append(arg)
 
-    pub = rospy.Publisher('/barrett_hand/tactile_markers', MarkerArray)
-    tactileImagepub = rospy.Publisher('/barrett_hand/tactile_image', Image)
+    if 2 == len(a):
+        prefix = a[1]
 
-    rospy.init_node('hand_markers', anonymous=True)
-    tf_listener = tf.TransformListener()
-    rospy.Subscriber("/barrett_hand_controller/BHPressureState", BHPressureState, callback)
-    rospy.spin()
+        print "Requesting pressure sensors info"
+        pressure_info = get_pressure_sensors_info_client()
+        print "sensor[0].center[0]: %s, %s, %s"%(pressure_info.sensor[0].center[0].x, pressure_info.sensor[0].center[0].y, pressure_info.sensor[0].center[0].z)
 
+        pub = rospy.Publisher('/' + prefix + '_hand/tactile_markers', MarkerArray)
+        tactileImagepub = rospy.Publisher('/' + prefix + '_hand/tactile_image', Image)
+
+        rospy.init_node(prefix + '_hand_markers', anonymous=True)
+        tf_listener = tf.TransformListener()
+        rospy.Subscriber('/' + prefix + '_hand/BHPressureState', BHPressureState, callback)
+        rospy.spin()
+    else:
+        print "Usage: %s prefix"%a[0]
 

@@ -7,7 +7,7 @@ import math
 import copy
 
 from std_msgs.msg import ColorRGBA
-from barrett_hand_controller.msg import *
+from barrett_hand_controller_srvs.msg import *
 from barrett_hand_controller_srvs.srv import *
 from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
@@ -15,8 +15,15 @@ from visualization_msgs.msg import *
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import Quaternion
 
-prefix = "right"
 update_on = "demand"
+
+def move_hand_client(prefix, f1, f2, f3, spread):
+    rospy.wait_for_service('/' + prefix + '_hand/move_hand')
+    try:
+        move_hand = rospy.ServiceProxy('/' + prefix + '_hand/move_hand', BHMoveHand)
+        resp1 = move_hand(f1, f2, f3, spread*3.14, 0.7, 0.7, 0.7, 0.7, 1000, 1000, 1000, 1000)
+    except rospy.ServiceException, e:
+        print "Service call failed: %s"%e
 
 def processFeedback(feedback):
     global update_on
@@ -31,6 +38,7 @@ def processFeedback(feedback):
     global f1_val
     global f2_val
     global f3_val
+    global prefix
 
     if feedback.marker_name == "spread_marker":
         val = 2*math.atan2(feedback.pose.orientation.z, feedback.pose.orientation.w)
@@ -64,17 +72,7 @@ def processFeedback(feedback):
         f3_val = val
 
     if ( (update_on == "mouse" and feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP) or (feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK and feedback.control_name == "button1_control") ):
-        goal = BHMoveActionGoal()
-        goal.header.frame_id = prefix+"_HandPalmLink"
-        goal.header.stamp = rospy.Time.now()
-        goal.goal.finger[0] = f1_val
-        goal.goal.finger[1] = f2_val
-        goal.goal.finger[2] = f3_val
-        goal.goal.spread = spread_val
-        goal.goal.fingerVel = 1.0
-        goal.goal.spreadVel = 2.0
-        global spread_pub
-        spread_pub.publish(goal)
+        move_hand_client(prefix, f1_val, f2_val, f3_val, spread_val)
 
 def createSphereMarkerControl(scale, position, color):
     marker = Marker()
@@ -102,14 +100,22 @@ def createBoxMarkerControl(scale, position):
     return control
 
 if __name__ == "__main__":
+    a = []
+    for arg in sys.argv:
+        a.append(arg)
+
+    if 2 != len(a):
+        print "Usage: %s prefix"%a[0]
+        exit(0)
+
+    prefix = a[1]
+
     rospy.init_node('int_hand_markers', anonymous=True)
 
     spread_val = 0.0
     f1_val = 0.0
     f2_val = 0.0
     f3_val = 0.0
-
-    spread_pub = rospy.Publisher('/move_hand/goal', BHMoveActionGoal)
 
     # create an interactive marker server on the topic namespace simple_marker
     server = InteractiveMarkerServer("int_hand_markers")
