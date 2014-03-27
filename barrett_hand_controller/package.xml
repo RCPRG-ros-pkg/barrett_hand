@@ -13,7 +13,7 @@
   
   <buildtool_depend>catkin</buildtool_depend>
 
-  <build_depend>genmsg</build_depend>
+<!--  <build_depend>genmsg</build_depend>-->
   <build_depend>ocl</build_depend>
   <build_depend>rtt</build_depend>
   <build_depend>rtt_roscomm</build_depend>
@@ -22,10 +22,10 @@
   <build_depend>roscpp</build_depend>
   <build_depend>sensor_msgs</build_depend>
   <build_depend>visualization_msgs</build_depend>
-  <build_depend>barrett_hand_controller_srvs</build_depend>
-  <build_depend>message_generation</build_depend>
+<!--  <build_depend>barrett_hand_controller_srvs</build_depend>-->
+<!--  <build_depend>message_generation</build_depend>-->
 
-  <run_depend>genmsg</run_depend>
+<!--  <run_depend>genmsg</run_depend>-->
   <run_depend>rtt</run_depend>
   <run_depend>ocl</run_depend>
   <run_depend>rtt_ros</run_depend>

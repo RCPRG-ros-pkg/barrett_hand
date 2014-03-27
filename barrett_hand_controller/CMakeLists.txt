@@ -1,8 +1,11 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(barrett_hand_controller)
 
+#find_package(catkin REQUIRED COMPONENTS
+#  roscpp rtt_ros sensor_msgs rtt_sensor_msgs visualization_msgs rtt_visualization_msgs genmsg rtt_roscomm)
+
 find_package(catkin REQUIRED COMPONENTS
-  roscpp rtt_ros sensor_msgs rtt_sensor_msgs visualization_msgs rtt_visualization_msgs genmsg rtt_roscomm)
+  roscpp rtt_ros rtt_roscomm)
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
 
