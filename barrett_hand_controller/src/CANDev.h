@@ -18,6 +18,7 @@ public:
   
   void send(uint32_t can_id, uint8_t len, const uint8_t *data);
   uint32_t waitForReply(uint32_t can_id, uint8_t *data);
+  bool isOpened();
 protected:
 private:
 

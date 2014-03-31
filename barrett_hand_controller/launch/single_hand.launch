@@ -1,0 +1,34 @@
+<launch>
+  <arg name="PREFIX" default="right"/>
+  <arg name="DEVICE" default="can0"/>
+  <arg name="LOG_LEVEL" default="error"/>
+  <arg name="DEBUG" default="false"/>
+
+  <!-- Orocos target (gnulinux, xenomai, etc) -->
+  <arg name="OROCOS_TARGET" default="$(optenv OROCOS_TARGET)"/>
+  <!-- Path to look for dynamically-loaded plugins and components (something like /lib/orocos) -->
+  <arg name="RTT_COMPONENT_PATH" default="$(env RTT_COMPONENT_PATH)"/>
+
+  <group ns="$(arg PREFIX)_hand">
+    <group ns="$(arg PREFIX)_hand_controller">
+      <param name="Hand/device_name" value="$(arg DEVICE)" />
+      <param name="Hand/prefix" value="$(arg PREFIX)" />
+    </group>
+
+    <node
+      name="$(arg PREFIX)_hand_controller"
+      pkg="rtt_ros" type="rttscript"
+      args="-l $(arg LOG_LEVEL) -s $(find barrett_hand_controller)/config/single_hand.ops --">
+      <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
+      <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
+    </node>
+
+    <node
+      name="$(arg PREFIX)_hand_controller_markers"
+      pkg="barrett_hand_controller" type="markers.py"
+      args="$(arg PREFIX) --">
+    </node>
+  </group>
+
+</launch>
+

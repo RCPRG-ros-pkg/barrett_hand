@@ -120,7 +120,7 @@ def run_int():
     f3_val = 0.0
 
     # create an interactive marker server on the topic namespace simple_marker
-    server = InteractiveMarkerServer("int_hand_markers")
+    server = InteractiveMarkerServer('/'+prefix+'_markers')
 
     button1Control = createSphereMarkerControl(Point(0.03,0.03,0.03), Point(0.1,0.02,-0.18), ColorRGBA(1,0,0,1))
     button1Control.interaction_mode = InteractiveMarkerControl.BUTTON
@@ -444,11 +444,6 @@ def callback(data):
         im.data[(yim*im.width + xim)*3+2] = value[2]
         i+=1
 
-#    for i in range(0, 24):
-#        value = convertToRGB(int(data.finger1_tip[i]/2))
-#        im.data[i*3] = value[0]
-#        im.data[i*3+1] = value[1]
-#        im.data[i*3+2] = value[2]
     tactileImagepub.publish(im)
 
 def run_mark():
@@ -495,7 +490,7 @@ if __name__ == '__main__':
     if noint == 1 and notac == 1:
         exit(0)
 
-    rospy.init_node('markers', anonymous=True)
+    rospy.init_node(prefix+'_hand_markers', anonymous=True)
 
     if noint == 0:
         print "int"

@@ -256,4 +256,9 @@ void MotorController::setHoldPosition(int id, bool hold)
 	setProperty(11 + id, PROP_HOLD, value);
 }
 
+bool MotorController::isDevOpened()
+{
+	return dev.isOpened();
+}
+
 

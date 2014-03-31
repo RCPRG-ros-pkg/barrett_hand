@@ -31,6 +31,7 @@ public:
 	void getTactile(int id, tact_array_t &tact);
         void getTemp(int id, int32_t &temp);
         void getTherm(int id, int32_t &temp);
+	bool isDevOpened();
 protected:
 	void setProperty(int id, uint32_t property, int32_t value);
 	void reqProperty(int id, uint32_t property);

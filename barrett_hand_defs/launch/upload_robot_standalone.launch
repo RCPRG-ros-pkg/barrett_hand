@@ -2,4 +2,5 @@
 <launch>
   <!-- send two_lwr.urdf.xml to param server -->
   <param name="robot_description" command="$(find xacro)/xacro.py '$(find barrett_hand_defs)/robots/barrett_hand.urdf.xml'" />
+  <node pkg="robot_state_publisher" type="state_publisher" name="robot_state_publisher"/>
 </launch>

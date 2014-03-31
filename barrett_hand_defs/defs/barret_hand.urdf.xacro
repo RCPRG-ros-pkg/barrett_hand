@@ -33,7 +33,7 @@
     <xacro:property name="highResModelDirectory" value="${homeDirectory}/meshes/splitModels" />
     <xacro:property name="PI" value="3.1415926535897931" />
 
-    <xacro:macro name="palm" params="prefix parent">
+    <xacro:macro name="palm" params="prefix parent *origin">
 
         <link name="${prefix}_HandPalmLink" >
         <inertial>
@@ -60,7 +60,8 @@
         <joint name="${prefix}_HandPalmJoint" type="fixed">
             <parent link="${parent}"/>
             <child link="${prefix}_HandPalmLink"/>
-            <origin xyz="0.0 0 0.0" rpy="0 0 0"/>
+            <insert_block name="origin"/>
+<!--            <origin xyz="0.0 0 0.0" rpy="0 0 0"/>-->
             <provideFeedback value="true"/> 
         </joint>
     </xacro:macro>
@@ -192,9 +193,11 @@
 
     </xacro:macro>
 
-    <xacro:macro name="barret_hand" params="prefix parent">
+    <xacro:macro name="barret_hand" params="prefix parent *origin">
 
-        <xacro:palm prefix="${prefix}" parent="${parent}"/>
+        <xacro:palm prefix="${prefix}" parent="${parent}">
+            <insert_block name="origin"/>
+        </xacro:palm>
     
         <xacro:fingers prefix="${prefix}" parent="${prefix}_HandPalmLink" number="Three" xyz="0 -0.05 0.0801966" rpy="-${0.5 * PI} -0.0429350996 -${0.5 * PI}"/>
 

@@ -18,7 +18,7 @@
 #include "tf/transform_datatypes.h"
 #include "sensor_msgs/JointState.h"
 #include "geometry_msgs/Vector3.h"
-
+#include "rtt_rosclock/rtt_rosclock.h"
 
 #include <iostream>
 #include <math.h>
@@ -169,6 +169,7 @@ public:
 	// RTT configure hook
 	bool configureHook()
 	{
+//		cout << "dev_name_: " << dev_name_ << "    prefix_: " << prefix_ << endl;
 		if (ctrl_ == NULL && !dev_name_.empty() && !prefix_.empty())
 		{
 			ctrl_ = new MotorController(dev_name_);
@@ -183,9 +184,10 @@ public:
 		
 			joint_states_.name[6] = prefix_ + "_HandFingerThreeKnuckleTwoJoint";
 			joint_states_.name[7] = prefix_ + "_HandFingerThreeKnuckleThreeJoint";
-		}
 
-		return true;
+			return ctrl_->isDevOpened();
+		}
+		return false;
 	}
 
 	// RTT start hook
@@ -251,7 +253,7 @@ public:
 		{
 			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
 
-			joint_states_.header.stamp = ros::Time::now();
+			joint_states_.header.stamp = rtt_rosclock::host_rt_now();//ros::Time::now();
 
 			joint_states_.position[0] = s * M_PI/ 35840.0;
 			joint_states_.position[1] = JP2RAD(jp1);
@@ -297,7 +299,7 @@ public:
 				RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
 			}
 
-			temp_.header.stamp = ros::Time::now();
+			temp_.header.stamp = rtt_rosclock::host_rt_now();//ros::Time::now();
 			temp_.temp[0] = temp[0];
 			temp_.temp[1] = temp[1];
 			temp_.temp[2] = temp[2];

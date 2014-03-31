@@ -94,3 +94,8 @@ uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
   }
 }
 
+bool CANDev::isOpened()
+{
+	return dev != -1;
+}
+
