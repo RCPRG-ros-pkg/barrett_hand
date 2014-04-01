@@ -5,7 +5,7 @@ project(barrett_hand_controller)
 #  roscpp rtt_ros sensor_msgs rtt_sensor_msgs visualization_msgs rtt_visualization_msgs genmsg rtt_roscomm)
 
 find_package(catkin REQUIRED COMPONENTS
-  roscpp rtt_ros rtt_roscomm)
+  roscpp rtt_ros rtt_roscomm barrett_hand_controller_srvs geometry_msgs sensor_msgs)
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
 
