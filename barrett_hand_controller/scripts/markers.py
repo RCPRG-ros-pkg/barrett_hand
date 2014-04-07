@@ -254,6 +254,7 @@ def callback(data):
 
     tran = []
     rotat = []
+    tf_listener.waitForTransform(prefix+'_HandPalmLink', frame_id[0], rospy.Time(0), rospy.Duration(10.0))
     (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[0], rospy.Time(0))
     tran.append(transl)
     rotat.append(rot)
