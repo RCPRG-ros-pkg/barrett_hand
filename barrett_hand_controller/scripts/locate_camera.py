@@ -24,11 +24,15 @@ from collections import deque
 left_makrer_id=2
 right_makrer_id=1
 
-tool_marker_left_position = [ 0.00013558,  0.00033355,  0.02499741]
-tool_marker_left_orientation = [ 0.00265232,  0.00669491,  0.99993464, -0.00887976]
+#tool_marker_left_position = [ 0.00013558,  0.00033355,  0.02499741]
+#tool_marker_left_orientation = [ 0.00265232,  0.00669491,  0.99993464, -0.00887976]
+tool_marker_left_position = [ -2.72290709e-05,   5.56445479e-04,   2.49937918e-02]
+tool_marker_left_orientation = [ -6.22007822e-04,   1.11255436e-02,   9.99913731e-01,  -6.95451356e-03]
 
-tool_marker_right_position = [ 0.00038019,  0.0001039,   0.02499689]
-tool_marker_right_orientation = [  7.60508486e-03,   2.07433971e-03,   9.99968812e-01,   4.84539739e-04]
+#tool_marker_right_position = [ 0.00038019,  0.0001039,   0.02499689]
+#tool_marker_right_orientation = [  7.60508486e-03,   2.07433971e-03,   9.99968812e-01,   4.84539739e-04]
+tool_marker_right_position = [  5.31013495e-05,  -1.31241002e-04,   2.49995991e-02]
+tool_marker_right_orientation = [ 0.00104553, -0.00263145,  0.99997629,  0.00627708]
 
 def PoseToTuple(p):
     return [p.position.x, p.position.y, p.position.z], [p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w]

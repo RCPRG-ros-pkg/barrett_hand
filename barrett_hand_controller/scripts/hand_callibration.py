@@ -87,18 +87,21 @@ if __name__ == "__main__":
     for arg in sys.argv:
         a.append(arg)
 
-    prefix = "left"
+    if len(a) !=2:
+        print "Usage: %s prefix"%a[0]
+        exit(1)
 
-    if prefix == "left":
+    if a[1] == "left":
+        prefix = a[1]
         marker_id = 2
-    elif prefix == "right":
+    elif a[1] == "right":
+        prefix = a[1]
         marker_id = 1
+    else:
+        print "Usage: %s prefix"%a[0]
+        exit(0)
 
     marker_pose = Pose([0,0,0],[0,0,1,0])
-#    if 2 == len(a):
-#        prefix = a[1]
-
-#    pub = rospy.Publisher('/position', MarkerArray)
 
     rospy.init_node('hand_callibration', anonymous=True)
 
@@ -111,10 +114,6 @@ if __name__ == "__main__":
 
     rospy.Subscriber('/ar_pose_marker', AlvarMarkers, callback)
     arm_pub = rospy.Publisher("/"+prefix+"_arm/trajectory", CartesianTrajectory)
-
-#    rospy.spin()
-
-#    exit(0)
 
     rate = 10.0
     period = 1.0/rate
