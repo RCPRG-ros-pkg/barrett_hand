@@ -329,7 +329,6 @@ Class for opening door with velma robot.
 
         rospy.sleep(1.0)
         
-#        init_motion = PyKDL.Frame(PyKDL.Rotation.RPY(-numpy.pi*5.0/180.0, 0, 0), PyKDL.Vector(0, 0.0, -0.10))
         init_motion = PyKDL.Frame(PyKDL.Rotation.RPY(0, 0, 0), PyKDL.Vector(0, 0.25, -0.10))
         pose = self.getContactPointFrame(contact_point_offset)
 
@@ -379,7 +378,6 @@ Class for opening door with velma robot.
 
         init_trajectory_progress = 0.0
         m_id = 1
-#        rospy.sleep(0.3)
         for i in range(0,120):
 
             rospy.sleep(0.025)
@@ -402,14 +400,7 @@ Class for opening door with velma robot.
                 pxm.point = Point(contact.position.x, contact.position.y, 0)
                 self.pub_pm.publish(pxm)
 
-#            px.append(contact.position.x)
-#            py.append(contact.position.y)
             cz = contact.position.z
-#            self.publishSinglePointMarker(contact.position.x, contact.position.y, cz, m_id, 1.0, 0.0, 0.0)
-#            pxm.header.stamp = rospy.Time.now()
-#            pxm.point = Point(contact.position.x, contact.position.y, 0)
-#            self.pub_pm.publish(pxm)
-#            m_id += 1
             if (i>20) and (not self.hasContact(50)):
                 print "end: no contact"
                 self.stopArm()
@@ -446,17 +437,13 @@ Class for opening door with velma robot.
         r = r + 0.25
         # take angle form initial motion target point, not from the current position...
         a_init = math.atan2(initial_contact_point.position.y - cy, initial_contact_point.position.x - cx)
-#        a = math.atan2(init_motion_pt[1] - cy, init_motion_pt[0] - cx) + 0.01
         a = math.atan2(init_motion_pt[1]*init_trajectory_progress + initial_contact_point.position.y*(1.0-init_trajectory_progress) - cy, init_motion_pt[0]*init_trajectory_progress + initial_contact_point.position.x*(1.0-init_trajectory_progress) - cx) + 0.01
 #        a = math.atan2(contact.position.y - cy, contact.position.x - cx) #+ numpy.pi*10.0/180.0
         print a
 
-#        pt_prev = Point(contact.position.x, contact.position.y, 0)
-
         a_max = a_init + (numpy.pi*110.0/180.0)
 
         print "a_init: %s     a: %s     a_max: %s"%(a_init/numpy.pi*180.0, a/numpy.pi*180.0, a_max/numpy.pi*180.0)
-        initial_rotation = a - a_init - numpy.pi*8.0/180.0
 
         if rospy.is_shutdown():
             return
@@ -465,6 +452,7 @@ Class for opening door with velma robot.
         trj_imp.points.append(CartesianImpedanceTrajectoryPoint(
         rospy.Duration(3.0),
         CartesianImpedance(Wrench(Vector3(150.0, 35.0, 1000.0), Vector3(300.0, 300.0, 300.0)),Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
+#        CartesianImpedance(Wrench(Vector3(75.0, 35.0, 1000.0), Vector3(300.0, 300.0, 300.0)),Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
         self.pub_impedance.publish(trj_imp)
         rospy.sleep(3.5)
         if rospy.is_shutdown():
@@ -474,9 +462,7 @@ Class for opening door with velma robot.
 
         # 8
         self.sendNextEvent()
-        r_const = r
-        rot_from_init = 0.0
-        i = 1
+#        i = 1
         last_angle = a_init
         current_angle = a_init
         palm_rotation = 0.0
@@ -484,9 +470,6 @@ Class for opening door with velma robot.
             if rospy.is_shutdown():
                 break
             (x, y) = self.circle(cx, cy, r, a)
-#            x = cx
-#            y = cy
-#            r = r_const
 
             pc.header.stamp = rospy.Time.now()
             pc.point = Point(x, y, 0)
@@ -501,7 +484,6 @@ Class for opening door with velma robot.
 
             frame = pm.fromMsg(contact)
             pt = pm.toMsg( frame * PyKDL.Frame(PyKDL.Rotation.RPY(0.0, 0.0, -palm_rotation), PyKDL.Vector(0.0, 0.0, 0.0)) * tool)
-#            pt = pm.toMsg( frame * PyKDL.Frame(PyKDL.Rotation.RPY(0.0, 0.0, -i * 0.01 - rot_from_init), PyKDL.Vector(0.0, 0.0, 0.0)) * tool)
             self.publishSinglePointMarker(contact.position.x, contact.position.y, contact.position.z, m_id, 0.0, 1.0, 0.0)
             m_id += 1
 
@@ -529,7 +511,8 @@ Class for opening door with velma robot.
 
 
 
-            print "a=%s    angle=%s     %s"%(a, 180.0*(-i * 0.01 - 0.1)/numpy.pi, self.estCircle(px, py))
+#            print "a=%s    angle=%s     %s"%(a, 180.0*(-i * 0.01 - 0.1)/numpy.pi, self.estCircle(px, py))
+            print "a=%s    angle=%s     %s"%(180.0*a/numpy.pi, 180.0*current_angle/numpy.pi, self.estCircle(px, py))
             cx, cy, r = self.estCircle(px, py)
             self.publishDoorMarker(cx, cy, cz, r)
             circle.header.stamp = rospy.Time.now()
@@ -543,40 +526,19 @@ Class for opening door with velma robot.
             r = r + 0.25
             rospy.sleep(0.1)
             a = a + 0.01
-            i = i + 1
-
-            if rot_from_init<initial_rotation:
-                rot_from_init += 0.01
-            else:
-                rot_from_init = initial_rotation
+#            i = i + 1
 
             if palm_rotation<(current_angle-a_init):
                 palm_rotation += 0.08
             else:
                 palm_rotation = (current_angle-a_init)
 
-#            abs(palm_rotation-(current_angle-a_init))
-
             if not self.hasContact(50):
                 print "end: no contact"
                 return
 
-        
-        #print [px, py]
-#        numpy.savetxt("data.txt", numpy.transpose([px,py,pxc,pyc]))
-#        sio.savemat('data.mat', {'Tm':[px, py], 'Tc':[pxc, pyc]}, oned_as='row')
-
 
     def spin(self):
-
-#        self.listener.waitForTransform('right_arm_7_link', "right_HandFingerThreeKnuckleThreeLink", rospy.Time.now(), rospy.Duration(4.0))
-#        real_gripper = self.listener.lookupTransform('right_arm_7_link', "right_HandFingerThreeKnuckleThreeLink", rospy.Time(0))
-#        print real_gripper
-
-
-
-
-#        return
 
         # straighten fingers
         self.move_hand_client(self.prefix, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
