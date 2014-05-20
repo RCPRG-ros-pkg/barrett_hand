@@ -378,7 +378,9 @@ Class for opening door with velma robot.
 
         init_trajectory_progress = 0.0
         m_id = 1
-        for i in range(0,120):
+#        for i in range(0,120):
+        init_end_t = rospy.Time.now()+rospy.Duration(3.0)
+        while rospy.Time.now()<init_end_t:
 
             rospy.sleep(0.025)
             contact_point_offset = self.getContactPointOnFinger()
@@ -401,14 +403,11 @@ Class for opening door with velma robot.
                 self.pub_pm.publish(pxm)
 
             cz = contact.position.z
-            if (i>20) and (not self.hasContact(50)):
-                print "end: no contact"
-                self.stopArm()
-                return
-
-#            if (offset_y>0.02) or (offset_y<-0.02):
+#            if (i>20) and (not self.hasContact(50)):
+#                print "end: no contact"
 #                self.stopArm()
-#                break
+#                return
+
             init_trajectory_progress += 1.0
         
         print "init motion finished"
@@ -491,7 +490,7 @@ Class for opening door with velma robot.
             m_id += 1
 
             self.moveArm2(pt, 1.0)
-            self.br.sendTransform(self.PoseToTuple(pt)[0], self.PoseToTuple(pt)[1], rospy.Time.now(), 'init_motion_'+format(i), "torso_base")
+#            self.br.sendTransform(self.PoseToTuple(pt)[0], self.PoseToTuple(pt)[1], rospy.Time.now(), 'init_motion_'+format(i), "torso_base")
 
             pose2 = self.getContactPointFrame(contact_point_offset)
             contact2 = pm.toMsg(pose2)
