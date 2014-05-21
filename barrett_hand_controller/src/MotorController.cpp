@@ -65,8 +65,6 @@ void MotorController::setProperty(int id, uint32_t property, int32_t value) {
 	
 	frame.data[0] = 0x80 | property;
 	frame.data[1] = 0;
-	//frame.data[2] = value & 0xff;
-	//frame.data[3] = (value >> 8) & 0xff;
 	
 	for(unsigned int i=2; i<6; i++){
     frame.data[i] = (uint8_t)(value & 0x000000FF);
@@ -96,7 +94,6 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 		jp = (int32_t(0x3F & data[3]) << 16) | ((int32_t)data[4] << 8) | (int32_t)data[5];
 	} else if (ret == 3) {
 		p = (int32_t(0x3F & data[0]) << 16) | ((int32_t)data[1] << 8) | (int32_t)data[2];
-		jp = 0;
 	}
 	
 	if(p > 0x200000)
@@ -121,7 +118,6 @@ void MotorController::recProperty(int id, int32_t &value) {
 	uint8_t data[8];
 	int ret = dev.waitForReply(GROUP(id, 6), data);
 	
-	//*property = msg[0] & 0x7F;
 	value = data[ret-1] & 0x80 ? -1L : 0;
 	for (unsigned int i = ret-1; i >= 2; i--)
 		value = value << 8 | data[i];

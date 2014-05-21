@@ -69,7 +69,7 @@ uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
     if(frame_buf[i].can_id == can_id) {
       memcpy(data, frame_buf[i].data, frame_buf[i].can_dlc);
       frame_buf.erase(frame_buf.begin()+i);
-      return frame_buf[i].can_dlc;//can_id;
+      return frame_buf[i].can_dlc;
     }
   }
   
@@ -87,7 +87,7 @@ uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
 
     if(frame.can_id == can_id) {
      memcpy(data, frame.data, frame.can_dlc);
-      return frame.can_dlc;//can_id;
+      return frame.can_dlc;
     }
     
     frame_buf.push_back(frame);

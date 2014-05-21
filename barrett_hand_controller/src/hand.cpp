@@ -33,11 +33,11 @@
 
 using namespace std;
 
-#define JP2RAD(x) (double)(x) * 1.0/4096.0 * 1.0/50.0 * 2 * M_PI
-#define P2RAD(x) (double)(x) * 1.0/4096.0 * 1.0/(125*2.5) * 2 * M_PI
+#define JP2RAD(x) ((double)(x) * 1.0/4096.0 * 1.0/50.0 * 2 * M_PI)
+#define P2RAD(x) ((double)(x) * 1.0/4096.0 * 1.0/(125*2.5) * 2 * M_PI)
 
-#define RAD2P(x) ((x) * 180.0/3.1416 / 140.0 * 199111.1)
-#define RAD2S(x) (x * 35840.0/M_PI)
+#define RAD2P(x) ((double)(x) * 180.0/3.1416 / 140.0 * 199111.1)
+#define RAD2S(x) ((double)(x) * 35840.0/M_PI)
 
 using namespace RTT;
 
@@ -169,7 +169,6 @@ public:
 	// RTT configure hook
 	bool configureHook()
 	{
-//		cout << "dev_name_: " << dev_name_ << "    prefix_: " << prefix_ << endl;
 		if (ctrl_ == NULL && !dev_name_.empty() && !prefix_.empty())
 		{
 			ctrl_ = new MotorController(dev_name_);
@@ -253,13 +252,13 @@ public:
 		{
 			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
 
-			joint_states_.header.stamp = rtt_rosclock::host_rt_now();//ros::Time::now();
+			joint_states_.header.stamp = rtt_rosclock::host_rt_now();
 
-			joint_states_.position[0] = s * M_PI/ 35840.0;
+			joint_states_.position[0] = (double)s * M_PI/ 35840.0;
 			joint_states_.position[1] = JP2RAD(jp1);
 			joint_states_.position[2] = P2RAD(p1);
 
-			joint_states_.position[3] = s * M_PI/ 35840.0;
+			joint_states_.position[3] = (double)s * M_PI/ 35840.0;
 			joint_states_.position[4] = JP2RAD(jp2);
 			joint_states_.position[5] = P2RAD(p2);
 
@@ -299,7 +298,7 @@ public:
 				RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
 			}
 
-			temp_.header.stamp = rtt_rosclock::host_rt_now();//ros::Time::now();
+			temp_.header.stamp = rtt_rosclock::host_rt_now();
 			temp_.temp[0] = temp[0];
 			temp_.temp[1] = temp[1];
 			temp_.temp[2] = temp[2];
