@@ -57,11 +57,14 @@
             </collision>
         </link>
 
+        <gazebo reference="${prefix}_HandPalmLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
+
         <joint name="${prefix}_HandPalmJoint" type="fixed">
             <parent link="${parent}"/>
             <child link="${prefix}_HandPalmLink"/>
             <insert_block name="origin"/>
-<!--            <origin xyz="0.0 0 0.0" rpy="0 0 0"/>-->
             <provideFeedback value="true"/> 
         </joint>
     </xacro:macro>
@@ -93,6 +96,10 @@
             <kd  value="1.0" />
         </collision>
         </link>
+
+        <gazebo reference="${prefix}_HandFinger${number}KnuckleOneLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
 
         <joint name="${prefix}_HandFinger${number}KnuckleOneJoint" type="revolute">
             <parent link="${prefix}_HandPalmLink"/>
@@ -132,6 +139,10 @@
                 <kd  value="1.0" />
             </collision>
         </link>
+
+        <gazebo reference="${prefix}_HandFinger${number}KnuckleTwoLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
 
         <joint name="${prefix}_HandFinger${number}KnuckleTwoJoint" type="revolute">
             <parent link="${parent}"/>
@@ -173,6 +184,10 @@
           </collision>
             
         </link>
+
+        <gazebo reference="${prefix}_HandFinger${number}KnuckleThreeLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
 
         <joint name="${prefix}_HandFinger${number}KnuckleThreeJoint" type="revolute">
             <parent link="${prefix}_HandFinger${number}KnuckleTwoLink"/>
