@@ -1,6 +1,6 @@
 <launch>
   <arg name="PREFIX" default="right"/>
-  <arg name="DEVICE" default="can0"/>
+  <arg name="DEVICE" default="rtcan2"/>
   <arg name="LOG_LEVEL" default="error"/>
   <arg name="DEBUG" default="false"/>
 

@@ -252,7 +252,7 @@ public:
 		{
 			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
 
-			joint_states_.header.stamp = rtt_rosclock::host_rt_now();
+			joint_states_.header.stamp = rtt_rosclock::host_now();
 
 			joint_states_.position[0] = (double)s * M_PI/ 35840.0;
 			joint_states_.position[1] = JP2RAD(jp1);
@@ -298,7 +298,7 @@ public:
 				RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
 			}
 
-			temp_.header.stamp = rtt_rosclock::host_rt_now();
+			temp_.header.stamp = rtt_rosclock::host_now();
 			temp_.temp[0] = temp[0];
 			temp_.temp[1] = temp[1];
 			temp_.temp[2] = temp[2];
