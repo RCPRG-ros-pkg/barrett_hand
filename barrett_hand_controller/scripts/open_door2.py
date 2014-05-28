@@ -114,6 +114,7 @@ Class for opening door with velma robot.
         self.q_start = (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 180.0/180.0*numpy.pi) 
         self.q_door = (40.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
         self.q_handle = (75.0/180.0*numpy.pi, 75.0/180.0*numpy.pi, 75.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
+        self.q_close = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
         self.P_s = PyKDL.Vector(0.0, -0.1, 0.3)
         self.r_a = 0.25
         self.d_init = 0.1
@@ -129,13 +130,14 @@ Class for opening door with velma robot.
         self.delta_handle = 0.01
         self.T_W_T = PyKDL.Frame(PyKDL.Vector(0.2,-0.05,0))    # tool transformation
 
-        self.action_trajectory_client_active = False
         self.action_trajectory_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_trajectory", CartesianTrajectoryAction)
         self.action_trajectory_client.wait_for_server()
 
-        self.action_tool_client_active = False
         self.action_tool_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/tool_trajectory", CartesianTrajectoryAction)
         self.action_tool_client.wait_for_server()
+
+        self.action_impedance_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
+        self.action_impedance_client.wait_for_server()
 
         self.pub_trajectory = rospy.Publisher("/"+self.prefix+"_arm/trajectory", CartesianTrajectory)
         self.pub_impedance = rospy.Publisher("/"+self.prefix+"_arm/impedance", CartesianImpedanceTrajectory)
@@ -189,7 +191,6 @@ Class for opening door with velma robot.
         action_trajectory_goal.goal_tolerance.position = tolerance.linear
         action_trajectory_goal.goal_tolerance.rotation = tolerance.angular
         self.action_trajectory_client.send_goal(action_trajectory_goal)
-        self.action_trajectory_client_active = True
 
     def moveTool(self, wrist_frame, t):
         wrist_pose = pm.toMsg(wrist_frame)
@@ -201,16 +202,23 @@ Class for opening door with velma robot.
         wrist_pose,
         Twist()))
         self.action_tool_client.send_goal(action_tool_goal)
-        self.action_tool_client_active = True
 
     def moveImpedance(self, k, t):
-        trj_imp = CartesianImpedanceTrajectory()
-        trj_imp.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
-        trj_imp.points.append(CartesianImpedanceTrajectoryPoint(
+        action_impedance_goal = CartesianImpedanceGoal()
+        action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.01)
+        action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
         rospy.Duration(t),
         CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
-        self.pub_impedance.publish(trj_imp)
+
+#        trj_imp = CartesianImpedanceTrajectory()
+#        trj_imp.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
+#        trj_imp.points.append(CartesianImpedanceTrajectoryPoint(
+#        rospy.Duration(t),
+#        CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
+#        self.pub_impedance.publish(trj_imp)
         self.current_k = k
+
+        self.action_impedance_client.send_goal(action_impedance_goal)
 
     def stopArm(self):
         if self.action_trajectory_client.gh:
@@ -489,7 +497,7 @@ Class for opening door with velma robot.
                 print "end: no contact"
                 return
 
-        raw_input("Press Enter to continue...")
+        raw_input("Press Enter to stop pulling the handle...")
 
         self.getTransformations()
         self.moveWrist(self.T_B_W, 4.0, self.getTolerance(50.0, 30.0))
@@ -506,7 +514,6 @@ Class for opening door with velma robot.
         self.moveWrist(T_B_Wd, 3.0, self.getTolerance(50.0, 30.0))
         self.checkEmergencyStop(3.0)
 
-        raw_input("Press Enter to continue...")
         self.moveImpedance(self.k_error, 0.5)
         self.checkEmergencyStop(0.5)
 
