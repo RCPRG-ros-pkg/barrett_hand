@@ -138,17 +138,20 @@ Class for opening door with velma robot.
         self.q_door = (40.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
         self.q_handle = (75.0/180.0*numpy.pi, 75.0/180.0*numpy.pi, 75.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
         self.q_close = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
-        self.P_s = PyKDL.Vector(0.0, -0.1, 0.3)
+        self.P_s = PyKDL.Vector(0.0, -0.12, 0.3)
+        self.P_e1 = PyKDL.Vector(0.30, -0.30, 0.2)
+        self.P_e2 = PyKDL.Vector(0.0, -0.30, 0.15)
+        self.P_e3 = PyKDL.Vector(0.0, -0.25, 0.25)
         self.r_a = 0.25
         self.d_init = 0.1
         self.alpha_open = 100.0/180.0*numpy.pi
-        self.delta = 0.005
-        self.delta_e = 0.04
+        self.delta = 0.02
+        self.delta_e = 0.05
         self.k_door = Wrench(Vector3(600.0, 1000.0, 1000.0), Vector3(300.0, 300.0, 300.0))
         self.k_handle = Wrench(Vector3(500.0, 35.0, 1000.0), Vector3(300.0, 300.0, 300.0))
         self.k_open = Wrench(Vector3(150.0, 35.0, 1000.0), Vector3(300.0, 300.0, 300.0))
         self.k_error = Wrench(Vector3(10.0, 10.0, 10.0), Vector3(2.0, 2.0, 2.0))
-        self.current_k = self.k_door
+        self.k_close = Wrench(Vector3(400.0, 400.0, 400.0), Vector3(100.0, 100.0, 100.0))
         self.delta_door = 0.005
         self.delta_handle = 0.01
         self.T_W_T = PyKDL.Frame(PyKDL.Vector(0.2,-0.05,0))    # tool transformation
@@ -198,9 +201,6 @@ Class for opening door with velma robot.
         rospy.Subscriber('/'+self.prefix+'_hand/BHPressureState', BHPressureState, self.tactileCallback)
         rospy.Subscriber('/'+self.prefix+'_arm/wrench', Wrench, self.wrenchCallback)
 
-    def getTolerance(self, maxForce, maxTorque):
-        return Twist( Vector3(maxForce/self.current_k.force.x, maxForce/self.current_k.force.y, maxForce/self.current_k.force.z), Vector3(maxTorque/self.current_k.torque.x, maxTorque/self.current_k.torque.y, maxTorque/self.current_k.torque.z) )
-
     def moveWrist2(self, wrist_frame, t):
         wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
         self.br.sendTransform(self.PoseToTuple(wrist_pose)[0], self.PoseToTuple(wrist_pose)[1], rospy.Time.now(), "dest", "torso_base")
@@ -217,10 +217,6 @@ Class for opening door with velma robot.
         wrist_pose,
         Twist()))
         action_trajectory_goal.wrench_constraint = max_wrench
-#        action_trajectory_goal.path_tolerance.position = tolerance.linear
-#        action_trajectory_goal.path_tolerance.rotation = tolerance.angular
-#        action_trajectory_goal.goal_tolerance.position = tolerance.linear
-#        action_trajectory_goal.goal_tolerance.rotation = tolerance.angular
         self.action_trajectory_client.send_goal(action_trajectory_goal)
 
     def moveTool(self, wrist_frame, t):
@@ -240,15 +236,6 @@ Class for opening door with velma robot.
         action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
         rospy.Duration(t),
         CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
-
-#        trj_imp = CartesianImpedanceTrajectory()
-#        trj_imp.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
-#        trj_imp.points.append(CartesianImpedanceTrajectoryPoint(
-#        rospy.Duration(t),
-#        CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
-#        self.pub_impedance.publish(trj_imp)
-        self.current_k = k
-
         self.action_impedance_client.send_goal(action_impedance_goal)
 
     def stopArm(self):
@@ -264,41 +251,36 @@ Class for opening door with velma robot.
 
     def checkStopCondition(self, t=0.0):
 
-#        if t < 0.01:
-#            if rospy.is_shutdown():
-#                self.emergencyStop()
-#                exit(0)
-#        else:
-            end_t = rospy.Time.now()+rospy.Duration(t+0.0001)
-            while rospy.Time.now()<end_t:
-                if rospy.is_shutdown():
-                    self.emergencyStop()
-                    print "emergency stop: interrupted  %s  %s"%(self.getMaxWrench(), self.wrench_tab_index)
-                    rospy.sleep(1.0)
-                    exit(0)
-                if (self.action_trajectory_client.gh) and ((self.action_trajectory_client.get_state()==GoalStatus.REJECTED) or (self.action_trajectory_client.get_state()==GoalStatus.ABORTED)):
-                    state = self.action_trajectory_client.get_state()
-                    result = self.action_trajectory_client.get_result()
-                    self.emergencyStop()
-                    print "emergency stop: traj_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
-                    rospy.sleep(1.0)
-                    exit(0)
+        end_t = rospy.Time.now()+rospy.Duration(t+0.0001)
+        while rospy.Time.now()<end_t:
+            if rospy.is_shutdown():
+                self.emergencyStop()
+                print "emergency stop: interrupted  %s  %s"%(self.getMaxWrench(), self.wrench_tab_index)
+                rospy.sleep(1.0)
+                exit(0)
+            if (self.action_trajectory_client.gh) and ((self.action_trajectory_client.get_state()==GoalStatus.REJECTED) or (self.action_trajectory_client.get_state()==GoalStatus.ABORTED)):
+                state = self.action_trajectory_client.get_state()
+                result = self.action_trajectory_client.get_result()
+                self.emergencyStop()
+                print "emergency stop: traj_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
+                rospy.sleep(1.0)
+                exit(0)
 
-                if (self.action_tool_client.gh) and ((self.action_tool_client.get_state()==GoalStatus.REJECTED) or (self.action_tool_client.get_state()==GoalStatus.ABORTED)):
-                    state = self.action_tool_client.get_state()
-                    result = self.action_tool_client.get_result()
-                    self.emergencyStop()
-                    print "emergency stop: tool_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
-                    rospy.sleep(1.0)
-                    exit(0)
-                rospy.sleep(0.01)
+            if (self.action_tool_client.gh) and ((self.action_tool_client.get_state()==GoalStatus.REJECTED) or (self.action_tool_client.get_state()==GoalStatus.ABORTED)):
+                state = self.action_tool_client.get_state()
+                result = self.action_tool_client.get_result()
+                self.emergencyStop()
+                print "emergency stop: tool_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
+                rospy.sleep(1.0)
+                exit(0)
+            rospy.sleep(0.01)
 
 
     def move_hand_client(self, prefix, q):
         rospy.wait_for_service('/' + self.prefix + '_hand/move_hand')
         try:
             move_hand = rospy.ServiceProxy('/' + self.prefix + '_hand/move_hand', BHMoveHand)
-            resp1 = move_hand(q[0], q[1], q[2], q[3], 0.7, 0.7, 0.7, 0.7, 1000, 1000, 1000, 1000)
+            resp1 = move_hand(q[0], q[1], q[2], q[3], 1.2, 1.2, 1.2, 1.2, 2000, 2000, 2000, 2000)
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
@@ -451,7 +433,6 @@ Class for opening door with velma robot.
                 print "distance error"
 
             self.checkStopCondition(0.01)
-#            rospy.sleep(0.01)
 
         print "init motion finished"
 
@@ -482,8 +463,8 @@ Class for opening door with velma robot.
 
         print "alpha_init: %s     alpha: %s     alpha_dest: %s"%(alpha_init/numpy.pi*180.0, alpha/numpy.pi*180.0, alpha_dest/numpy.pi*180.0)
 
-        self.moveImpedance(self.k_open, 3.0)
-        self.checkStopCondition(3.0)
+        self.moveImpedance(self.k_open, 0.5)
+        self.checkStopCondition(0.5)
 
         raw_input("Press Enter to continue...")
 
@@ -493,18 +474,28 @@ Class for opening door with velma robot.
         # 8
         self.sendNextEvent()
         beta = 0
+        new_traj_point_period = 0.2
+        next_traj_update = rospy.Time.now()
         while (alpha < alpha_dest):
-            self.checkStopCondition()
-
-            alpha_door = math.atan2(P_contact.y()-cy, P_contact.x()-cx)
-            alpha += self.delta
-            beta += self.delta_e
-            if beta>alpha_door-alpha_init:
-                beta = alpha_door-alpha_init
-            P_d = PyKDL.Vector(cx, cy, pz) + (r+self.r_a)*PyKDL.Vector(math.cos(alpha), math.sin(alpha), 0)
-            T_B_Cd = PyKDL.Frame(P_d-P_d_init)*T_B_C_d_init*PyKDL.Frame(PyKDL.Rotation.RotZ(-beta))
 
             self.getTransformations()
+
+            if rospy.Time.now()>next_traj_update:
+                alpha_door = math.atan2(P_contact.y()-cy, P_contact.x()-cx)
+                alpha += self.delta
+                beta += self.delta_e
+                if beta>alpha_door-alpha_init:
+                    beta = alpha_door-alpha_init
+                P_d = PyKDL.Vector(cx, cy, pz) + (r+self.r_a)*PyKDL.Vector(math.cos(alpha), math.sin(alpha), 0)
+                T_B_Cd = PyKDL.Frame(P_d-P_d_init)*T_B_C_d_init*PyKDL.Frame(PyKDL.Rotation.RotZ(-beta))                
+
+                T_B_Wd = T_B_Cd*self.T_C_F*self.T_F_E*self.T_E_W
+                self.moveWrist(T_B_Wd, new_traj_point_period, Wrench(Vector3(20,20,15), Vector3(6,4,2)))
+                Wd = T_B_Wd*PyKDL.Vector()
+                self.publishSinglePointMarker(Wd.x(), Wd.y(), Wd.z(), m_id, 0.0, 1.0, 0.0)
+                m_id += 1
+                next_traj_update = rospy.Time.now() + rospy.Duration(new_traj_point_period)
+
             T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
             P_contact = T_B_C*PyKDL.Vector(0,0,0)
             dist = math.sqrt((P_contact_prev.x()-P_contact.x())*(P_contact_prev.x()-P_contact.x()) + (P_contact_prev.y()-P_contact.y())*(P_contact_prev.y()-P_contact.y()))
@@ -515,13 +506,6 @@ Class for opening door with velma robot.
                 self.publishSinglePointMarker(P_contact.x(), P_contact.y(), P_contact.z(), m_id, 1.0, 0.0, 0.0)
                 m_id += 1
                 alpha_contact_last = alpha_door
-
-            T_B_Wd = T_B_Cd*self.T_C_F*self.T_F_E*self.T_E_W
-            self.moveWrist(T_B_Wd, 0.2, Wrench(Vector3(15,20,15), Vector3(5,3,2)))
-
-            Wd = T_B_Wd*PyKDL.Vector()
-            self.publishSinglePointMarker(Wd.x(), Wd.y(), Wd.z(), m_id, 0.0, 1.0, 0.0)
-            m_id += 1
 
             cx, cy, r = self.estCircle(px, py)
 
@@ -535,49 +519,43 @@ Class for opening door with velma robot.
             if r > 0.50:
                 self.emergencyStop()
                 print "too big radius"
-                rospy.sleep(0.5)
+                rospy.sleep(1.0)
                 break
             if r < 0.10 :
                 self.emergencyStop()
                 print "too small radius"
-                rospy.sleep(0.5)
+                rospy.sleep(1.0)
                 break
 
-            self.checkStopCondition(0.1)
-#            rospy.sleep(0.1)
+            self.checkStopCondition(0.05)
 
             print "alpha: %s   beta: %s"%(alpha*180.0/math.pi, beta*180.0/math.pi)
 
             if not self.hasContact(50):
                 self.emergencyStop()
                 print "end: no contact"
-                rospy.sleep(0.5)
+                rospy.sleep(1.0)
                 return
 
         raw_input("Press Enter to stop pulling the handle...")
 
         self.getTransformations()
         print "moving desired pose to current pose"
-        self.moveWrist(self.T_B_W, 4.0, Wrench(Vector3(15,20,15), Vector3(5,3,2)))
-        self.checkStopCondition(4.0)
+        self.moveWrist(self.T_B_W, 2.0, Wrench(Vector3(20,20,15), Vector3(6,4,2)))
+        self.checkStopCondition(2.0)
         self.getTransformations()
 
         print "moving gripper outwards the handle"
         T_W_Wd = PyKDL.Frame(PyKDL.Vector(0,-0.05,0))
         T_B_Wd = self.T_B_W*T_W_Wd
-        self.moveWrist(T_B_Wd, 1.0, Wrench(Vector3(10,15,10), Vector3(4,3,2)))
-        self.checkStopCondition(1.0)
+        self.moveWrist(T_B_Wd, 0.5, Wrench(Vector3(10,15,10), Vector3(4,3,2)))
+        self.checkStopCondition(0.5)
 
         print "rotating gripper outwards the handle"
         T_W_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(-math.pi/4.0))
         T_B_Wd = self.T_B_W*T_W_Wd
-        self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(10,15,10), Vector3(4,3,2)))
-        self.checkStopCondition(3.0)
-
-        print "changing stiffness to very low value"
-        self.moveImpedance(self.k_error, 0.5)
-        self.checkStopCondition(0.5)
-
+        self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(10,15,10), Vector3(4,3,2)))
+        self.checkStopCondition(2.0)
 
     def moveRelToMarker(self, P, t, max_wrench):
         T_M_Ed = PyKDL.Frame(P)*PyKDL.Frame(PyKDL.Rotation.RotY(math.pi))*PyKDL.Frame(PyKDL.Rotation.RotZ(-math.pi/2.0))
@@ -603,10 +581,10 @@ Class for opening door with velma robot.
         # move both tool position and wrist position - the gripper holds its position
         print "moving wrist"
         # we assume that during the initialization there are no contact forces, so we limit the wrench
-        self.moveWrist( T_B_W, 3.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
+        self.moveWrist( T_B_W, 2.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
         print "moving tool"
-        self.moveTool( self.T_W_T, 3.0 )
-        self.checkStopCondition(3.0)
+        self.moveTool( self.T_W_T, 2.0 )
+        self.checkStopCondition(2.0)
 
         # change the stiffness
         print "changing stiffness for door approach"
@@ -641,8 +619,8 @@ Class for opening door with velma robot.
         self.move_hand_client(self.prefix, self.q_door)
         rospy.sleep(0.5)
 
-        self.moveRelToMarker(self.P_s, 6.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
-        self.checkStopCondition(6.0)
+        self.moveRelToMarker(self.P_s, 5.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
+        self.checkStopCondition(5.0)
 
         print "moved to point P_s"
 
@@ -678,17 +656,17 @@ Class for opening door with velma robot.
         # hand configuration change
         print "Going back 8cm"
         d_door -= 0.08
-        self.moveRelToMarker(self.P_s+PyKDL.Vector(0, 0, -d_door), 4.0, Wrench(Vector3(5, 10, 20), Vector3(2, 2, 2)))
-        self.checkStopCondition(4.0)
+        self.moveRelToMarker(self.P_s+PyKDL.Vector(0, 0, -d_door), 2.0, Wrench(Vector3(5, 10, 20), Vector3(2, 2, 2)))
+        self.checkStopCondition(2.0)
 
         self.move_hand_client(self.prefix, self.q_handle)
 
         self.checkStopCondition(1.0)
 
-        print "Going forward 55cm"
-        d_door += 0.055
-        self.moveRelToMarker(self.P_s+PyKDL.Vector(0, 0, -d_door), 3.0, Wrench(Vector3(5, 10, 10), Vector3(1.5, 1.5, 1.5)))
-        self.checkStopCondition(3.0)
+        print "Going forward 6cm"
+        d_door += 0.06
+        self.moveRelToMarker(self.P_s+PyKDL.Vector(0, 0, -d_door), 2.0, Wrench(Vector3(5, 10, 10), Vector3(1.5, 1.5, 1.5)))
+        self.checkStopCondition(2.0)
 
         # approach handle
         d_handle = 0.0
@@ -696,7 +674,7 @@ Class for opening door with velma robot.
         while d_handle<0.4:
             self.checkStopCondition()
             d_handle += self.delta_handle
-            self.moveRelToMarker(self.P_s+PyKDL.Vector(-d_handle, 0, -d_door), 0.25, Wrench(Vector3(5,20,10), Vector3(2,2,2)))
+            self.moveRelToMarker(self.P_s+PyKDL.Vector(-d_handle, 0, -d_door), 0.25, Wrench(Vector3(5,25,10), Vector3(2,2,2)))
             rospy.sleep(0.125)
             if self.hasContact(100):
                 contact_found = True
@@ -735,13 +713,34 @@ Class for opening door with velma robot.
         self.sendNextEvent()
 
         d_handle += self.r_a
-        self.moveRelToMarker(self.P_s+PyKDL.Vector(-d_handle, 0, -d_door), 3.0, Wrench(Vector3(10,20,10), Vector3(2,2,2)))
+        self.moveRelToMarker(self.P_s+PyKDL.Vector(-d_handle, 0, -d_door), 3.0, Wrench(Vector3(10,25,10), Vector3(2,2,2)))
         self.checkStopCondition(3.0)
 
         # 6
         self.sendNextEvent()
 
         self.openTheDoor()
+
+        raw_input("Press Enter to close fingers and prepare for door closing...")
+        self.move_hand_client(self.prefix, self.q_close)
+
+        self.moveImpedance(self.k_close, 1.0)
+
+        self.moveRelToMarker(self.P_e1, 3.0, Wrench(Vector3(10,20,10), Vector3(2,2,2)))
+        self.checkStopCondition(3.0)
+
+        raw_input("Press Enter to continue...")
+
+        self.moveRelToMarker(self.P_e2, 3.0, Wrench(Vector3(10,20,10), Vector3(2,2,2)))
+        self.checkStopCondition(3.0)
+
+        self.moveRelToMarker(self.P_e3, 3.0, Wrench(Vector3(10,20,10), Vector3(2,2,2)))
+        self.checkStopCondition(3.0)
+
+        print "changing stiffness to very low value"
+        self.moveImpedance(self.k_error, 0.5)
+        self.checkStopCondition(1.0)
+
         return
 
 if __name__ == '__main__':
