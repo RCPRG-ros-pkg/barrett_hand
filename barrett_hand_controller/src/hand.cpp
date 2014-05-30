@@ -88,6 +88,9 @@ private:
 	int32_t temp[4], therm[4];
 
 	int resetFingersCounter_;
+
+	int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s, mode1, mode2, mode3, mode4;
+
 public:
 	BarrettHand(const std::string& name):
 		TaskContext(name, PreOperational),
@@ -220,8 +223,6 @@ public:
 	// Temperature is published every 100 ms (10 Hz).
 	void updateHook()
 	{
-		int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s, mode1, mode2, mode3, mode4;
-
 		if (move_hand_cmd_)
 		{
 			move_hand_cmd_ = false;
@@ -250,6 +251,7 @@ public:
 		// on 0, 10, 20, 30, 40, ... step
 		if ( (loop_counter_%10) == 0)
 		{
+			// sometimes jp1 or jp2 or jp3 are not updated and they must be class members, so their prevoius value is taken
 			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
 
 			joint_states_.header.stamp = rtt_rosclock::host_now();
