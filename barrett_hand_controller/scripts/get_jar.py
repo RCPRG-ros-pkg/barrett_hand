@@ -25,6 +25,13 @@ from cartesian_trajectory_msgs.msg import *
 
 from collections import deque
 
+import actionlib
+from actionlib_msgs.msg import *
+
+import PyKDL
+
+import copy
+
 jar_makrer_id=0
 prefix="right"
 
@@ -42,57 +49,63 @@ Class for gripping the jar with velma robot.
     def PoseToPosition(self, p):
         return [p.position.x, p.position.y, p.position.z, 1]
 
-    def moveArm(self, gripper_pose):
+    def moveWrist(self, wrist_frame, t, max_wrench):
+        # we are moving the tool, so: T_B_Wd*T_W_T
+        wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
+        self.br.sendTransform(self.PoseToTuple(wrist_pose)[0], self.PoseToTuple(wrist_pose)[1], rospy.Time.now(), "dest", "torso_base")
 
-#    global prefix
-#    global tf_listener
-#    global hand_arm_transform
-#    global tool
-#    global p
-#    global arm_pub
-
-        gripper = gripper_pose
-
-        real_gripper = self.tf_listener.lookupTransform('torso_base', self.prefix+'_HandPalmLink', rospy.Time(0))
-#    print "real gripper pose: %s"%(real_gripper)
-
-        real_tool = self.tf_listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
-        p = pm.toMsg(pm.fromMsg(gripper) * self.tool)
-        dx = p.position.x-real_tool[0][0]
-        dy = p.position.y-real_tool[0][1]
-        dz = p.position.z-real_tool[0][2]
-        length = math.sqrt(dx*dx + dy*dy + dz*dz)
-        qw = quaternion_multiply(real_tool[1], quaternion_inverse([p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w]))[3]
-        if qw>0.99999:
-            angle = 0
-        elif qw<-0.99999:
-             angle = numpy.pi
-        else:
-            angle = abs(2 * math.acos(qw))
-
-        duration = length*20
-        if angle*2>duration:
-            duration = angle*2
-
-        trj = CartesianTrajectory()
-        
-        trj.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
-        
-        trj.points.append(CartesianTrajectoryPoint(
-        rospy.Duration(duration),
-        p,
+        action_trajectory_goal = CartesianTrajectoryGoal()
+        action_trajectory_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.01)
+        action_trajectory_goal.trajectory.points.append(CartesianTrajectoryPoint(
+        rospy.Duration(t),
+        wrist_pose,
         Twist()))
+        action_trajectory_goal.wrench_constraint = max_wrench
+        self.current_max_wrench = max_wrench
+        self.action_trajectory_client.send_goal(action_trajectory_goal)
 
-        self.arm_pub.publish(trj)
-        print "duration: %s"%(duration)
-        print "pose: %s"%(p)
-        return duration
+    def moveWristTraj(self, wrist_frames, times, max_wrench):
+        # we are moving the tool, so: T_B_Wd*T_W_T
+        action_trajectory_goal = CartesianTrajectoryGoal()
+        action_trajectory_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.01)
 
-    def move_hand_client(self, prefix, f1, f2, f3, spread):
-        rospy.wait_for_service('/' + prefix + '_hand/move_hand')
+        i = 0
+        for wrist_frame in wrist_frames:
+            wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
+            action_trajectory_goal.trajectory.points.append(CartesianTrajectoryPoint(
+            rospy.Duration(times[i]),
+            wrist_pose,
+            Twist()))
+            i += 1
+
+        action_trajectory_goal.wrench_constraint = max_wrench
+        self.current_max_wrench = max_wrench
+        self.action_trajectory_client.send_goal(action_trajectory_goal)
+
+    def moveTool(self, wrist_frame, t):
+        wrist_pose = pm.toMsg(wrist_frame)
+
+        action_tool_goal = CartesianTrajectoryGoal()
+        action_tool_goal.trajectory.header.stamp = rospy.Time.now()
+        action_tool_goal.trajectory.points.append(CartesianTrajectoryPoint(
+        rospy.Duration(t),
+        wrist_pose,
+        Twist()))
+        self.action_tool_client.send_goal(action_tool_goal)
+
+    def moveImpedance(self, k, t):
+        action_impedance_goal = CartesianImpedanceGoal()
+        action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
+        action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
+        rospy.Duration(t),
+        CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
+        self.action_impedance_client.send_goal(action_impedance_goal)
+
+    def move_hand_client(self, prefix, q):
+        rospy.wait_for_service('/' + self.prefix + '_hand/move_hand')
         try:
-            move_hand = rospy.ServiceProxy('/' + prefix + '_hand/move_hand', BHMoveHand)
-            resp1 = move_hand(f1, f2, f3, spread, 0.7, 0.7, 0.7, 0.7, 1000, 1000, 1000, 1000)
+            move_hand = rospy.ServiceProxy('/' + self.prefix + '_hand/move_hand', BHMoveHand)
+            resp1 = move_hand(q[0], q[1], q[2], q[3], 1.2, 1.2, 1.2, 1.2, 2000, 2000, 2000, 2000)
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
@@ -105,6 +118,62 @@ Class for gripping the jar with velma robot.
                 self.jar_marker_pose = self.PoseToTuple(data.markers[i].pose.pose)
                 self.jar_marker_visible = True
 
+    def stopArm(self):
+        if self.action_trajectory_client.gh:
+            self.action_trajectory_client.cancel_goal()
+        if self.action_tool_client.gh:
+            self.action_tool_client.cancel_goal()
+
+    def emergencyStop(self):
+        self.moveImpedance(self.k_error, 0.5)
+        self.stopArm()
+        self.emergency_stop_active = True
+        print "emergency stop"
+
+    def emergencyExit(self):
+        exit(0)
+
+    def checkStopCondition(self, t=0.0):
+
+        end_t = rospy.Time.now()+rospy.Duration(t+0.0001)
+        while rospy.Time.now()<end_t:
+            if rospy.is_shutdown():
+                self.emergencyStop()
+                print "emergency stop: interrupted  %s  %s"%(self.getMaxWrench(), self.wrench_tab_index)
+                self.failure_reason = "user_interrupt"
+                rospy.sleep(1.0)
+                if self.exit_on_emergency_stop:
+                    self.emergencyExit()
+#            if self.wrench_emergency_stop:
+#                self.emergencyStop()
+#                print "too big wrench"
+#                self.failure_reason = "too_big_wrench"
+#                rospy.sleep(1.0)
+#                if self.exit_on_emergency_stop:
+#                    self.emergencyExit()
+
+            if (self.action_trajectory_client.gh) and ((self.action_trajectory_client.get_state()==GoalStatus.REJECTED) or (self.action_trajectory_client.get_state()==GoalStatus.ABORTED)):
+                state = self.action_trajectory_client.get_state()
+                result = self.action_trajectory_client.get_result()
+                self.emergencyStop()
+#                print "emergency stop: traj_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
+                self.failure_reason = "too_big_wrench_trajectory"
+                rospy.sleep(1.0)
+                if self.exit_on_emergency_stop:
+                    self.emergencyExit()
+
+            if (self.action_tool_client.gh) and ((self.action_tool_client.get_state()==GoalStatus.REJECTED) or (self.action_tool_client.get_state()==GoalStatus.ABORTED)):
+                state = self.action_tool_client.get_state()
+                result = self.action_tool_client.get_result()
+                self.emergencyStop()
+#                print "emergency stop: tool_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
+                self.failure_reason = "too_big_wrench_tool"
+                rospy.sleep(1.0)
+                if self.exit_on_emergency_stop:
+                    self.emergencyExit()
+            rospy.sleep(0.01)
+        return self.emergency_stop_active
+
     def checkForExit(self):
         if rospy.is_shutdown():
             exit(0)
@@ -114,27 +183,43 @@ Class for gripping the jar with velma robot.
         self.jar_marker_visible = False
         self.jar_marker_pose = Pose()
 
+        self.q_start = (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 180.0/180.0*numpy.pi) 
+        self.q_end = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 180.0/180.0*numpy.pi) 
+        self.q_pregrip = (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi) 
+        self.q_grip = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 0.0/180.0*numpy.pi) 
+        self.k_error = Wrench(Vector3(10.0, 10.0, 10.0), Vector3(2.0, 2.0, 2.0))
+        self.k_jar = Wrench(Vector3(400.0, 400.0, 400.0), Vector3(200.0, 200.0, 200.0))
+
+        self.T_W_T = PyKDL.Frame(PyKDL.Vector(0.0, 0.0, 0.0))    # zero tool transformation
+
+        self.exit_on_emergency_stop = True
+        self.emergency_stop_active = False
+
         print "Subscribing to tf"
-        self.tf_listener = tf.TransformListener();
+        self.listener = tf.TransformListener();
         self.br = tf.TransformBroadcaster()
         print "Subscribing to /ar_pose_marker"
         rospy.Subscriber('/ar_pose_marker', AlvarMarkers, self.alvarMarkerCallback)
-        self.arm_pub = rospy.Publisher("/"+self.prefix+"_arm/trajectory", CartesianTrajectory)
-#        self.pub_impedance = rospy.Publisher("/"+self.prefix+"_arm/impedance", CartesianImpedanceTrajectory)
-        self.pub_impedance = rospy.Publisher("/right_arm/impedance", CartesianImpedanceTrajectory)
+
+        self.action_trajectory_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_trajectory", CartesianTrajectoryAction)
+        self.action_trajectory_client.wait_for_server()
+
+        self.action_tool_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/tool_trajectory", CartesianTrajectoryAction)
+        self.action_tool_client.wait_for_server()
+
+        self.action_impedance_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
+        self.action_impedance_client.wait_for_server()
+
+    def getTransformations(self):
+        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
+        self.T_B_W = pm.fromTf(pose)
+
+#        pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', rospy.Time(0))
+#        self.T_E_F = pm.fromTf(pose)
+#        self.T_F_E = self.T_E_F.Inverse()
 
     def spin(self):
         rospy.sleep(1.0)
-
-#        print "setting impedance..."
-#        # set impedence parameters
-#        trj_imp = CartesianImpedanceTrajectory()
-#        trj_imp.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
-#        trj_imp.points.append(CartesianImpedanceTrajectoryPoint(
-#        rospy.Duration(3.0),
-#        CartesianImpedance(Wrench(Vector3(1000.0, 1000.0, 1000.0), Vector3(300.0, 300.0, 300.0)),Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
-#        self.pub_impedance.publish(trj_imp)
-#        rospy.sleep(3.0)
 
         rate = 10.0
         period = 1.0/rate
@@ -144,117 +229,123 @@ Class for gripping the jar with velma robot.
                 break        
             r.sleep()
 
-        self.tf_listener.waitForTransform('torso_base', prefix+'_HandPalmLink', rospy.Time.now(), rospy.Duration(4.0))
-        real_gripper = self.tf_listener.lookupTransform('torso_base', prefix+'_HandPalmLink', rospy.Time(0))
-
-        real_gripper_mx = quaternion_matrix(real_gripper[1])
-        real_gripper_mx[:3, 3] = real_gripper[0][:3]
-        print "real gripper matrix:"
-        print real_gripper_mx
-
         print "Found jar marker"
 
-        self.tf_listener.waitForTransform('torso_base', prefix+'_arm_7_link', rospy.Time.now(), rospy.Duration(4.0))
-        tool_msg = self.tf_listener.lookupTransform(prefix+'_HandPalmLink', prefix+'_arm_7_link', rospy.Time(0))
-        self.tool = pm.fromTf(tool_msg)
+        # get door marker absolute position
+        self.listener.waitForTransform('torso_base', 'ar_marker_0', rospy.Time.now(), rospy.Duration(4.0))
+        door_marker = self.listener.lookupTransform('torso_base', 'ar_marker_0', rospy.Time(0))
 
-        self.checkForExit()
+        print door_marker
+        self.T_B_M = pm.fromTf(door_marker)
 
-        self.tf_listener.waitForTransform('torso_base', 'ar_marker_0', rospy.Time.now(), rospy.Duration(4.0))
-        jar_marker = self.tf_listener.lookupTransform('torso_base', 'ar_marker_0', rospy.Time(0))
-        jar_marker_mx = quaternion_matrix(jar_marker[1])
-        jar_marker_mx[:3, 3] = jar_marker[0][:3]
+        self.listener.waitForTransform(self.prefix+'_arm_7_link', self.prefix+'_HandPalmLink', rospy.Time.now(), rospy.Duration(4.0))
+        pose = self.listener.lookupTransform(self.prefix+'_arm_7_link', self.prefix+'_HandPalmLink', rospy.Time(0))
+        self.T_W_E = pm.fromTf(pose)
+        self.T_E_W = self.T_W_E.Inverse()
 
-        self.tf_listener.waitForTransform('torso_base', 'torso_link0', rospy.Time.now(), rospy.Duration(4.0))
-        torso_link0 = self.tf_listener.lookupTransform('torso_base', 'torso_link0', rospy.Time(0))
-        torso_link0_mx = quaternion_matrix(torso_link0[1])
-        torso_link0_mx[:3, 3] = torso_link0[0][:3]
+        # start with very low stiffness
+        print "setting stiffness to very low value"
+        self.moveImpedance(self.k_error, 0.5)
+        self.checkStopCondition(0.5)
 
-        # P is the point on jar's axis where the center of grip is
-        P = jar_marker[0] - 0.05*jar_marker_mx[:3,2]
-        # x axis of the gripper is equal to inverted z axis of jar's marker
-        # z axis of the gripper is equal to y axis of torso_link0 (for right hand or inverse for left hand)
-        if prefix == "right":
-            grip_x = -jar_marker_mx[:3,2]
-            grip_z = torso_link0_mx[:3,1]
+        raw_input("Press Enter to continue...")
+        self.checkStopCondition()
+
+        self.getTransformations()
+
+        print "setting the tool to %s relative to wrist frame"%(self.T_W_T)
+        # move both tool position and wrist position - the gripper holds its position
+        print "moving wrist"
+        # we assume that during the initialization there are no contact forces, so we limit the wrench
+        self.moveWrist( self.T_B_W, 2.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
+        print "moving tool"
+        self.moveTool( self.T_W_T, 2.0 )
+        self.checkStopCondition(2.0)
+
+        # change the stiffness
+        print "changing stiffness for door approach"
+        self.moveImpedance(self.k_jar, 2.0)
+        self.checkStopCondition(2.0)
+
+
+        # straighten fingers
+        self.move_hand_client(self.prefix, self.q_start)
+
+        rospy.sleep(2.0)
+
+        if self.prefix == "right":
+            self.T_B_W.M = PyKDL.Rotation.RotZ(math.pi/4.0)
         else:
-            grip_x = jar_marker_mx[:3,2]
-            grip_z = -torso_link0_mx[:3,1]
+            self.T_B_W.M = PyKDL.Rotation.RotZ(-math.pi/4.0)
+        self.moveWrist( self.T_B_W, 3.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(3.0)
 
-        # y axis of the gripper is the cross product of z and x axis
-        grip_y = numpy.cross(grip_z, grip_x)
+        self.getTransformations()
 
-        # point G is gripper position
-        G1 = P-grip_z*0.34
-        G2 = P-grip_z*0.14
+        T_W_B = self.T_B_W.Inverse()
+        T_E_M = self.T_E_W * T_W_B * self.T_B_M
+        T_E_M.p = PyKDL.Vector(0.10, 0.0, 0.30)
+        T_M_E = T_E_M.Inverse()
+        
+        print "moving close to jar"
+        T_B_Wd = self.T_B_M * T_M_E * self.T_E_W
+        T_B_Wd_table_pre = copy.deepcopy(T_B_Wd)
+        self.moveWrist( T_B_Wd, 3.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(3.0)
 
-        gripper_mx = identity_matrix()
-        gripper_mx[:3,0] = grip_x
-        gripper_mx[:3,1] = grip_y
-        gripper_mx[:3,2] = grip_z
+        self.move_hand_client(self.prefix, self.q_pregrip)
+        self.checkStopCondition(2.0)
 
-        self.checkForExit()
+        self.getTransformations()
 
-        # move to pregrasp position
-#        br.sendTransform(translation_from_matrix(jar_marker_mx), quaternion_from_matrix(jar_marker_mx), rospy.Time.now(), "jar", "torso_base")
-        duration = self.moveArm(self.tupleToPose([G1,quaternion_from_matrix(gripper_mx)])) + 1
-        self.br.sendTransform(G1, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar1", "torso_base")
-        self.br.sendTransform(G2, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar2", "torso_base")
-        rospy.sleep(duration)
+        T_W_B = self.T_B_W.Inverse()
+        T_E_M = self.T_E_W * T_W_B * self.T_B_M
+        T_E_M.p = PyKDL.Vector(-0.11, 0.0, 0.12)
+        T_M_E = T_E_M.Inverse()
+        
+        print "moving closer to jar"
+        T_B_Wd = self.T_B_M * T_M_E * self.T_E_W
+        T_B_Wd_table = copy.deepcopy(T_B_Wd)
+        self.moveWrist( T_B_Wd, 3.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(3.0)
 
-        raw_input("Press Enter to continue...")
-
-        self.move_hand_client(prefix, 30.0/180.0*numpy.pi, 30.0/180.0*numpy.pi, 30.0/180.0*numpy.pi, 0)
-        rospy.sleep(3.0)
-
-        raw_input("Press Enter to continue...")
-
-        # move to grasping position
-        time = 0.0
-        duration = self.moveArm(self.tupleToPose([G2,quaternion_from_matrix(gripper_mx)])) + 1
-        self.br.sendTransform(G1, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar1", "torso_base")
-        self.br.sendTransform(G2, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar2", "torso_base")
-        rospy.sleep(duration)
-
-        self.checkForExit()
+        self.move_hand_client(self.prefix, self.q_grip)
+        self.checkStopCondition(3.0)
 
         raw_input("Press Enter to continue...")
 
-        # perform grip
-        self.move_hand_client(prefix, 90.0/180.0*numpy.pi, 90.0/180.0*numpy.pi, 90.0/180.0*numpy.pi, 0)
-
-        # wait some time
-#        self.br.sendTransform(G1, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar1", "torso_base")
-#        self.br.sendTransform(G2, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar2", "torso_base")
-#        rospy.sleep(6.0)
-        raw_input("Press Enter to continue...")
-
-        self.checkForExit()
-
-        # release hand
-        self.move_hand_client(prefix, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0)
-
-        # return to pregrasp position
-        duration = self.moveArm(self.tupleToPose([G1,quaternion_from_matrix(gripper_mx)])) + 1
-        self.br.sendTransform(G1, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar1", "torso_base")
-        self.br.sendTransform(G2, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar2", "torso_base")
-        rospy.sleep(duration)
-
-        self.checkForExit()
+        print "moving somewhere..."
+        T_B_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(0.0), PyKDL.Vector(0.5, -0.3, 1.1))
+        self.moveWrist( T_B_Wd, 4.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(4.0)
 
         raw_input("Press Enter to continue...")
 
-        # release hand
-        self.move_hand_client(prefix, 130.0/180.0*numpy.pi, 130.0/180.0*numpy.pi, 130.0/180.0*numpy.pi, 0)
-        rospy.sleep(3.0)
+        self.moveWrist( T_B_Wd_table, 4.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(4.0)
 
         raw_input("Press Enter to continue...")
 
-        # return to starting position
-        duration = self.moveArm(self.tupleToPose([translation_from_matrix(real_gripper_mx),quaternion_from_matrix(real_gripper_mx)])) + 1
-        self.br.sendTransform(G1, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar1", "torso_base")
-        self.br.sendTransform(G2, quaternion_from_matrix(gripper_mx), rospy.Time.now(), "jar2", "torso_base")
-        rospy.sleep(duration)
+        self.move_hand_client(self.prefix, self.q_pregrip)
+        self.checkStopCondition(2.0)
+
+        raw_input("Press Enter to continue...")
+
+        self.moveWrist( T_B_Wd_table_pre, 4.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(4.0)
+
+        raw_input("Press Enter to continue...")
+
+        self.move_hand_client(self.prefix, self.q_start)
+        self.checkStopCondition(2.0)
+
+        print "moving somewhere..."
+        T_B_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(0.0), PyKDL.Vector(0.5, -0.3, 1.1))
+        self.moveWrist( T_B_Wd, 4.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        self.checkStopCondition(2.0)
+
+        self.move_hand_client(self.prefix, self.q_end)
+        self.checkStopCondition(2.0)
 
 if __name__ == "__main__":
     a = []
