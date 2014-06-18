@@ -144,19 +144,11 @@ Class for gripping the jar with velma robot.
                 rospy.sleep(1.0)
                 if self.exit_on_emergency_stop:
                     self.emergencyExit()
-#            if self.wrench_emergency_stop:
-#                self.emergencyStop()
-#                print "too big wrench"
-#                self.failure_reason = "too_big_wrench"
-#                rospy.sleep(1.0)
-#                if self.exit_on_emergency_stop:
-#                    self.emergencyExit()
 
             if (self.action_trajectory_client.gh) and ((self.action_trajectory_client.get_state()==GoalStatus.REJECTED) or (self.action_trajectory_client.get_state()==GoalStatus.ABORTED)):
                 state = self.action_trajectory_client.get_state()
                 result = self.action_trajectory_client.get_result()
                 self.emergencyStop()
-#                print "emergency stop: traj_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
                 self.failure_reason = "too_big_wrench_trajectory"
                 rospy.sleep(1.0)
                 if self.exit_on_emergency_stop:
@@ -166,7 +158,6 @@ Class for gripping the jar with velma robot.
                 state = self.action_tool_client.get_state()
                 result = self.action_tool_client.get_result()
                 self.emergencyStop()
-#                print "emergency stop: tool_err: %s ; %s ; max_wrench: %s   %s"%(state, result, self.getMaxWrench(), self.wrench_tab_index)
                 self.failure_reason = "too_big_wrench_tool"
                 rospy.sleep(1.0)
                 if self.exit_on_emergency_stop:
@@ -214,9 +205,8 @@ Class for gripping the jar with velma robot.
         pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
         self.T_B_W = pm.fromTf(pose)
 
-#        pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', rospy.Time(0))
-#        self.T_E_F = pm.fromTf(pose)
-#        self.T_F_E = self.T_E_F.Inverse()
+        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_1_link', rospy.Time(0))
+        self.T_B_A = pm.fromTf(pose)
 
     def spin(self):
         rospy.sleep(1.0)
@@ -315,7 +305,7 @@ Class for gripping the jar with velma robot.
         raw_input("Press Enter to continue...")
 
         print "moving somewhere..."
-        T_B_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(0.0), PyKDL.Vector(0.5, -0.3, 1.1))
+        T_B_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(math.pi/2.0), PyKDL.Vector(0.50, -0.10, 1.20))
         self.moveWrist( T_B_Wd, 4.0, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
         self.checkStopCondition(4.0)
 
@@ -346,6 +336,68 @@ Class for gripping the jar with velma robot.
 
         self.move_hand_client(self.prefix, self.q_end)
         self.checkStopCondition(2.0)
+
+    def throwUp(self):
+        # the following code rotates only the first axis, so very high speeds are reached at wrist
+        # USE THIS CODE VERY CAREFULLY
+
+        # start with very low stiffness
+        print "setting stiffness to very low value"
+        self.moveImpedance(self.k_error, 0.5)
+        self.checkStopCondition(0.5)
+
+        raw_input("Press Enter to continue...")
+        self.checkStopCondition()
+
+        self.getTransformations()
+
+        print "setting the tool to %s relative to wrist frame"%(self.T_W_T)
+        # move both tool position and wrist position - the gripper holds its position
+        print "moving wrist"
+        # we assume that during the initialization there are no contact forces, so we limit the wrench
+        self.moveWrist( self.T_B_W, 2.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
+        print "moving tool"
+        self.moveTool( self.T_W_T, 2.0 )
+        self.checkStopCondition(2.0)
+
+        # change the stiffness
+        print "changing stiffness for door approach"
+        self.moveImpedance(self.k_jar, 2.0)
+        self.checkStopCondition(2.0)
+
+
+        self.getTransformations()
+        T_A_B = self.T_B_A.Inverse()
+        T_A_W = T_A_B * self.T_B_W
+
+        traj = []
+        times = []
+        omega = 10.0
+        time = 0.0
+        delta_t = 0.01
+        angle = 0.0
+        angle_limit_min = -30
+        angle_limit_max = 30
+        while (angle>angle_limit_min) and (angle<angle_limit_max):
+            T_A_Wd = PyKDL.Frame( PyKDL.Rotation.RotZ(math.pi/180.0 * (angle)) ) * T_A_W
+            T_B_Wd = self.T_B_A * T_A_Wd
+            print time
+            print angle
+            print T_B_Wd
+            traj.append(T_B_Wd)
+            times.append(time)
+            angle += omega*delta_t
+            time += delta_t
+
+        raw_input("Press Enter to throw... BE CAREFUL!")
+
+        self.moveWristTraj( traj, times, Wrench(Vector3(15, 15, 15), Vector3(4, 4, 4)) )
+        rospy.sleep(time*0.8)
+        self.move_hand_client(self.prefix, self.q_pregrip)
+        rospy.sleep(time*0.2)
+
+        return
+
 
 if __name__ == "__main__":
     a = []

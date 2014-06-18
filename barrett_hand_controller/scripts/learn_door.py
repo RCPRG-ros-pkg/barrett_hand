@@ -911,7 +911,9 @@ Class for opening door with velma robot.
 
         rospy.sleep(2.0)
 
-        door_marker = ((0.8666992082584777, -0.174810766112004, 1.310426812445025), (-0.4667586404443633, 0.5244352551999468, 0.5420385102088775, -0.46184227624204893))
+        # uncomment the following line to get marker pose from vision
+#        door_marker = None
+        door_marker = ((0.8706762604472923, -0.17540538568541159, 1.2997999734039194), (-0.46361347288013666, 0.5215836270730932, 0.5478510309867619, -0.4613808790793538))
 
         if door_marker == None:
             if self.door_marker_visible:
@@ -928,6 +930,7 @@ Class for opening door with velma robot.
             self.listener.waitForTransform('torso_base', 'ar_marker_3', rospy.Time.now(), rospy.Duration(4.0))
             door_marker = self.listener.lookupTransform('torso_base', 'ar_marker_3', rospy.Time(0))
 
+        print "door marker:"
         print door_marker
         self.T_B_M = pm.fromTf(door_marker)
 
@@ -1058,6 +1061,8 @@ Class for opening door with velma robot.
         forces = [4.0, 6.0, 8.0, 10.0] #, 12.0]
         k_x = [200.0, 350.0, 500.0]
         k_y = [20.0, 60.0, 100.0]
+        k_y = [10.0]
+# forces: 2.0
 
 
         with open("experiments.txt", "a") as exfile:

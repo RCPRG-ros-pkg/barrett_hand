@@ -33,10 +33,13 @@ roslib.load_manifest('velma_controller')
 
 import rospy
 
-from geometry_msgs.msg import Vector3, Wrench
-from cartesian_trajectory_msgs.msg import CartesianImpedance, CartesianImpedanceGoal, CartesianImpedanceAction, CartesianImpedanceTrajectoryPoint
+from geometry_msgs.msg import *
+from cartesian_trajectory_msgs.msg import *
 import actionlib
 from actionlib_msgs.msg import *
+import tf
+import tf_conversions.posemath as pm
+import PyKDL
 
 def moveImpedance(k, t):
     global action_impedance_client
@@ -46,6 +49,32 @@ def moveImpedance(k, t):
     rospy.Duration(t),
     CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
     action_impedance_client.send_goal(action_impedance_goal)
+
+def moveWrist( wrist_frame, tool_frame, t, max_wrench):
+    global action_trajectory_client
+    # we are moving the tool, so: T_B_Wd*T_W_T
+    wrist_pose = pm.toMsg(wrist_frame*tool_frame)
+
+    action_trajectory_goal = CartesianTrajectoryGoal()
+    action_trajectory_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.01)
+    action_trajectory_goal.trajectory.points.append(CartesianTrajectoryPoint(
+    rospy.Duration(t),
+    wrist_pose,
+    Twist()))
+    action_trajectory_goal.wrench_constraint = max_wrench
+    action_trajectory_client.send_goal(action_trajectory_goal)
+
+def moveTool(tool_frame, t):
+    global action_tool_client
+    tool_pose = pm.toMsg(tool_frame)
+    action_tool_goal = CartesianTrajectoryGoal()
+    action_tool_goal.trajectory.header.stamp = rospy.Time.now()
+    action_tool_goal.trajectory.points.append(CartesianTrajectoryPoint(
+    rospy.Duration(t),
+    tool_pose,
+    Twist()))
+    action_tool_client.send_goal(action_tool_goal)
+
 
 if __name__ == '__main__':
 
@@ -59,12 +88,39 @@ if __name__ == '__main__':
         print "Usage: %s prefix"%a[0]
         exit(0)
 
-    rospy.init_node('impedance_lowerer')
+    rospy.init_node('impedance_riser')
+
+    listener = tf.TransformListener();
 
     action_impedance_client = actionlib.SimpleActionClient("/" + prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
     action_impedance_client.wait_for_server()
 
-    moveImpedance(Wrench(Vector3(10.0, 10.0, 10.0), Vector3(1.0, 1.0, 1.0)), 1.0)
-    rospy.sleep(1.1)
+    action_trajectory_client = actionlib.SimpleActionClient("/" + prefix + "_arm/cartesian_trajectory", CartesianTrajectoryAction)
+    action_trajectory_client.wait_for_server()
+
+    action_tool_client = actionlib.SimpleActionClient("/" + prefix + "_arm/tool_trajectory", CartesianTrajectoryAction)
+    action_tool_client.wait_for_server()
+
+    rospy.sleep(1.0)
+
+    # save current wrist position
+    listener.waitForTransform('torso_base', prefix+'_arm_7_link', rospy.Time.now(), rospy.Duration(4.0))
+    pose = listener.lookupTransform('torso_base', prefix+'_arm_7_link', rospy.Time(0))
+    T_B_W = pm.fromTf(pose)
+
+    T_W_T = PyKDL.Frame()    # tool transformation
+    print "setting the tool to %s relative to wrist frame"%(T_W_T)
+    # move both tool position and wrist position - the gripper holds its position
+    print "moving wrist"
+    # we assume that during the initialization there are no contact forces, so we limit the wrench
+    moveWrist( T_B_W, T_W_T, 2.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
+    print "moving tool"
+    moveTool( T_W_T, 2.0 )
+    rospy.sleep(2.0)
+
+    # change the stiffness
+    print "changing stiffness for door approach"
+    moveImpedance(Wrench(Vector3(800.0, 800.0, 800.0), Vector3(300.0, 300.0, 300.0)), 4.0)
+    rospy.sleep(4.0)
 
 
