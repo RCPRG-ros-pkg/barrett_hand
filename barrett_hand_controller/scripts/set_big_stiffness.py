@@ -113,7 +113,7 @@ if __name__ == '__main__':
     # move both tool position and wrist position - the gripper holds its position
     print "moving wrist"
     # we assume that during the initialization there are no contact forces, so we limit the wrench
-    moveWrist( T_B_W, T_W_T, 2.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
+    moveWrist( T_B_W, T_W_T, 2.0, Wrench(Vector3(20, 20, 20), Vector3(4, 4, 4)) )
     print "moving tool"
     moveTool( T_W_T, 2.0 )
     rospy.sleep(2.0)

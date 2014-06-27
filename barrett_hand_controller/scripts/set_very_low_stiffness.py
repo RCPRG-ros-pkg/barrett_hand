@@ -41,7 +41,7 @@ from actionlib_msgs.msg import *
 def moveImpedance(k, t):
     global action_impedance_client
     action_impedance_goal = CartesianImpedanceGoal()
-    action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.1)
+    action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
     action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
     rospy.Duration(t),
     CartesianImpedance(k,Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7)))))
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     action_impedance_client = actionlib.SimpleActionClient("/" + prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
     action_impedance_client.wait_for_server()
 
-    moveImpedance(Wrench(Vector3(10.0, 10.0, 10.0), Vector3(1.0, 1.0, 1.0)), 1.0)
+    moveImpedance(Wrench(Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0)), 1.0)
     rospy.sleep(1.1)
 
 
