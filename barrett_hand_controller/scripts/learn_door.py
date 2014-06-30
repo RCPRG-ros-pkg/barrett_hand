@@ -571,7 +571,7 @@ Class for opening door with velma robot.
         T_B_Wd = T_B_Ed * self.T_E_W
         return T_B_Wd
 
-    def openTheDoor(self):
+    def openTheDoor(self, R_B_E):
         self.px = []
         self.py = []
         self.m_id = 0
@@ -591,7 +591,7 @@ Class for opening door with velma robot.
         #
         pt = self.pressure_info.sensor[2].center[10]
         T_F_pt = PyKDL.Frame(PyKDL.Vector(pt.x, pt.y, pt.z))
-        T_E_pt = self.T_E_F * T_F_pt
+        E_pt = self.T_E_F * T_F_pt * PyKDL.Vector(0,0,0)
 
         #
         # initial motion setup
@@ -605,12 +605,12 @@ Class for opening door with velma robot.
         P_contact = T_B_C*PyKDL.Vector(0,0,0)
         self.addContact(P_contact)
         pz = P_contact.z()
-        T_B_Wd_init = self.T_B_W*self.T_W_E*T_E_Ed*self.T_E_W
+        T_B_Wd_init = self.T_B_W * self.T_W_E * T_E_Ed * self.T_E_W
 
         #
         # initial motion begins
         #
-        self.moveWrist(T_B_Wd_init, self.init_motion_time, Wrench(Vector3(10,20,25), Vector3(4,2,2)))
+        self.moveWrist(T_B_Wd_init, self.init_motion_time, Wrench(Vector3(10,25,25), Vector3(4,3,2)))
 
         lost_contact = False
         init_end_t = rospy.Time.now()+rospy.Duration(self.init_motion_time)
@@ -691,6 +691,8 @@ Class for opening door with velma robot.
         alpha_init = math.atan2( self.py[0] - cy, self.px[0] - cx )
         # calculate destination angle
 
+        self.checkStopCondition(0.5)
+
         # get current contact point
         self.getTransformations()
         T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
@@ -715,8 +717,9 @@ Class for opening door with velma robot.
         traj = []
         times = []
 
-        T_C_B = T_B_C.Inverse()
-        T_C_C_d_init = T_C_B * T_B_Wd_init * self.T_W_E * self.T_E_F * self.T_F_C
+        dest_pt = T_B_Wd_init * self.T_W_E * E_pt
+        E_pt_in_B = self.T_B_W * self.T_W_E * E_pt
+        r_v = dest_pt - E_pt_in_B
 
         print "beta_dest: %s"%(beta_dest)
 
@@ -726,23 +729,30 @@ Class for opening door with velma robot.
                 beta = beta_dest
                 stop = True
             time += delta_t
-            T_C_Cd = PyKDL.Frame(PyKDL.Rotation.RotZ(-beta)) * T_C_C_d_init
-            T_B_Wd = T_B_C * T_C_Cd * self.T_C_F * self.T_F_E * self.T_E_W
+            
+            dest_pt_d = PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * r_v + E_pt_in_B
+            R_B_Ed = copy.deepcopy((PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * self.T_B_W * self.T_W_E).M)
 
-            # for radius verification
-            T_B_Cd = T_B_Wd * self.T_W_E * self.T_E_F * self.T_F_C
-            P_d = T_B_Cd * PyKDL.Vector(0,0,0)
-            r_c = math.sqrt( (P_d.x()-cx)*(P_d.x()-cx) + (P_d.y()-cy)*(P_d.y()-cy) )
-#            print "r_c: %s   r: %s   r_a: %s"%(r_c, r, r_c-r)
+            self.publishSinglePointMarker(dest_pt_d.x(), dest_pt_d.y(), dest_pt_d.z(), self.m_id, r=0.0, g=1.0, b=0.0)
+            self.m_id += 1
+
+            T_B_Wd = self.calculateMoveGripperPointToPose(E_pt, R_B_Ed, dest_pt_d)
 
             traj.append(T_B_Wd)
             times.append(time)
-            self.moveWrist2(T_B_Wd)
-            self.checkStopCondition(0.05)
+#            self.moveWrist2(T_B_Wd)
+#            self.checkStopCondition(0.05)
             beta += omega*delta_t
 
+        raw_input("Press Enter to continue...")
+        self.checkStopCondition(0.05)
+        if self.emergency_stop_active:
+            self.failure_reason = "emergency_stop"
+            print "end: emergency stop"
+            return 0
+
         # rotate the gripper with spring
-        self.moveWristTraj( traj, times, Wrench(Vector3(10,20,25), Vector3(4,2,2)) )
+        self.moveWristTraj( traj, times, Wrench(Vector3(10,25,25), Vector3(4,3,2)) )
         end_t = rospy.Time.now()+rospy.Duration(time)
         while rospy.Time.now()<end_t:
             self.getTransformations()
@@ -797,9 +807,9 @@ Class for opening door with velma robot.
 
         ref_T_B_E = self.T_B_W * self.T_W_E
 
-        ref_dest_pt = traj[-1] * self.T_W_E * self.T_E_F * ref_T_F_C * PyKDL.Vector(0,0,0)
-        dest_pt = copy.deepcopy(ref_dest_pt)
-        ref_alpha_contact = math.atan2(ref_dest_pt.y()-cy, ref_dest_pt.x()-cx)
+        #ref_dest_pt = traj[-1] * self.T_W_E * self.T_E_F * ref_T_F_C * PyKDL.Vector(0,0,0)
+        dest_pt = copy.deepcopy(dest_pt_d)#ref_dest_pt)
+        ref_alpha_contact = math.atan2(dest_pt.y()-cy, dest_pt.x()-cx)
         alpha_contact = copy.copy(ref_alpha_contact)
         dest_alpha_door = copy.copy(beta)
         while alpha_door-alpha_init < self.door_angle_dest:
@@ -826,12 +836,12 @@ Class for opening door with velma robot.
             beta += 0.01
             if beta > alpha_door-ref_alpha_door:
                 beta = alpha_door-ref_alpha_door
-            T_B_Wd = self.calculateMoveGripperPointToPose(T_E_pt*PyKDL.Vector(0,0,0), (PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * ref_T_B_E ).M, dest_pt)
+            T_B_Wd = self.calculateMoveGripperPointToPose(E_pt, (PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * ref_T_B_E ).M, dest_pt)
             self.moveWrist2(T_B_Wd)
 #            raw_input("Press Enter to continue...")
 #            self.checkStopCondition(0.5)
 
-            self.moveWrist(T_B_Wd, 0.1, Wrench(Vector3(10,20,25), Vector3(4,2,2)))
+            self.moveWrist(T_B_Wd, 0.1, Wrench(Vector3(10,25,25), Vector3(4,3,2)))
             end_t = rospy.Time.now()+rospy.Duration(0.1)
             while rospy.Time.now()<end_t:
                 self.getTransformations()
@@ -855,119 +865,6 @@ Class for opening door with velma robot.
                     self.failure_reason = "lost_contact"
                     print "end: lost contact"
                     rospy.sleep(1.0)
-                    return score
-
-            cx, cy, r = self.estCircle(self.px, self.py)
-            r_old = r
-            if r > 0.45 :
-                self.failure_reason = "estimation_error_2"
-                print "estimation error: too big radius"
-                return score
-            if r < 0.075 :
-                self.failure_reason = "estimation_error_3"
-                print "estimation error: too small radius"
-                return score
-
-            # for score function
-            self.init_motion_time_left = 0.0
-            self.circle_cx = cx
-            self.circle_cy = cy
-            self.circle_r = r
-
-            self.publishDoorMarker(cx, cy, pz, r)
-            circle = QuaternionStamped()
-            circle.header.frame_id = 'torso_base'
-            circle.header.stamp = rospy.Time.now()
-            circle.quaternion = Quaternion(cx, cy, pz, r)
-            self.pub_circle.publish(circle)
-            print "circle: x: %s   y: %s    r: %s"%(cx,cy,r)
-
-        return score
-
-        # get current contact point
-        self.getTransformations()
-        T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
-        P_contact = T_B_C*PyKDL.Vector(0,0,0)
-        # calculate current door angle
-        alpha_door_C = math.atan2(P_contact.y()-cy, P_contact.x()-cx)
-
-        while alpha_door-alpha_init < self.door_angle_dest:
-
-            # get current contact point
-            self.getTransformations()
-            T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
-            P_contact = T_B_C*PyKDL.Vector(0,0,0)
-            # calculate current door angle
-            alpha_door = math.atan2(P_contact.y()-cy, P_contact.x()-cx)
-
-            T_C_B = T_B_C.Inverse()
-            T_B_C_d_prev = T_B_Wd * self.T_W_E * self.T_E_F * self.T_F_C
-            # rotate contact point spring end in frame of door hinge
-            T_B_H = PyKDL.Frame( PyKDL.Vector(cx,cy,0) )
-            T_H_B = T_B_H.Inverse()
-
-            T_H_C_d_prev = T_H_B * T_B_C_d_prev
-
-            stop = False
-            gamma_dest = 10.0/180.0*math.pi
-            gamma = 0.0
-            time = 0.0
-            delta_t = 0.05
-            omega = 0.1
-            traj = []
-            times = []
-
-            # calculate trajectory for rotating gripper to correct orientation
-            while not stop:
-                if gamma > gamma_dest:
-                    gamma = gamma_dest
-                    stop = True
-                time += delta_t
-
-                T_H_C_d = PyKDL.Frame( PyKDL.Rotation.RotZ(gamma) ) * T_H_C_d_prev
-                T_B_C_d = T_B_H * T_H_C_d
-
-                T_B_Wd = T_B_C_d * self.T_C_F * self.T_F_E * self.T_E_W
-
-                # for radius verification
-                T_B_Cd = T_B_Wd * self.T_W_E * self.T_E_F * self.T_F_C
-                P_d = T_B_Cd * PyKDL.Vector(0,0,0)
-                r_c = math.sqrt( (P_d.x()-cx)*(P_d.x()-cx) + (P_d.y()-cy)*(P_d.y()-cy) )
-#                print "r_c: %s   r: %s   r_a: %s"%(r_c, r, r_c-r)
-
-                traj.append(T_B_Wd)
-                times.append(time)
-#                self.moveWrist2(T_B_Wd)
-#                self.checkStopCondition(0.1)
-                gamma += omega*delta_t
-
-#            raw_input("Press Enter to continue...")
-
-            self.moveWristTraj( traj, times, Wrench(Vector3(10,20,25), Vector3(4,2,2)) )
-            end_t = rospy.Time.now()+rospy.Duration(time)
-            while rospy.Time.now()<end_t:
-                self.getTransformations()
-                T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
-                P_contact = T_B_C*PyKDL.Vector(0,0,0)
-                self.addContact(P_contact)
-                alpha_door = math.atan2(P_contact.y()-cy, P_contact.x()-cx)
-
-                # for score function
-                f = ( (alpha_door-alpha_init) - (alpha_door_C-alpha_init) ) / (self.door_angle_dest - (alpha_door_C-alpha_init))
-                if f > 1.0: f = 1.0
-                if f < 0.0: f = 0.0
-                score = (1.0-f)*self.score_open_C + f*self.score_open_D
-
-                if not self.hasContact(50):
-                    self.emergencyStop()
-                    self.failure_reason = "lost_contact"
-                    print "end: lost contact"
-                    rospy.sleep(1.0)
-                    return score
-                self.checkStopCondition(0.05)
-                if self.emergency_stop_active:
-                    self.failure_reason = "emergency_stop"
-                    print "end: emergency stop"
                     return score
 
             cx, cy, r = self.estCircle(self.px, self.py)
@@ -1036,9 +933,9 @@ Class for opening door with velma robot.
                 self.index += 1
             self.getTransformations()
             print "moving desired pose to current pose"
+            self.emergency_stop_active = False
             self.moveWrist(self.T_B_W, 2.0, Wrench(Vector3(20,20,15), Vector3(6,4,2)))
             self.checkStopCondition(2.0)
-            self.emergency_stop_active = False
             return True
         return False
 
@@ -1130,7 +1027,7 @@ Class for opening door with velma robot.
 
         door.getAttribute("base").value = pm.fromTf(door_marker)
 
-        find_door_surface = False
+        find_door_surface = True
 
         if find_door_surface:
             # approach the door
@@ -1209,8 +1106,13 @@ Class for opening door with velma robot.
 
         # the orientation of E is set according to orientation of M (door.base)
         # the finger nail frame N is at position door.H_start
+
+        # calculate rotation of gripper in door base frame M
         T_M_Ed = PyKDL.Frame( PyKDL.Rotation.RotZ(-math.pi/2.0) * PyKDL.Rotation.RotX(math.pi) )
-        T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), (door.getAttribute("base").value * T_M_Ed).M, door.getAttribute("base").value * door.getAttribute("H_start").value )
+        # calculate rotation of gripper in robot base frame B
+        R_B_Ed = copy.deepcopy((door.getAttribute("base").value * T_M_Ed).M)
+
+        T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * door.getAttribute("H_start").value )
         self.moveWrist(T_B_Wd, 4.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
         self.checkStopCondition(4.0)
 
@@ -1241,10 +1143,8 @@ Class for opening door with velma robot.
         raw_input("Press Enter to continue...")
 
         # the orientation of E is set according to orientation of M (door.base)
-        # the finger nail frame N is at position door.H_start
-
-        T_M_Ed = PyKDL.Frame( PyKDL.Rotation.RotZ(-math.pi/2.0) * PyKDL.Rotation.RotX(math.pi) )
-        T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), (door.getAttribute("base").value * T_M_Ed).M, door.getAttribute("base").value * door.getAttribute("H_end").value )
+        # the finger nail frame N is at position door.H_end
+        T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * door.getAttribute("H_end").value )
         self.moveWrist(T_B_Wd, 10.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
 
         contact_found = False
@@ -1260,7 +1160,6 @@ Class for opening door with velma robot.
             self.emergencyStop()
             rospy.sleep(1.0)
             return
-
 
         self.getTransformations()
         T_B_C = self.T_B_W * self.T_W_E * self.T_E_F * self.T_F_C
@@ -1279,7 +1178,7 @@ Class for opening door with velma robot.
 
         self.exit_on_emergency_stop = False
 
-        forces = [2.0, 2.5, 3.0, 3.5,]
+        forces = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5,]
         k_x = [500.0]
         k_y = [10.0, 20.0, 40.0, 80.0]
 
@@ -1411,7 +1310,7 @@ Class for opening door with velma robot.
                 self.printQualityMeasure(1000)
                 continue
 
-            score_open = self.openTheDoor()
+            score_open = self.openTheDoor(R_B_Ed)
 
             self.printQualityMeasure(score_open)
 
