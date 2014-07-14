@@ -41,6 +41,8 @@ from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
 from geometry_msgs.msg import *
 from sensor_msgs.msg import Image
+import PyKDL
+import tf_conversions.posemath as pm
 
 import tf
 from tf import *
@@ -260,9 +262,17 @@ def callback(data):
     global tf_listener
     global prefix
     global pressure_info
+    global tactile_tmx
+    global scale_t
     global pub
     global tactileImagepub
     m = MarkerArray()
+
+    finger_skin_data = []
+    finger_skin_data.append(data.finger1_tip)
+    finger_skin_data.append(data.finger2_tip)
+    finger_skin_data.append(data.finger3_tip)
+    finger_skin_data.append(data.palm_tip)
 
     frame_id = []
     frame_id.append(prefix+"_HandFingerOneKnuckleThreeLink")
@@ -270,92 +280,58 @@ def callback(data):
     frame_id.append(prefix+"_HandFingerThreeKnuckleThreeLink")
     frame_id.append(prefix+"_HandPalmLink")
 
+    arrows = False
 
-    tran = []
-    rotat = []
-    tf_listener.waitForTransform(prefix+'_HandPalmLink', frame_id[0], rospy.Time(0), rospy.Duration(10.0))
-    (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[0], rospy.Time(0))
-    tran.append(transl)
-    rotat.append(rot)
-    (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[1], rospy.Time(0))
-    tran.append(transl)
-    rotat.append(rot)
-    (transl, rot) = tf_listener.lookupTransform(prefix+'_HandPalmLink', frame_id[2], rospy.Time(0))
-    tran.append(transl)
-    rotat.append(rot)
+    if arrows:
+        for sens in range(0, 4):
+            for i in range(0, 24):
+                halfside1 = PyKDL.Vector(pressure_info.sensor[sens].halfside1[i].x, pressure_info.sensor[sens].halfside1[i].y, pressure_info.sensor[sens].halfside1[i].z)
+                halfside2 = PyKDL.Vector(pressure_info.sensor[sens].halfside2[i].x, pressure_info.sensor[sens].halfside2[i].y, pressure_info.sensor[sens].halfside2[i].z)
+                # calculate cross product: halfside1 x halfside2
+                norm = halfside1*halfside2
+                norm.Normalize()
+                scale = 0
+                if sens == 0:
+                    scale = data.finger1_tip[i]/256.0
+                elif sens == 1:
+                    scale = data.finger2_tip[i]/256.0
+                elif sens == 2:
+                    scale = data.finger3_tip[i]/256.0
+                else:
+                    scale = data.palm_tip[i]/256.0
+                norm = norm*scale*0.01
+                marker = Marker()
+                marker.header.frame_id = frame_id[sens]
+                marker.header.stamp = rospy.Time.now()
+                marker.ns = frame_id[sens]
+                marker.id = i
+                marker.type = 0
+                marker.action = 0
+                marker.points.append(Point(pressure_info.sensor[sens].center[i].x,pressure_info.sensor[sens].center[i].y,pressure_info.sensor[sens].center[i].z))
+                marker.points.append(Point(pressure_info.sensor[sens].center[i].x+norm.x(), pressure_info.sensor[sens].center[i].y+norm.y(), pressure_info.sensor[sens].center[i].z+norm.z()))
+                marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
+                marker.scale = Vector3(0.001, 0.002, 0)
+                marker.color = ColorRGBA(1,0,0,1)
+                m.markers.append(marker)
+        pub.publish(m)
+    else:
+        for sens in range(0, 4):
+            for i in range(0, 24):
+                value = convertToRGB(int(finger_skin_data[sens][i]/2))
 
-    sumx = 0
-    sumy = 0
-    sumz = 0
-    for sens in range(0, 4):
-        for i in range(0, 24):
-            # calculate cross product: halfside1 x halfside2
-            cx = pressure_info.sensor[sens].halfside1[i].y*pressure_info.sensor[sens].halfside2[i].z - pressure_info.sensor[sens].halfside1[i].z*pressure_info.sensor[sens].halfside2[i].y
-            cy = pressure_info.sensor[sens].halfside1[i].z*pressure_info.sensor[sens].halfside2[i].x - pressure_info.sensor[sens].halfside1[i].x*pressure_info.sensor[sens].halfside2[i].z
-            cz = pressure_info.sensor[sens].halfside1[i].x*pressure_info.sensor[sens].halfside2[i].y - pressure_info.sensor[sens].halfside1[i].y*pressure_info.sensor[sens].halfside2[i].x
+                marker = Marker()
+                marker.header.frame_id = frame_id[sens]
+                marker.header.stamp = rospy.Time.now()
+                marker.ns = frame_id[sens]
+                marker.id = i
+                marker.type = 1
+                marker.action = 0
+                marker.pose = pm.toMsg(tactile_tmx[sens][i])
+                marker.scale = Vector3(scale_t[sens][i][0], scale_t[sens][i][1], 0.004)
+                marker.color = ColorRGBA(1.0/255.0*value[0], 1.0/255.0*value[1], 1.0/255.0*value[2],1)
+                m.markers.append(marker)
+        pub.publish(m)
 
-            length = math.sqrt(cx*cx + cy*cy + cz*cz)
-
-            scale = 0
-
-            if sens == 0:
-                scale = data.finger1_tip[i]/256.0
-            elif sens == 1:
-                scale = data.finger2_tip[i]/256.0
-            elif sens == 2:
-                scale = data.finger3_tip[i]/256.0
-            else:
-                scale = data.palm_tip[i]/256.0
-
-            cx = cx/length*scale*0.01
-            cy = cy/length*scale*0.01
-            cz = cz/length*scale*0.01
-
-            if sens < 3:
-                a = rotat[sens][3]
-                b = rotat[sens][0]
-                c = rotat[sens][1]
-                d = rotat[sens][2]
-                gx = (a*a+b*b-c*c-d*d)*cx + 2*(b*c-a*d)*cy + 2*(b*d+a*c)*cz
-                gy = 2*(b*c+a*d)*cx + (a*a-b*b+c*c-d*d)*cy + 2*(c*d-a*b)*cz
-                gz = 2*(b*d-a*c)*cx + 2*(c*d+a*b)*cy + (a*a-b*b-c*c+d*d)*cz
-                sumx += gx
-                sumy += gy
-                sumz += gz
-            else:
-                sumx += cx
-                sumy += cy
-                sumz += cz
-
-            marker = Marker()
-            marker.header.frame_id = frame_id[sens]
-            marker.header.stamp = rospy.Time.now()
-            marker.ns = frame_id[sens]
-            marker.id = i
-            marker.type = 0
-            marker.action = 0
-            marker.points.append(Point(pressure_info.sensor[sens].center[i].x,pressure_info.sensor[sens].center[i].y,pressure_info.sensor[sens].center[i].z))
-            marker.points.append(Point(pressure_info.sensor[sens].center[i].x+cx, pressure_info.sensor[sens].center[i].y+cy, pressure_info.sensor[sens].center[i].z+cz))
-            marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
-            marker.scale = Vector3(0.001, 0.002, 0)
-            marker.color = ColorRGBA(1,0,0,1)
-            m.markers.append(marker)
-
-    marker = Marker()
-    marker.header.frame_id = frame_id[3]
-    marker.header.stamp = rospy.Time.now()
-    marker.ns = frame_id[3]
-    marker.id = i
-    marker.type = 0
-    marker.action = 0
-    marker.points.append(Point(0,0,0.15))
-    marker.points.append(Point(1*sumx, 1*sumy, 1*sumz+0.15))
-    marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
-    marker.scale = Vector3(0.001, 0.002, 0)
-    marker.color = ColorRGBA(0,0,1,1)
-    m.markers.append(marker)
-
-    pub.publish(m)
 
 #  palm   f1  f2  f3
 #         xxx xxx xxx
@@ -366,11 +342,6 @@ def callback(data):
 #  01234  678 678 678
 #         345 345 345
 #         012 012 012
-
-    finger_skin_data = []
-    finger_skin_data.append(data.finger1_tip)
-    finger_skin_data.append(data.finger2_tip)
-    finger_skin_data.append(data.finger3_tip)
 
     im = Image()
     im.height = 8
@@ -405,11 +376,33 @@ def callback(data):
 def run_mark():
     global tf_listener
     global pressure_info
+    global tactile_tmx
+    global scale_t
     global pub
     global tactileImagepub
     print "Requesting pressure sensors info"
     pressure_info = get_pressure_sensors_info_client()
     print "sensor[0].center[0]: %s, %s, %s"%(pressure_info.sensor[0].center[0].x, pressure_info.sensor[0].center[0].y, pressure_info.sensor[0].center[0].z)
+
+    tactile_tmx = []
+    scale_t = []
+    # calculate transformation matrices for each tactile cell
+    for sens in range(0, 4):
+        tactile_tmx.append([])
+        scale_t.append([])
+        for i in range(0, 24):
+            halfside1 = PyKDL.Vector(pressure_info.sensor[sens].halfside1[i].x, pressure_info.sensor[sens].halfside1[i].y, pressure_info.sensor[sens].halfside1[i].z)
+            halfside2 = PyKDL.Vector(pressure_info.sensor[sens].halfside2[i].x, pressure_info.sensor[sens].halfside2[i].y, pressure_info.sensor[sens].halfside2[i].z)
+            scale_t[sens].append((halfside1.Norm()*2.0, halfside2.Norm()*2.0))
+
+            # calculate cross product: halfside1 x halfside2
+            norm = halfside1*halfside2
+            norm.Normalize()
+            halfside2_prim = norm*halfside1
+            halfside2_prim.Normalize()
+            halfside1.Normalize()
+
+            tactile_tmx[sens].append( PyKDL.Frame( PyKDL.Rotation(halfside1, halfside2_prim, norm), PyKDL.Vector(pressure_info.sensor[sens].center[i].x, pressure_info.sensor[sens].center[i].y, pressure_info.sensor[sens].center[i].z) ) )
 
     pub = rospy.Publisher('/' + prefix + '_hand/tactile_markers', MarkerArray)
     tactileImagepub = rospy.Publisher('/' + prefix + '_hand/tactile_image', Image)
