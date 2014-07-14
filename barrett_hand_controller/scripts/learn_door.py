@@ -55,9 +55,13 @@ import scipy.io as sio
 import PyKDL
 import math
 from numpy import *
+import numpy as np
 from scipy import optimize
 
 import copy
+
+from scipy.interpolate import *
+import matplotlib.pyplot as plt
 
 # reference frames:
 # B - robot's base
@@ -101,6 +105,7 @@ class Door:
         self.attributes.append( ScalarAttribute("handle_radius", None) )
         self.attributes.append( PoseAttribute("handle", None) )
         self.attributes.append( PoseAttribute("pre_handle", None) )
+        self.attributes.append( PoseAttribute("hinge_pos", None) )
 
     def getAttribute(self, name):
         return next(a for a in self.attributes if a.name == name)
@@ -296,7 +301,7 @@ Class for opening door with velma robot.
         rospy.Subscriber('/'+self.prefix+'_arm/wrench', Wrench, self.wrenchCallback)
 
     def moveWrist2(self, wrist_frame):
-        wrist_pose = pm.toMsg(wrist_frame)#*self.T_W_T)
+        wrist_pose = pm.toMsg(wrist_frame)
         self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
 
     def moveWrist(self, wrist_frame, t, max_wrench, start_time=0.01, stamp=None):
@@ -440,10 +445,12 @@ Class for opening door with velma robot.
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
-    def estCircle(self, px, py):
-      x_m = mean(px)
-      y_m = mean(py)
-    
+    def estCircle(self, px, py, x_m=None, y_m=None):
+       if x_m == None:
+          x_m = mean(px)
+       if y_m == None:
+          y_m = mean(py)
+
       def calc_R(xc, yc):
         """ calculate the distance of each 2D points from the center (xc, yc) """
         return sqrt((px-xc)**2 + (py-yc)**2)
@@ -452,9 +459,9 @@ Class for opening door with velma robot.
         """ calculate the algebraic distance between the 2D points and the mean circle centered at c=(xc, yc) """
         Ri = calc_R(*c)
         return Ri - Ri.mean()
-        
+
       center_estimate = x_m, y_m
-      center_2, ier = optimize.leastsq(f_2, center_estimate, maxfev = 3000)
+      center_2, ier = optimize.leastsq(f_2, center_estimate, maxfev = 2000)
 
       xc, yc = center_2
       Ri_2       = calc_R(xc, yc)
@@ -505,9 +512,11 @@ Class for opening door with velma robot.
 
         self.pub_marker.publish(m)
 
-    def hasContact(self, threshold):
+    def hasContact(self, threshold, print_on_false=False):
         if self.max_tactile_value>threshold:
             return True
+        if print_on_false:
+            print "hasContact(%s): %s"%(threshold, self.max_tactile_value)
         return False
 
     def getContactPointFrame(self):
@@ -534,21 +543,21 @@ Class for opening door with velma robot.
     def stepBackFromHandle(self):
         self.getTransformations()
         print "moving desired pose to current pose"
-        self.moveWrist(self.T_B_W, 2.0, Wrench(Vector3(20,20,20), Vector3(6,4,2)))
+        self.moveWrist(self.T_B_W, 2.0, Wrench(Vector3(25,25,25), Vector3(6,5,4)))
         self.checkStopCondition(2.0)
 
         self.getTransformations()
         print "moving gripper outwards the handle"
         T_W_Wd = PyKDL.Frame(PyKDL.Vector(0,-0.05,0))
         T_B_Wd = self.T_B_W*T_W_Wd
-        self.moveWrist(T_B_Wd, 0.5, Wrench(Vector3(10,15,10), Vector3(4,3,2)))
+        self.moveWrist(T_B_Wd, 0.5, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
         self.checkStopCondition(0.5)
 
         self.getTransformations()
         print "rotating gripper outwards the handle"
-        T_W_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(-math.pi/8.0))
+        T_W_Wd = PyKDL.Frame(PyKDL.Rotation.RotZ(-10.0/180.0*math.pi))
         T_B_Wd = self.T_B_W*T_W_Wd
-        self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(10,15,10), Vector3(4,3,2)))
+        self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
         self.checkStopCondition(2.0)
 
     def addContact(self, P_contact):
@@ -566,7 +575,6 @@ Class for opening door with velma robot.
 
     def calculateMoveGripperPointToPose(self, P_E_p, rot_B_E, pos_B_E_p):
         P_B_N = PyKDL.Frame( copy.deepcopy(rot_B_E) ) * P_E_p
-        print P_B_N
         T_B_Ed = PyKDL.Frame( copy.deepcopy(rot_B_E), pos_B_E_p - P_B_N )
         T_B_Wd = T_B_Ed * self.T_E_W
         return T_B_Wd
@@ -610,40 +618,52 @@ Class for opening door with velma robot.
         #
         # initial motion begins
         #
-        self.moveWrist(T_B_Wd_init, self.init_motion_time, Wrench(Vector3(10,25,25), Vector3(4,3,2)))
+        self.moveWrist(T_B_Wd_init, self.init_motion_time, Wrench(Vector3(25,25,25), Vector3(5,5,5)))
 
-        lost_contact = False
-        init_end_t = rospy.Time.now()+rospy.Duration(self.init_motion_time)
-        init_contact_measure_t = rospy.Time.now()+rospy.Duration(1.0)
+        time_now = rospy.Time.now()
+        init_end_t = time_now + rospy.Duration(self.init_motion_time)
+        last_contact_time = time_now
+
         while rospy.Time.now()<init_end_t:
             self.getTransformations()
             T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
             P_contact = T_B_C*PyKDL.Vector(0,0,0)
             self.addContact(P_contact)
 
-            if (rospy.Time.now() > init_contact_measure_t) and (not self.hasContact(50)):
-                lost_contact = True
+            # record the current time of contact
+            if self.hasContact(50):
+                last_contact_time = rospy.Time.now()
 
-            if lost_contact or self.checkStopCondition(0.01):
+            if self.checkStopCondition(0.01):
                 # for score function
                 dur = init_end_t-rospy.Time.now()
                 self.init_motion_time_left = dur.to_sec()
                 f = self.init_motion_time_left / self.init_motion_time
                 score = f*self.score_open_A + (1.0-f)*self.score_open_B
                 self.emergencyStop()
-                if lost_contact:
-                    self.failure_reason = "lost_contact"
-                    print "end: lost contact"
                 rospy.sleep(1.0)
                 return score
 
         print "init motion finished"
 
+        if not self.hasContact(50):
+            dur = init_end_t-last_contact_time
+            self.init_motion_time_left = dur.to_sec()
+            f = self.init_motion_time_left / self.init_motion_time
+            score = f*self.score_open_A + (1.0-f)*self.score_open_B
+            self.emergencyStop()
+            self.failure_reason = "lost_contact"
+            print "end: lost contact"
+            rospy.sleep(1.0)
+            return score
+
         #
         # first circle estimation
         #
+        hinge = door.getAttribute("base").value*door.getAttribute("hinge_pos").value
+
         if len(self.px)>1:
-            cx, cy, r = self.estCircle(self.px, self.py)
+            cx, cy, r = self.estCircle(self.px, self.py, hinge.x(), hinge.y())
             r_old = r
         else:
             self.failure_reason = "no_contact_points"
@@ -711,9 +731,9 @@ Class for opening door with velma robot.
         time = 0.0
         delta_t = 0.05
         if beta_dest > 0:
-            omega = 0.1
+            omega = 0.05
         else:
-            omega = -0.1
+            omega = -0.05
         traj = []
         times = []
 
@@ -752,7 +772,8 @@ Class for opening door with velma robot.
             return 0
 
         # rotate the gripper with spring
-        self.moveWristTraj( traj, times, Wrench(Vector3(10,25,25), Vector3(4,3,2)) )
+        no_contact = 0
+        self.moveWristTraj( traj, times, Wrench(Vector3(25,25,25), Vector3(5,5,5)) )
         end_t = rospy.Time.now()+rospy.Duration(time)
         while rospy.Time.now()<end_t:
             self.getTransformations()
@@ -767,6 +788,10 @@ Class for opening door with velma robot.
             score = f*self.score_open_B + (1.0-f)*self.score_open_C
 
             if not self.hasContact(50):
+                no_contact += 1
+            else:
+                no_contact = 0
+            if no_contact > 3:
                 self.emergencyStop()
                 self.failure_reason = "lost_contact"
                 print "end: lost contact"
@@ -778,7 +803,7 @@ Class for opening door with velma robot.
                 print "end: emergency stop"
                 return score
 
-        cx, cy, r = self.estCircle(self.px, self.py)
+        cx, cy, r = self.estCircle(self.px, self.py, hinge.x(), hinge.y())
         r_old = r
 
         # for score function
@@ -829,8 +854,6 @@ Class for opening door with velma robot.
             alpha_contact += 0.005
             dest_pt = PyKDL.Vector(cx, cy, pz) + (current_radius + self.r_a)*PyKDL.Vector(math.cos(alpha_contact), math.sin(alpha_contact), 0)
 
-            print "current_radius: %s     alpha_contact: %s"%(current_radius, alpha_contact)
-
             self.publishSinglePointMarker(dest_pt.x(), dest_pt.y(), dest_pt.z(), self.m_id, r=0.0, g=1.0, b=0.0)
             self.m_id += 1
             beta += 0.01
@@ -838,10 +861,9 @@ Class for opening door with velma robot.
                 beta = alpha_door-ref_alpha_door
             T_B_Wd = self.calculateMoveGripperPointToPose(E_pt, (PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * ref_T_B_E ).M, dest_pt)
             self.moveWrist2(T_B_Wd)
-#            raw_input("Press Enter to continue...")
-#            self.checkStopCondition(0.5)
 
-            self.moveWrist(T_B_Wd, 0.1, Wrench(Vector3(10,25,25), Vector3(4,3,2)))
+            no_contact = 0
+            self.moveWrist(T_B_Wd, 0.1, Wrench(Vector3(25,25,25), Vector3(5,5,5)))
             end_t = rospy.Time.now()+rospy.Duration(0.1)
             while rospy.Time.now()<end_t:
                 self.getTransformations()
@@ -860,14 +882,18 @@ Class for opening door with velma robot.
                     print "end: emergency stop"
                     return score
 
-                if not self.hasContact(50):
+                if not self.hasContact(50,print_on_false=True):
+                    no_contact += 1
+                else:
+                    no_contact = 0
+                if no_contact > 3:
                     self.emergencyStop()
                     self.failure_reason = "lost_contact"
                     print "end: lost contact"
                     rospy.sleep(1.0)
                     return score
 
-            cx, cy, r = self.estCircle(self.px, self.py)
+            cx, cy, r = self.estCircle(self.px, self.py, hinge.x(), hinge.y())
             r_old = r
             if r > 0.45 :
                 self.failure_reason = "estimation_error_2"
@@ -890,7 +916,6 @@ Class for opening door with velma robot.
             circle.header.stamp = rospy.Time.now()
             circle.quaternion = Quaternion(cx, cy, pz, r)
             self.pub_circle.publish(circle)
-            print "circle: x: %s   y: %s    r: %s"%(cx,cy,r)
 
         return self.score_open_D
 
@@ -934,7 +959,7 @@ Class for opening door with velma robot.
             self.getTransformations()
             print "moving desired pose to current pose"
             self.emergency_stop_active = False
-            self.moveWrist(self.T_B_W, 2.0, Wrench(Vector3(20,20,15), Vector3(6,4,2)))
+            self.moveWrist(self.T_B_W, 2.0, Wrench(Vector3(25,25,25), Vector3(5,5,5)))
             self.checkStopCondition(2.0)
             return True
         return False
@@ -973,7 +998,7 @@ Class for opening door with velma robot.
         # move both tool position and wrist position - the gripper holds its position
         print "moving wrist"
         # we assume that during the initialization there are no contact forces, so we limit the wrench
-        self.moveWrist( self.T_B_W, 2.0, Wrench(Vector3(5, 5, 5), Vector3(2, 2, 2)) )
+        self.moveWrist( self.T_B_W, 2.0, Wrench(Vector3(10, 10, 10), Vector3(2, 2, 2)) )
         print "moving tool"
         self.moveTool( self.T_W_T, 2.0 )
         self.checkStopCondition(2.0)
@@ -1048,12 +1073,12 @@ Class for opening door with velma robot.
             for i in range(0, 3):
                 T_B_Nd = door.getAttribute("base").value * P_s[i]
                 T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-                self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
+                self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
                 self.checkStopCondition(3.0)
 
                 T_B_Nd = door.getAttribute("base").value * P_e[i]
                 T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-                self.moveWrist(T_B_Wd, 8.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
+                self.moveWrist(T_B_Wd, 8.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
 
                 contact_found = False
                 end_t = rospy.Time.now()+rospy.Duration(8.0)
@@ -1075,7 +1100,7 @@ Class for opening door with velma robot.
 
                 T_B_Nd = door.getAttribute("base").value * P_s[i]
                 T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-                self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
+                self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
                 self.checkStopCondition(2.0)
 
             print P_door_surface
@@ -1113,39 +1138,15 @@ Class for opening door with velma robot.
         R_B_Ed = copy.deepcopy((door.getAttribute("base").value * T_M_Ed).M)
 
         T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * door.getAttribute("H_start").value )
-        self.moveWrist(T_B_Wd, 4.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
+        self.moveWrist(T_B_Wd, 4.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
         self.checkStopCondition(4.0)
-
-#######################################
-        if False:
-            raw_input("Press Enter to continue...")
-
-            start_stamp = rospy.Time.now() + rospy.Duration(1.0)
-            self.moveImpedance(Wrench(Vector3(10.0, 800.0, 800.0), Vector3(300.0, 300.0, 300.0)), 0.5, stamp=start_stamp)
-            self.action_impedance_client.wait_for_result()
-            print "result: %s"%(self.action_impedance_client.get_result())
-            print "status: %s"%(self.action_impedance_client.get_state())
-
-            return
-            raw_input("Press Enter to continue...")
-
-            start_stamp = rospy.Time.now() + rospy.Duration(1.0)
-            print "result: %s"%(self.action_impedance_client.get_result())
-            print "status: %s"%(self.action_impedance_client.get_state())
-
-            raw_input("Press Enter to continue...")
-
-            self.checkStopCondition(1.0)
-
-
-#######################################
 
         raw_input("Press Enter to continue...")
 
         # the orientation of E is set according to orientation of M (door.base)
         # the finger nail frame N is at position door.H_end
         T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * door.getAttribute("H_end").value )
-        self.moveWrist(T_B_Wd, 10.0, Wrench(Vector3(15,15,15), Vector3(3,3,3)))
+        self.moveWrist(T_B_Wd, 10.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
 
         contact_found = False
         end_t = rospy.Time.now()+rospy.Duration(8.0)
@@ -1178,41 +1179,85 @@ Class for opening door with velma robot.
 
         self.exit_on_emergency_stop = False
 
-        forces = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5,]
-        k_x = [500.0]
-        k_y = [10.0, 20.0, 40.0, 80.0]
+        forces = [1.0, 2.0, 3.0]
+        r_a_tab = [ 0.02, 0.26, 0.50 ]
+        forces = [1.0, 3.0]
+        r_a_tab = [ 0.02, 0.50 ]
+
+        grid_x, grid_y = np.mgrid[forces[0]:forces[-1]:400j, r_a_tab[0]:r_a_tab[-1]:400j]
+        min_f_dist = 0.15*2.0
+        min_r_dist = 0.05*2.0
 
         with open("experiments.txt", "a") as exfile:
             exfile.write("******** experiment series begin ********" + "\n")
 
 
-        self.max_index = len(forces) * len(k_x) * len(k_y)
+        self.max_index = len(forces) * len(r_a_tab)
+
+        used_forces = []
+        used_r_a = []
+        scores = []
 
         self.index = 0
         # door opening loop
-        while self.index < self.max_index:
+        while True:#self.index < self.max_index:
             self.failure_reason = "unknown"
 
-            i = 0
-            for forces_v in forces:
-                for k_x_v in k_x:
-                    for k_y_v in k_y:
+            if self.index < self.max_index:
+                i = 0
+                for forces_v in forces:
+                    for r_a_v in r_a_tab:
                         if i == self.index:
                             self.force = forces_v
-                            self.learning_k_handle_x = k_x_v
-                            self.learning_k_open_x = k_x_v
-                            self.learning_k_open_y = k_y_v
-                            self.learning_r_a = self.force / self.learning_k_open_y
+                            self.learning_r_a = r_a_v
+                            self.learning_k_open_y = self.force / self.learning_r_a
                         i += 1
+            else:
+                # linear nearest, cubic
+                grid = griddata( (used_forces, used_r_a), scores, (grid_x, grid_y), 'cubic')
+                plt.xlabel('force')
+                plt.ylabel('r_a')
 
-            self.r_a = self.learning_r_a
-            self.k_open = Wrench(Vector3(self.learning_k_open_x, self.learning_k_open_y, 800.0), Vector3(300.0, 300.0, 300.0))
+                # find local minimum
+                minimum = 10000.0
+                coord = [-1, -1]
+                for r in range(0, 400):
+                    for f in range(0, 400):
+                        if grid.T[r][f] < minimum:
+                            # check if this point was wisited before
+                            coord_u = [(f/399.0)*(forces[-1]-forces[0])+forces[0],  (r/399.0)*(r_a_tab[-1]-r_a_tab[0])+r_a_tab[0]]
+                            cont = False
+                            for i in range(0, len(used_forces)):
+                                f_d = (used_forces[i]-coord_u[0])/min_f_dist
+                                r_d = (used_r_a[i]-coord_u[1])/min_r_dist
+                                if math.sqrt( f_d*f_d + r_d*r_d ) < 1.0:
+                                    cont = True
+                                    break
+                            if cont:
+                                continue
+                            coord = [f, r]
+                            minimum = grid.T[r][f]
+
+                print [(coord[0]/399.0)*(forces[-1]-forces[0])+forces[0],  (coord[1]/399.0)*(r_a_tab[-1]-r_a_tab[0])+r_a_tab[0]]
+                print minimum
+                print coord
+
+                self.force = (coord[0]/399.0)*(forces[-1]-forces[0])+forces[0]
+                self.learning_r_a = (coord[1]/399.0)*(r_a_tab[-1]-r_a_tab[0])+r_a_tab[0]
+                self.learning_k_open_y = self.force / self.learning_r_a
+
+                plt.imshow(grid.T, extent=(forces[0],forces[-1],r_a_tab[0],r_a_tab[-1]), aspect='auto', origin='lower')
+                plt.plot(used_forces, used_r_a, 'ro')
+
+                plt.show()
+
+            self.r_a = copy.deepcopy( self.learning_r_a )
+            self.k_open = copy.deepcopy( Wrench(Vector3(500.0, self.learning_k_open_y, 800.0), Vector3(300.0, 300.0, 300.0)) )
 
             print "parameters:"
             print "index: %s"%(self.index)
             print "force: %s"%(self.force)
             print "r_a: %s"%(self.learning_r_a)
-            print "k_handle_x: %s"%(self.learning_k_handle_x)
             print "k_open_y: %s"%(self.learning_k_open_y)
 
             with open("experiments.txt", "a") as exfile:
@@ -1220,7 +1265,6 @@ Class for opening door with velma robot.
                 exfile.write("index:"+str(self.index) + "\n")
                 exfile.write("force:"+str(self.force) + "\n")
                 exfile.write("r_a:"+str(self.learning_r_a) + "\n")
-                exfile.write("k_handle_x:"+str(self.learning_k_handle_x) + "\n")
                 exfile.write("k_open_y:"+str(self.learning_k_open_y) + "\n")
 
             self.moveImpedance(self.k_door2, 2.0)
@@ -1230,7 +1274,7 @@ Class for opening door with velma robot.
 
             T_B_Nd = door.getAttribute("base").value * door.getAttribute("pre_handle").value
             T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(20,20,20), Vector3(3,3,3)))
+            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
             self.checkStopCondition(3.0)
 
             if self.handleEmergencyStop():
@@ -1240,13 +1284,11 @@ Class for opening door with velma robot.
 
             T_B_Nd = door.getAttribute("base").value * door.getAttribute("handle").value
             T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(20,20,20), Vector3(3,3,3)))
+            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
             self.checkStopCondition(3.0)
 
             if self.handleEmergencyStop():
                 continue
-
-#            raw_input("Press Enter to continue...")
 
             print "pushing the handle"
 
@@ -1262,7 +1304,7 @@ Class for opening door with velma robot.
             print "pushing handle with current stiffness"
             T_B_Nd = door.getAttribute("base").value * PyKDL.Frame(PyKDL.Vector(-r_a_interpolated, 0, 0)) * door.getAttribute("handle").value
             T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-            self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(20,20,20), Vector3(3,3,3)))
+            self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
             self.checkStopCondition(2.0)
 
             velocity = 0.05    # 5 cm/s
@@ -1291,26 +1333,41 @@ Class for opening door with velma robot.
                 traj.append(T_B_Wd)
                 traj_imp.append(k_interpolated)
                 times.append(time)
-#                print "%s:  %s    %s   %s"%(step, time, T_B_Wd.p, k_interpolated.force)
                 step += 1
 
-#            raw_input("Press Enter to continue...")
-#            self.checkStopCondition(0.5)
-
             if self.handleEmergencyStop():
+
+                used_forces.append(copy.deepcopy(self.force))
+                used_r_a.append(copy.deepcopy(self.learning_r_a))
+                wrench_total = math.sqrt(self.wrench_max.force.x*self.wrench_max.force.x + self.wrench_max.force.y*self.wrench_max.force.y + self.wrench_max.force.z*self.wrench_max.force.z) + 10*math.sqrt(self.wrench_max.torque.x*self.wrench_max.torque.x + self.wrench_max.torque.y*self.wrench_max.torque.y + self.wrench_max.torque.z*self.wrench_max.torque.z)
+                wrench_mean_total = math.sqrt(self.wrench_mean.force.x*self.wrench_mean.force.x + self.wrench_mean.force.y*self.wrench_mean.force.y + self.wrench_mean.force.z*self.wrench_mean.force.z) + 10*math.sqrt(self.wrench_mean.torque.x*self.wrench_mean.torque.x + self.wrench_mean.torque.y*self.wrench_mean.torque.y + self.wrench_mean.torque.z*self.wrench_mean.torque.z)
+                scores.append(wrench_total+wrench_mean_total+1000.0)
+
                 self.printQualityMeasure(1000)
                 continue
 
             start_stamp = rospy.Time.now() + rospy.Duration(1.0)
             self.moveImpedanceTraj( traj_imp, times, stamp=start_stamp)
-            self.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(3,3,3)), stamp=start_stamp)
+            self.moveWristTraj(traj, times, Wrench(Vector3(25,25,25), Vector3(4,4,4)), stamp=start_stamp)
             self.checkStopCondition(time+1.5)
 
             if self.handleEmergencyStop():
+                used_forces.append(copy.deepcopy(self.force))
+                used_r_a.append(copy.deepcopy(self.learning_r_a))
+                wrench_total = math.sqrt(self.wrench_max.force.x*self.wrench_max.force.x + self.wrench_max.force.y*self.wrench_max.force.y + self.wrench_max.force.z*self.wrench_max.force.z) + 10*math.sqrt(self.wrench_max.torque.x*self.wrench_max.torque.x + self.wrench_max.torque.y*self.wrench_max.torque.y + self.wrench_max.torque.z*self.wrench_max.torque.z)
+                wrench_mean_total = math.sqrt(self.wrench_mean.force.x*self.wrench_mean.force.x + self.wrench_mean.force.y*self.wrench_mean.force.y + self.wrench_mean.force.z*self.wrench_mean.force.z) + 10*math.sqrt(self.wrench_mean.torque.x*self.wrench_mean.torque.x + self.wrench_mean.torque.y*self.wrench_mean.torque.y + self.wrench_mean.torque.z*self.wrench_mean.torque.z)
+                scores.append(wrench_total+wrench_mean_total+1000.0)
+
                 self.printQualityMeasure(1000)
                 continue
 
             score_open = self.openTheDoor(R_B_Ed)
+
+            used_forces.append(copy.deepcopy(self.force))
+            used_r_a.append(copy.deepcopy(self.learning_r_a))
+            wrench_total = math.sqrt(self.wrench_max.force.x*self.wrench_max.force.x + self.wrench_max.force.y*self.wrench_max.force.y + self.wrench_max.force.z*self.wrench_max.force.z) + 10*math.sqrt(self.wrench_max.torque.x*self.wrench_max.torque.x + self.wrench_max.torque.y*self.wrench_max.torque.y + self.wrench_max.torque.z*self.wrench_max.torque.z)
+            wrench_mean_total = math.sqrt(self.wrench_mean.force.x*self.wrench_mean.force.x + self.wrench_mean.force.y*self.wrench_mean.force.y + self.wrench_mean.force.z*self.wrench_mean.force.z) + 10*math.sqrt(self.wrench_mean.torque.x*self.wrench_mean.torque.x + self.wrench_mean.torque.y*self.wrench_mean.torque.y + self.wrench_mean.torque.z*self.wrench_mean.torque.z)
+            scores.append(wrench_total+wrench_mean_total+score_open)
 
             self.printQualityMeasure(score_open)
 
@@ -1347,6 +1404,8 @@ if __name__ == '__main__':
     # for big radius
     door.getAttribute("H_start").value = PyKDL.Vector(0.0, -0.12, 0.005)
     door.getAttribute("H_end").value   = PyKDL.Vector(-0.20, -0.12, 0.005)
+
+    door.getAttribute("hinge_pos").value   = PyKDL.Vector(0.20, 0.0, 0.0)
 
     # for test
 #    door.getAttribute("H_start").value = PyKDL.Vector(0.0, -0.12, 0.10)
