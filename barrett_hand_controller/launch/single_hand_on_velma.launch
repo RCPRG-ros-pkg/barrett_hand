@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<launch>
+
+	<!-- upload robot description -->
+	<include file="$(find barrett_hand_defs)/launch/upload_robot.launch" />
+
+	<group>
+		<!-- start robot_state_publisher -->
+		<node pkg="robot_state_publisher" type="state_publisher" name="robot_state_publisher"/>
+
+		<!-- startup hardware -->
+		<include file="$(find barrett_hand_controller)/launch/single_hand.launch" >
+                    <arg name="PREFIX" value="right"/>
+                    <arg name="DEVICE" value="rtcan2"/>
+                </include>
+	</group>
+
+</launch>
+
