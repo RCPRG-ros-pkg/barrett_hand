@@ -81,6 +81,11 @@ class PoseAttribute(Attribute):
         self.name = name
         self.value = value
 
+class VectorAttribute(Attribute):
+    def __init__(self, name, value = None):
+        self.name = name
+        self.value = value
+
 class ScalarAttribute(Attribute):
     def __init__(self, name, value = None):
         self.name = name
@@ -97,13 +102,12 @@ class Door:
         self.attributes.append( PoseAttribute("P2_end", None) )       # pose on door surface
         self.attributes.append( PoseAttribute("P3_start", None) )     # pose on door surface
         self.attributes.append( PoseAttribute("P3_end", None) )       # pose on door surface
-        self.attributes.append( PoseAttribute("H_start", None) )      # handle search
-        self.attributes.append( PoseAttribute("H_end", None) )        # handle search
-        self.attributes.append( PoseAttribute("hinge", None) )        # hinge frame, in base frame, constant
+        self.attributes.append( VectorAttribute("H_start", None) )      # handle search
+        self.attributes.append( VectorAttribute("H_end", None) )        # handle search
         self.attributes.append( ScalarAttribute("handle_radius", None) )
-        self.attributes.append( PoseAttribute("handle", None) )
-        self.attributes.append( PoseAttribute("pre_handle", None) )
-        self.attributes.append( PoseAttribute("hinge_pos", None) )
+        self.attributes.append( VectorAttribute("handle", None) )
+        self.attributes.append( VectorAttribute("pre_handle", None) )
+        self.attributes.append( VectorAttribute("hinge_pos", None) )
 
     def getAttribute(self, name):
         return next(a for a in self.attributes if a.name == name)
@@ -238,11 +242,11 @@ Class for opening door with velma robot.
         if (wfx>self.current_max_wrench.force.x*2.0) or (wfy>self.current_max_wrench.force.y*2.0) or (wfz>self.current_max_wrench.force.z*2.0) or (wtx>self.current_max_wrench.torque.x*2.0) or (wty>self.current_max_wrench.torque.y*2.0) or (wtz>self.current_max_wrench.torque.z*2.0):
             self.wrench_emergency_stop = True
 
-        ws = WrenchStamped()
-        ws.header.stamp = rospy.Time.now()
-        ws.header.frame_id = self.prefix+"_arm_7_link"
-        ws.wrench = wrench
-        self.pub_wrench.publish(ws)
+#        ws = WrenchStamped()
+#        ws.header.stamp = rospy.Time.now()
+#        ws.header.frame_id = self.prefix+"_arm_7_link"
+#        ws.wrench = wrench
+#        self.pub_wrench.publish(ws)
 
     def resetMarkCounters(self):
         self.wrench_max = Wrench()
@@ -264,7 +268,7 @@ Class for opening door with velma robot.
         self.T_W_T = PyKDL.Frame(PyKDL.Vector(0.2,-0.05,0))    # tool transformation
         self.T_W_E = None
         self.T_E_W = None
-        self.T_F_N = PyKDL.Frame( PyKDL.Vector(0.04, -0.01, 0) )
+        self.T_F_N = PyKDL.Frame( PyKDL.Vector(0.03, -0.01, 0) )
         self.T_N_F = self.T_F_N.Inverse()
         self.current_max_wrench = Wrench(Vector3(20, 20, 20), Vector3(20, 20, 20))
         self.wrench_emergency_stop = False
@@ -792,7 +796,7 @@ Class for opening door with velma robot.
 
         # calculate gripper angle
         stop = False
-        beta_dest = alpha_door-alpha_init - 20.0/180.0*math.pi
+        beta_dest = alpha_door-alpha_init #- 20.0/180.0*math.pi
         beta = 0.0
         time = 0.0
         delta_t = 0.05
@@ -830,7 +834,7 @@ Class for opening door with velma robot.
             self.checkStopCondition(0.05)
             beta += omega*delta_t
 
-        raw_input("Press Enter to continue...")
+#        raw_input("Press Enter to continue...")
         self.checkStopCondition(0.05)
         if self.emergency_stop_active:
             self.failure_reason = "emergency_stop"
@@ -886,7 +890,7 @@ Class for opening door with velma robot.
         self.pub_circle.publish(circle)
         print "circle: x: %s   y: %s    r: %s"%(cx,cy,r)
 
-        raw_input("Press Enter to continue...")
+#        raw_input("Press Enter to continue...")
 
         #
         # door opening loop
@@ -925,7 +929,6 @@ Class for opening door with velma robot.
 
             self.publishSinglePointMarker(dest_pt.x(), dest_pt.y(), dest_pt.z(), self.m_id, r=0.0, g=1.0, b=0.0)
             self.m_id += 1
-            print "beta: %s"%(beta)
             beta += 0.01
             if beta > alpha_door-ref_alpha_door:
                 beta = alpha_door-ref_alpha_door
@@ -1209,7 +1212,7 @@ Class for opening door with velma robot.
 
         self.getTransformations()
 
-        raw_input("Press Enter to continue...")
+#        raw_input("Press Enter to continue...")
 
         # the orientation of E is set according to orientation of M (door.base)
         # the finger nail frame N is at position door.H_start
@@ -1223,7 +1226,7 @@ Class for opening door with velma robot.
         self.moveWrist(T_B_Wd, 4.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
         self.checkStopCondition(4.0)
 
-        raw_input("Press Enter to continue...")
+#        raw_input("Press Enter to continue...")
 
         # the orientation of E is set according to orientation of M (door.base)
         # the finger nail frame N is at position door.H_end
@@ -1247,17 +1250,16 @@ Class for opening door with velma robot.
         self.getTransformations()
         T_B_C = self.T_B_W * self.T_W_E * self.T_E_F * self.T_F_C
         T_M_B = door.getAttribute("base").value.Inverse()
-        door.getAttribute("handle").value = T_M_B * T_B_C
-        door.getAttribute("pre_handle").value = T_M_B * T_B_C
+        door.getAttribute("handle").value = T_M_B * T_B_C * PyKDL.Vector()
+        door.getAttribute("pre_handle").value = T_M_B * T_B_C * PyKDL.Vector()
 
-        print door.getAttribute("handle").value
-        door.getAttribute("handle").value.p += PyKDL.Vector(-0.01, 0.0, 0.0)
-        door.getAttribute("pre_handle").value.p += PyKDL.Vector(0.10, 0.0, 0.05)
+        door.getAttribute("handle").value += PyKDL.Vector(-0.01, 0.0, 0.0)
+        door.getAttribute("pre_handle").value += PyKDL.Vector(0.10, 0.0, 0.05)
 
-        print door.getAttribute("handle").value
-        print door.getAttribute("pre_handle").value
+        print "handle: %s"%(door.getAttribute("handle").value)
+        print "pre_handle: %s"%(door.getAttribute("pre_handle").value)
 
-        raw_input("Press Enter to continue...")
+#        raw_input("Press Enter to continue...")
 
         self.exit_on_emergency_stop = False
 
@@ -1266,6 +1268,9 @@ Class for opening door with velma robot.
 
         forces = [6.0, 6.1]
         r_a_tab = [ 0.05, 0.051 ]
+
+        forces = [3.0, 4.0, 6.0, 8.0]
+        r_a_tab = [ 0.02, 0.05, 0.2 ]
 
         grid_x, grid_y = np.mgrid[forces[0]:forces[-1]:400j, r_a_tab[0]:r_a_tab[-1]:400j]
         min_f_dist = 0.15*2.0
@@ -1284,7 +1289,7 @@ Class for opening door with velma robot.
         self.index = 0
         self.action = "next"
         # door opening loop
-        while True:#self.index < self.max_index:
+        while True:
             self.failure_reason = "unknown"
 
             self.clearDoorEstMarkers()
@@ -1300,7 +1305,7 @@ Class for opening door with velma robot.
                         i += 1
             elif self.action == "next":
                 # linear nearest, cubic
-                grid = griddata( (used_forces, used_r_a), scores, (grid_x, grid_y), 'cubic')
+                grid = griddata( (used_forces, used_r_a), scores, (grid_x, grid_y), 'linear')
                 plt.xlabel('force')
                 plt.ylabel('r_a')
 
@@ -1359,20 +1364,20 @@ Class for opening door with velma robot.
 
             self.getTransformations()
 
-            T_B_Nd = door.getAttribute("base").value * door.getAttribute("pre_handle").value
-            T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
-            self.checkStopCondition(3.0)
+#            raw_input("Press Enter to continue...")
+
+            T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * door.getAttribute("pre_handle").value )
+            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+            self.checkStopCondition(3.1)
 
             if self.handleEmergencyStop():
                 continue
 
 #            raw_input("Press Enter to continue...")
 
-            T_B_Nd = door.getAttribute("base").value * door.getAttribute("handle").value
-            T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
+            T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * door.getAttribute("handle").value )
             self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
-            self.checkStopCondition(3.0)
+            self.checkStopCondition(3.1)
 
             if self.handleEmergencyStop():
                 continue
@@ -1389,54 +1394,10 @@ Class for opening door with velma robot.
 #            raw_input("Press Enter to continue...")
 
             print "pushing handle with current stiffness"
-            T_B_Nd = door.getAttribute("base").value * PyKDL.Frame(PyKDL.Vector(-r_a_interpolated, 0, 0)) * door.getAttribute("handle").value
-            T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-            self.moveWrist(T_B_Wd, 2.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
-            self.checkStopCondition(2.0)
 
-#            velocity = 0.05    # 5 cm/s
-#            delta_t = 0.01    # 10 ms
-#            traj = []
-#            traj_imp = []
-#            times = []
-#            time = 0.0
-#            stop = False
-#            steps = int((self.r_a - r_a_interpolated) / (velocity * delta_t))
-#            print steps
-#            step = 0
-#            while not stop:
-#                r_a_interpolated += velocity * delta_t
-#                time += delta_t
-#                if r_a_interpolated > self.r_a:
-#                    r_a_interpolated = self.r_a
-#                    k_interpolated.force.x = self.k_open.force.x
-#                    stop = True
-#                else:
-#                    f = float(step)/steps
-#                    k_interpolated.force.x = (1.0-f)*self.k_door2.force.x + f*self.k_open.force.x
-#                k_interpolated.force.y = F_y/r_a_interpolated
-#                T_B_Nd = door.getAttribute("base").value * PyKDL.Frame(PyKDL.Vector(-r_a_interpolated, 0, 0)) * door.getAttribute("handle").value
-#                T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
-#                traj.append(T_B_Wd)
-#                traj_imp.append(k_interpolated)
-#                times.append(time)
-#                step += 1
-
-#            if self.handleEmergencyStop():
-
-#                used_forces.append(copy.deepcopy(self.force))
-#                used_r_a.append(copy.deepcopy(self.learning_r_a))
-#                wrench_total = math.sqrt(self.wrench_max.force.x*self.wrench_max.force.x + self.wrench_max.force.y*self.wrench_max.force.y + self.wrench_max.force.z*self.wrench_max.force.z) + 10*math.sqrt(self.wrench_max.torque.x*self.wrench_max.torque.x + self.wrench_max.torque.y*self.wrench_max.torque.y + self.wrench_max.torque.z*self.wrench_max.torque.z)
-#                wrench_mean_total = math.sqrt(self.wrench_mean.force.x*self.wrench_mean.force.x + self.wrench_mean.force.y*self.wrench_mean.force.y + self.wrench_mean.force.z*self.wrench_mean.force.z) + 10*math.sqrt(self.wrench_mean.torque.x*self.wrench_mean.torque.x + self.wrench_mean.torque.y*self.wrench_mean.torque.y + self.wrench_mean.torque.z*self.wrench_mean.torque.z)
-#                scores.append(wrench_total+wrench_mean_total+1000.0)
-
-#                self.printQualityMeasure(1000)
-#                continue
-
-#            start_stamp = rospy.Time.now() + rospy.Duration(1.0)
-#            self.moveImpedanceTraj( traj_imp, times, stamp=start_stamp)
-#            self.moveWristTraj(traj, times, Wrench(Vector3(25,25,25), Vector3(4,4,4)), stamp=start_stamp)
-#            self.checkStopCondition(time+1.5)
+            T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * (PyKDL.Vector(-r_a_interpolated, 0, 0) + door.getAttribute("handle").value ) )
+            self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
+            self.checkStopCondition(3.1)
 
             print "changing stiffness"
             self.moveImpedance( self.k_open, 2.0)
@@ -1453,8 +1414,7 @@ Class for opening door with velma robot.
                 continue
 
             print "pushing handle with current stiffness"
-            T_B_Nd = door.getAttribute("base").value * PyKDL.Frame(PyKDL.Vector(-self.r_a, 0, 0)) * door.getAttribute("handle").value
-            T_B_Wd = T_B_Nd * self.T_N_F * self.T_F_E * self.T_E_W
+            T_B_Wd = self.calculateMoveGripperPointToPose( (self.T_E_F * self.T_F_N) * PyKDL.Vector(0,0,0), R_B_Ed, door.getAttribute("base").value * (PyKDL.Vector(-self.r_a, 0, 0) + door.getAttribute("handle").value ) )
             self.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(25,25,25), Vector3(4,4,4)))
             self.checkStopCondition(3.1)
 
@@ -1499,20 +1459,20 @@ if __name__ == '__main__':
     door = Door()
 
     rot = PyKDL.Rotation.RotZ(-math.pi/2.0) * PyKDL.Rotation.RotY(math.pi/2.0) * PyKDL.Rotation.RotZ(-10.0*math.pi/180.0)
-    door.getAttribute("P1_start").value = PyKDL.Frame( rot, PyKDL.Vector(0.10, -0.12, 0.15) )
-    door.getAttribute("P1_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.10, -0.12, -0.10) )
-    door.getAttribute("P2_start").value = PyKDL.Frame( rot, PyKDL.Vector(0.0, 0.0, 0.15) )
-    door.getAttribute("P2_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.0, 0.0, -0.10) )
-    door.getAttribute("P3_start").value = PyKDL.Frame( rot, PyKDL.Vector(0.10, 0, 0.15) )
-    door.getAttribute("P3_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.10, 0, -0.10) )
+    door.getAttribute("P1_start").value = PyKDL.Frame( rot, PyKDL.Vector(0.10, -0.30, 0.15) )
+    door.getAttribute("P1_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.10, -0.30, -0.10) )
+    door.getAttribute("P2_start").value = PyKDL.Frame( rot, PyKDL.Vector(0.0, 0.05, 0.15) )
+    door.getAttribute("P2_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.0, 0.05, -0.10) )
+    door.getAttribute("P3_start").value = PyKDL.Frame( rot, PyKDL.Vector(0.10, 0.05, 0.15) )
+    door.getAttribute("P3_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.10, 0.05, -0.10) )
 
     # for small radius
-#    door.getAttribute("H_start").value = PyKDL.Vector(0.10, -0.12, 0.005)
-#    door.getAttribute("H_end").value   = PyKDL.Vector(-0.10, -0.12, 0.005)
+    door.getAttribute("H_start").value = PyKDL.Vector(0.10, -0.12, 0.04)
+    door.getAttribute("H_end").value   = PyKDL.Vector(-0.10, -0.12, 0.04)
 
     # for big radius
-    door.getAttribute("H_start").value = PyKDL.Vector(0.0, -0.12, 0.03)
-    door.getAttribute("H_end").value   = PyKDL.Vector(-0.20, -0.12, 0.03)
+#    door.getAttribute("H_start").value = PyKDL.Vector(0.0, -0.12, 0.03)
+#    door.getAttribute("H_end").value   = PyKDL.Vector(-0.20, -0.12, 0.03)
 
     door.getAttribute("hinge_pos").value   = PyKDL.Vector(0.20, 0.0, 0.0)
 
