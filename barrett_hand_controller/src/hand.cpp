@@ -364,6 +364,7 @@ public:
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(3, tact);
 			ts_[3].updatePressure(tact);
+			pressure_states_.header.stamp = rtt_rosclock::host_now();
 
 			for (int i=0; i<24; ++i)
 			{
