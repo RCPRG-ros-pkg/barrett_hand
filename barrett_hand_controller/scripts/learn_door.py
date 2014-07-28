@@ -170,13 +170,25 @@ Class for opening door with velma robot.
                     val_sum += val
         self.tactile_lock.acquire()
         if val_sum > 0:
+            self.tactile_data_index += 1
+            if self.tactile_data_index >= self.tactile_data_len:
+                self.tactile_data_index = 0
+
             contact_center *= 1.0/val_sum
+# TODO: remove
             self.contact_center = copy.deepcopy(contact_center)
-        self.max_tactile_value = copy.copy(max_tactile_value)
-        self.max_tactile_index = copy.copy(max_tactile_index)
-        self.max_tactile_finger = copy.copy(max_tactile_finger)
-        self.tactile_time = data.header.stamp
+            self.max_tactile_value = copy.copy(max_tactile_value)
+            self.max_tactile_index = copy.copy(max_tactile_index)
+            self.max_tactile_finger = copy.copy(max_tactile_finger)
+            self.tactile_time = data.header.stamp
+# TODO: remove end
+            # time, finger, max value, contact center
+            self.tactile_data[self.tactile_data_index][0] = copy.copy(data.header.stamp)
+            self.tactile_data[self.tactile_data_index][1] = copy.copy(max_tactile_finger)
+            self.tactile_data[self.tactile_data_index][2] = copy.copy(max_tactile_value)
+            self.tactile_data[self.tactile_data_index][3] = copy.deepcopy(contact_center)
         self.tactile_lock.release()
+#        print self.tactile_data_index
 
     def sendNextEvent(self):
         pc = PointStamped()
@@ -280,6 +292,14 @@ Class for opening door with velma robot.
         self.contact_center = PyKDL.Vector()
         self.tactile_time = None
         self.tactile_lock = Lock()
+
+        # for tactile sync
+        self.tactile_data = []
+        self.tactile_data_len = 40
+        self.tactile_data_index = 0
+        for i in range(0, self.tactile_data_len):
+            # time, finger, max value, contact center
+            self.tactile_data.append( [rospy.Time.now(), 0, 0, PyKDL.Vector()] )
 
         # for score function
         self.init_motion_time_left = 3.0
@@ -602,23 +622,23 @@ Class for opening door with velma robot.
             print "hasContact(%s): %s"%(threshold, self.max_tactile_value)
         return False
 
-    def getContactPointFrameOld(self):
-        pt = self.pressure_info.sensor[self.max_tactile_finger].center[self.max_tactile_index]
-        T_F_C = PyKDL.Frame(PyKDL.Vector(pt.x, pt.y, pt.z))
-        return T_F_C
+#    def getContactPointFrameOld(self):
+#        pt = self.pressure_info.sensor[self.max_tactile_finger].center[self.max_tactile_index]
+#        T_F_C = PyKDL.Frame(PyKDL.Vector(pt.x, pt.y, pt.z))
+#        return T_F_C
 
-    def getContactPointFrame(self):
-        pt = self.contact_center
-        T_F_C = PyKDL.Frame(pt)
-        return T_F_C
+#    def getContactPointFrame(self):
+#        pt = self.contact_center
+#        T_F_C = PyKDL.Frame(pt)
+#        return T_F_C
 
     def getTransformations(self):
-        self.tactile_lock.acquire()
-        now = copy.deepcopy(self.tactile_time)
-        self.T_F_C = self.getContactPointFrame()
-        self.tactile_lock.release()
+#        self.tactile_lock.acquire()
+#        now = copy.deepcopy(self.tactile_time)
+#        self.T_F_C = self.getContactPointFrame()
+#        self.tactile_lock.release()
 
-        self.T_C_F = self.T_F_C.Inverse()
+#        self.T_C_F = self.T_F_C.Inverse()
 
 #        self.listener.waitForTransform('torso_base', self.prefix+'_arm_7_link', now, rospy.Duration(1.0))
 #        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', now)
@@ -636,6 +656,29 @@ Class for opening door with velma robot.
             pose = self.listener.lookupTransform(self.prefix+'_arm_7_link', self.prefix+'_HandPalmLink', rospy.Time(0))
             self.T_W_E = pm.fromTf(pose)
             self.T_E_W = self.T_W_E.Inverse()
+
+    def getTransformationsForContact(self):
+        self.tactile_lock.acquire()
+        index = copy.copy(self.tactile_data_index)
+        self.tactile_lock.release()
+
+        self.T_F_C = None
+        self.T_C_F = None
+        for i in range(0, self.tactile_data_len-1):
+            # time, finger, max value, contact center
+            time = self.tactile_data[index][0]
+            if self.listener.canTransform('torso_base', self.prefix+'_arm_7_link', time) and self.listener.canTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', time):
+                self.T_F_C = PyKDL.Frame( copy.deepcopy(self.tactile_data[index][3]) )
+                self.T_C_F = self.T_F_C.Inverse()
+                self.T_B_W = pm.fromTf(self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', time))
+                self.T_E_F = pm.fromTf(self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', time))
+                self.T_F_E = self.T_E_F.Inverse()
+                self.last_contact_time = copy.copy(time)
+
+                break
+            index -= 1
+            if index < 0:
+                index = copy.copy(self.tactile_data_len)-1
 
     def stepBackFromHandle(self):
         self.getTransformations()
@@ -690,7 +733,9 @@ Class for opening door with velma robot.
     def openTheDoor(self):
         self.px = []
         self.py = []
-        self.m_id = 10
+        m_id_start = 10
+        m_id_max = 200
+        self.m_id = m_id_start
 
         self.resetMarkCounters()
 
@@ -778,7 +823,7 @@ Class for opening door with velma robot.
         self.checkStopCondition(3.1)
 
         # change the stiffness
-        self.k_open = copy.deepcopy( Wrench(Vector3(1200.0, 1200.0, 500.0), Vector3(300.0, 300.0, 300.0)) )
+        self.k_open = copy.deepcopy( Wrench(Vector3(800.0, 800.0, 200.0), Vector3(200.0, 200.0, 200.0)) )
         self.moveImpedance(self.k_open, 2.0)
         self.checkStopCondition(2.0)
 
@@ -823,9 +868,11 @@ Class for opening door with velma robot.
 #        init_pos = PyKDL.Vector(self.px[0], self.py[0], pz)
         while True:
 
-            self.getTransformations()
+            self.getTransformationsForContact()            
+#self.getTransformations()
+            contact_time_diff = self.last_contact_time-rospy.Time.now()
 
-            if self.hasContact(100):
+            if contact_time_diff.to_sec() < 0.2:
                 T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
                 P_contact = T_B_C*PyKDL.Vector(0,0,0)
                 self.addContact(P_contact)
@@ -845,20 +892,22 @@ Class for opening door with velma robot.
             
             # calculate new rotation of the gripper to align tool with force
             R_B_T = copy.deepcopy((self.T_B_W * self.T_W_T).M)
-            print R_B_T
-            print PyKDL.Frame(R_B_T)
+#            print R_B_T
+#            print PyKDL.Frame(R_B_T)
             normal_B = PyKDL.Frame(R_B_T) * PyKDL.Vector(0,0,1)
-            print normal_B
+#            print normal_B
             alpha_norm = math.atan2(normal_B.y(), normal_B.x())
             alpha_force = math.atan2(F_B.y(), F_B.x())
             alpha_diff = self.fixAngleDiff(alpha_force-alpha_norm)
-            print "alpha_force: %s     alpha_norm: %s    omega: %s"%(alpha_force, alpha_norm, omega)
             if alpha_diff > 0.01:
                 alpha += 0.01
             elif alpha_diff < -0.01:
                 alpha -= 0.01
             else:
                 alpha += alpha_diff
+
+            print "alpha_force: %s     alpha_norm: %s    alpha_diff: %s    alpha: %s"%(alpha_force, alpha_norm, alpha_diff, alpha)
+            print "Ft_value: %s"%(Ft_value)
 
             # calculate rotation frame
             T_E_Ed = PyKDL.Frame(PyKDL.Rotation.RotX(-alpha))
@@ -894,8 +943,11 @@ Class for opening door with velma robot.
             self.moveWrist(T_B_Wd, 0.1, Wrench(Vector3(25,25,25), Vector3(5,5,5)))
             end_t = rospy.Time.now()+rospy.Duration(0.11)
             while rospy.Time.now()<end_t:
-                self.getTransformations()
-                if self.hasContact(100):
+#                self.getTransformations()
+#                if self.hasContact(100):
+                self.getTransformationsForContact()            
+                contact_time_diff = self.last_contact_time-rospy.Time.now()
+                if contact_time_diff.to_sec() < 0.2:
                     T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
                     P_contact = T_B_C*PyKDL.Vector(0,0,0)
                     self.addContact(P_contact)
@@ -917,8 +969,9 @@ Class for opening door with velma robot.
 #                    rospy.sleep(1.0)
 #                    return score
 
-            if abs(alpha_diff)<0.4:
-                door_position += 0.01 * 0.1
+            if abs(alpha_diff)<0.1:
+#                door_position += 0.01 * 0.1
+                door_position += 0.005 * 0.1
 
             if state == 0:
                 current_pos = door.getAttribute("base").value * door.getAttribute("handle").value + Ft_versor_B*door_position
@@ -961,15 +1014,20 @@ Class for opening door with velma robot.
                 current_pos = PyKDL.Vector(cx+r*math.cos(current_angle), cy+r*math.sin(current_angle), pz)
 
                 angle = self.fixAngleDiff(init_angle-math.atan2(P_contact.y()-cy, P_contact.x()-cx))
-                print "angle: %s"%(angle)
-                if (angle > 100.0/180.0*math.pi) or (angle < -100.0/180.0*math.pi):
+#                print "angle: %s"%(angle)
+                if (angle > 90.0/180.0*math.pi) or (angle < -90.0/180.0*math.pi):
                     print "end: angle: %s"%(angle)
                     break
 
             self.publishSinglePointMarker(current_pos.x(), current_pos.y(), current_pos.z(), self.m_id, r=0.2, g=0.2, b=1.0)
             self.m_id += 1
 
+            if self.m_id > m_id_max:
+                self.m_id = m_id_start
+
             Ft_value = 500.0 * PyKDL.dot( Ft_versor_B, current_pos - P_contact )
+            if Ft_value < Fr_value*1.0:
+                Ft_value = Fr_value*1.0
 
             continue
 
@@ -1073,6 +1131,27 @@ Class for opening door with velma robot.
 
     def spin(self, door):
 
+#######
+        if False:
+            self.getTransformations()
+            m_id_start = 10
+            m_id_max = 200
+            self.m_id = m_id_start
+            while True:
+                self.getTransformationsForContact()
+                if self.hasContact(100) and self.T_F_C != None:
+                    T_B_C = self.T_B_W*self.T_W_E*self.T_E_F*self.T_F_C
+                    P_contact = T_B_C*PyKDL.Vector(0,0,0)
+                    self.publishSinglePointMarker(P_contact.x(), P_contact.y(), P_contact.z(), self.m_id, r=1.0, g=0.0, b=0.0)
+                    self.m_id += 1
+                if self.checkStopCondition(0.1):
+                    return
+                if self.m_id > m_id_max:
+                    self.m_id = m_id_start
+
+            return
+#######
+
         # start with very low stiffness
         print "setting stiffness to very low value"
         self.moveImpedance(self.k_error, 0.5)
@@ -1165,7 +1244,7 @@ Class for opening door with velma robot.
                     rospy.sleep(1.0)
                     return
 
-                self.getTransformations()
+                self.getTransformationsForContact()
                 T_B_C = self.T_B_W * self.T_W_E * self.T_E_F * self.T_F_C
                 P_door_surface.append( T_B_C * PyKDL.Vector(0, 0, 0) )
 
@@ -1234,7 +1313,7 @@ Class for opening door with velma robot.
             rospy.sleep(1.0)
             return
 
-        self.getTransformations()
+        self.getTransformationsForContact()
         T_B_C = self.T_B_W * self.T_W_E * self.T_E_F * self.T_F_C
         T_M_B = door.getAttribute("base").value.Inverse()
         door.getAttribute("handle").value = T_M_B * T_B_C * PyKDL.Vector()
