@@ -715,7 +715,7 @@ Class for opening door with velma robot.
         if self.hasContact(50):
             if len(self.px) > 0:
                 dist = math.sqrt((self.px[-1]-P_contact.x())*(self.px[-1]-P_contact.x()) + (self.py[-1]-P_contact.y())*(self.py[-1]-P_contact.y()))
-                if dist > 0.005:
+                if dist > 0.001:
                     self.px.append(P_contact.x())
                     self.py.append(P_contact.y())
                     self.publishSinglePointMarker(P_contact, self.m_id, 1.0, 0.0, 0.0, "contact")
@@ -794,8 +794,10 @@ Class for opening door with velma robot.
                     v = TR_B_M*PyKDL.Vector(-1,0,0)
                 angle_line = math.atan2(line[1], line[0])
                 angle_door = math.atan2(v.y(), v.x())
+                mult = (1.0 + ((max_dist-min_dist)-0.02)/(0.1-0.02))
+                angle_line = angle_door + mult*self.fixAngleDiff(angle_line - angle_door)
 #                angle_line = angle_door + 2.0*self.fixAngleDiff(angle_line - angle_door)
-                angle_line = angle_door + self.fixAngleDiff(angle_line - angle_door)
+#                angle_line = angle_door + self.fixAngleDiff(angle_line - angle_door)
                 a = math.cos(angle_line)
                 b = math.sin(angle_line)
                 c = -a*self.px[-1] - b*self.py[-1]
@@ -842,9 +844,9 @@ Class for opening door with velma robot.
         self.getTransformations()
 
         # radial force
-        Fr_value = 8.0
+        Fr_value = 10.0
         # initial tangent force
-        Ft_value = 5.0
+        Ft_value = 6.0
 
         Fr_versor_B = PyKDL.Frame(door.getAttribute("base").value.M) * PyKDL.Vector(-1.0, 0.0, 0.0)
         Ft_versor_B = PyKDL.Frame(door.getAttribute("base").value.M) * PyKDL.Vector(0.0, 0.0, 1.0)
@@ -907,7 +909,7 @@ Class for opening door with velma robot.
         self.checkStopCondition(3.1)
 
         # change the stiffness
-        self.k_open = copy.deepcopy( Wrench(Vector3(800.0, 800.0, 400.0), Vector3(200.0, 200.0, 200.0)) )
+        self.k_open = copy.deepcopy( Wrench(Vector3(800.0, 800.0, 200.0), Vector3(200.0, 200.0, 200.0)) )
         self.moveImpedance(self.k_open, 2.0)
         self.checkStopCondition(2.0)
 
@@ -980,7 +982,7 @@ Class for opening door with velma robot.
             T_E_Ed = PyKDL.Frame(PyKDL.Rotation.RotX(-alpha))
             R_B_Ed = copy.deepcopy((door.getAttribute("base").value * T_M_Ed * T_E_Ed).M)
 
-            # calculate current absolute force vector in T (tool) frame FOR NEXT STEP
+            # calculate current absolute force vector in T (tool) frame
             R_B_Td = copy.deepcopy((PyKDL.Frame(R_B_Ed) * self.T_E_W * self.T_W_T).M)
             F_T = R_B_Td.Inverse() * F_B
 
@@ -999,14 +1001,27 @@ Class for opening door with velma robot.
             spring_B = R_B_Td * spring_T
 
             # apply spring constraint (limit max offset of the spring's end)
-            max_offset = 0.001
             E_pt_dest = P_contact + spring_B
+            self.publishSinglePointMarker(E_pt_dest, 0, 0.0, 1, 1, "E_pt_dest_no_constraint")
+
+            # test begin
+            spring_B_actual2 = E_pt_dest - P_contact
+            spring_T_actual2 = R_B_Td.Inverse() * spring_B_actual2
+            F_T_actual2 = PyKDL.Vector(spring_T_actual2.x() * self.k_open.force.x, spring_T_actual2.y() * self.k_open.force.y, spring_T_actual2.z() * self.k_open.force.z)
+            F_B_actual2 = R_B_Td * F_T_actual2
+            Fr_value_actual2 = PyKDL.dot(F_B_actual2, Fr_versor_B)
+            Ft_value_actual2 = PyKDL.dot(F_B_actual2, Ft_versor_B)
+            # test end
+
+            # constrain spring
+            max_offset = 0.002
             if E_pt_dest_prev != None:
                 v_offset = E_pt_dest - E_pt_dest_prev
                 if v_offset.Norm() > max_offset:
                     v_offset.Normalize()
-                    v_offset = v_offset*max_offset # PyKDL.Vector(v_offset.x()*max_offset, v_offset.y()*max_offset, v_offset.z()*max_offset)
+                    v_offset = v_offset*max_offset
                     E_pt_dest = E_pt_dest_prev + v_offset
+                print "v_offset: %s"%(v_offset)
 
             # calculate actual force after applying spring constraint
             spring_B_actual = E_pt_dest - P_contact
@@ -1021,6 +1036,7 @@ Class for opening door with velma robot.
             Ft_value_actual = PyKDL.dot(F_B_actual, Ft_versor_B)
 
             print "actual: Fr: %s    Ft: %s"%(Fr_value_actual, Ft_value_actual)
+            print "actual2: Fr: %s    Ft: %s"%(Fr_value_actual2, Ft_value_actual2)
 
             E_pt_dest_prev = copy.copy(E_pt_dest)
 ######################
@@ -1031,7 +1047,6 @@ Class for opening door with velma robot.
 
             normal_B = PyKDL.Frame(R_B_T) * PyKDL.Vector(0,0,1)
             alpha_norm = math.atan2(normal_B.y(), normal_B.x())
-#            alpha_force = math.atan2(F_B.y(), F_B.x())
             alpha_force = math.atan2(F_B_actual.y(), F_B_actual.x())
             alpha_diff = self.fixAngleDiff(alpha_force-alpha_norm)
             if alpha_diff > 0.02:
@@ -1137,6 +1152,8 @@ Class for opening door with velma robot.
                 self.m_id = m_id_start
 
             Ft_value = 30.0
+
+#            raw_input("Press Enter to continue...")
 
             continue
 
