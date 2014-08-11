@@ -265,12 +265,9 @@ Class for opening door with velma robot.
         self.q_start = (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 180.0/180.0*numpy.pi) 
         self.q_door = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
         self.q_handle = (75.0/180.0*numpy.pi, 75.0/180.0*numpy.pi, 75.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
-        self.q_close = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
-        self.d_init = 0.1
         self.k_door = Wrench(Vector3(200.0, 800.0, 1000.0), Vector3(300.0, 300.0, 300.0))
         self.k_door2 = Wrench(Vector3(800.0, 800.0, 800.0), Vector3(300.0, 300.0, 300.0))
         self.k_error = Wrench(Vector3(1.0, 1.0, 1.0), Vector3(0.5, 0.5, 0.5))
-        self.k_close = Wrench(Vector3(400.0, 400.0, 400.0), Vector3(100.0, 100.0, 100.0))
         self.T_B_W = None
         self.T_W_T = PyKDL.Frame(PyKDL.Vector(0.2,-0.05,0))    # tool transformation
         self.T_W_E = None
@@ -283,9 +280,6 @@ Class for opening door with velma robot.
 
         self.last_contact_time = rospy.Time.now()
 
-        self.init_motion_time = 3.0
-        self.door_angle_dest = 80.0/180.0*math.pi
-
         self.tactile_lock = Lock()
 
         # for tactile sync
@@ -296,13 +290,7 @@ Class for opening door with velma robot.
             # time, finger, max value, contact center
             self.tactile_data.append( [rospy.Time.now(), 0, 0, PyKDL.Vector()] )
 
-        self.exp = []
-
         # for score function
-        self.init_motion_time_left = 3.0
-        self.circle_cx = 0
-        self.circle_cy = 0
-        self.circle_r = 0
         self.failure_reason = "unknown"
 
         self.emergency_stop_active = False
@@ -564,9 +552,6 @@ Class for opening door with velma robot.
       py = cy + dy
       return [px, py]
       
-    def interpolate(begin, end, i, lenght):
-      return begin + (((end - begin)/lenght)*i)  
-
     def publishDoorMarker(self, cx, cy, cz, r):
         m = MarkerArray()
 
@@ -656,6 +641,9 @@ Class for opening door with velma robot.
         self.publishSinglePointMarker(T_B_T * PyKDL.Vector(1,0,0), 1, 1.0, 0, 0, "T_B_T")
         self.publishSinglePointMarker(T_B_T * PyKDL.Vector(0,1,0), 2, 1.0, 0, 0, "T_B_T")
         self.publishSinglePointMarker(T_B_T * PyKDL.Vector(0,0,1), 3, 1.0, 0, 0, "T_B_T")
+
+        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_cmd', rospy.Time(0))
+        self.T_B_T_cmd = pm.fromTf(pose)
 
     def getTransformationsForContact(self, threshold = 100):
         self.tactile_lock.acquire()
@@ -770,6 +758,9 @@ Class for opening door with velma robot.
             else:
                 a = n.x()
                 b = n.y()
+                length = math.sqrt(a*a + b*b)
+                a /= length
+                b /= length
                 c = -math.fsum(a*numpy.asarray(self.px) + b*numpy.asarray(self.py))/len(self.px)
                 return [a, b, c, max_dist-min_dist]
 
@@ -796,10 +787,11 @@ Class for opening door with velma robot.
                 angle_door = math.atan2(v.y(), v.x())
                 mult = (1.0 + ((max_dist-min_dist)-0.02)/(0.1-0.02))
                 angle_line = angle_door + mult*self.fixAngleDiff(angle_line - angle_door)
-#                angle_line = angle_door + 2.0*self.fixAngleDiff(angle_line - angle_door)
-#                angle_line = angle_door + self.fixAngleDiff(angle_line - angle_door)
                 a = math.cos(angle_line)
                 b = math.sin(angle_line)
+                length = math.sqrt(a*a + b*b)
+                a /= length
+                b /= length
                 c = -a*self.px[-1] - b*self.py[-1]
                 if PyKDL.dot(n, PyKDL.Vector(a,b,0)) < 0.0:
                     return [-a, -b, -c, max_dist-min_dist]
@@ -814,6 +806,9 @@ Class for opening door with velma robot.
             diff = self.fixAngleDiff(max_angle-min_angle)
             a = self.px[-1]-cx
             b = self.py[-1]-cy
+            length = math.sqrt(a*a + b*b)
+            a /= length
+            b /= length
             c = -a*self.px[-1] - b*self.py[-1]
             if PyKDL.dot(PyKDL.Vector(cx - self.px[-1], cy - self.py[-1], 0), PyKDL.Vector(a,b,0)) < 0.0:
                 return [-a, -b, -c, diff*r]
@@ -846,7 +841,7 @@ Class for opening door with velma robot.
         # radial force
         Fr_value = 10.0
         # initial tangent force
-        Ft_value = 6.0
+        Ft_value = 7.0
 
         Fr_versor_B = PyKDL.Frame(door.getAttribute("base").value.M) * PyKDL.Vector(-1.0, 0.0, 0.0)
         Ft_versor_B = PyKDL.Frame(door.getAttribute("base").value.M) * PyKDL.Vector(0.0, 0.0, 1.0)
@@ -930,8 +925,8 @@ Class for opening door with velma robot.
         end_t = rospy.Time.now()+rospy.Duration(3.0)
         while rospy.Time.now()<end_t:
             self.checkStopCondition(0.05)
-            self.getTransformationsForContact(100)
-            if self.hasContact(100):
+            self.getTransformationsForContact(200)
+            if self.hasContact(200):
                 contact_found = True
                 self.stopArm()
                 print "found contact"
@@ -945,15 +940,14 @@ Class for opening door with velma robot.
         hinge = door.getAttribute("base").value*door.getAttribute("hinge_pos").value
         self.pz = (self.T_B_W * self.T_W_E * self.T_E_F * self.T_F_pt * PyKDL.Vector(0,0,0) ).z()
 
-        init_surf = PyKDL.Frame(copy.deepcopy(door.getAttribute("base").value.M)) * PyKDL.Vector(-1,0,0)
-        init_angle = math.atan2(init_surf.y(), init_surf.x()) 
+        self.getTransformations()
+        E_pt_dest = self.T_B_T_cmd*PyKDL.Vector(0,0,0)
 
-        arc = None
-        speed = 0.0
-        speeds = deque()
-        i = 0
-        state = 0
-        E_pt_dest_prev = None
+        r_versor_B = copy.deepcopy(Fr_versor_B)
+        t_versor_B = copy.deepcopy(Ft_versor_B)
+
+        Ft_value = 30.0
+
         while True:
 
             self.getTransformationsForContact(100)            
@@ -964,64 +958,23 @@ Class for opening door with velma robot.
                 P_contact = T_B_C*PyKDL.Vector(0,0,0)
                 self.addContact(P_contact)
 
+            # circle estimation is used only for debugging and estimation of the door angle
             if len(self.px)>1:
                 cx, cy, r = self.estCircle(self.px, self.py, hinge.x(), hinge.y())
                 r_old = r
                 # for score function
-                self.circle_cx = cx
-                self.circle_cy = cy
-                self.circle_r = r
                 self.publishDoorMarker(cx, cy, P_contact.z(), r)
                 print "circle: cx: %s    cy: %s    r: %s"%(cx, cy, r)
 
             # calculate desired absolute force vector in B (base) frame
             F_B = Fr_versor_B * Fr_value + Ft_versor_B * Ft_value
 
-######################
             # calculate rotation frame
             T_E_Ed = PyKDL.Frame(PyKDL.Rotation.RotX(-alpha))
             R_B_Ed = copy.deepcopy((door.getAttribute("base").value * T_M_Ed * T_E_Ed).M)
 
             # calculate current absolute force vector in T (tool) frame
             R_B_Td = copy.deepcopy((PyKDL.Frame(R_B_Ed) * self.T_E_W * self.T_W_T).M)
-            F_T = R_B_Td.Inverse() * F_B
-
-            # white vector - force F_T
-            self.publishVectorMarker(PyKDL.Vector(0,0,0),F_T*0.011, 5, 1,1,1, "right_arm_tool", "F_T")
-            # green vector - force F_B
-            self.publishVectorMarker(self.T_B_W * self.T_W_T * PyKDL.Vector(0,0,0), self.T_B_W * self.T_W_T * PyKDL.Vector(0,0,0) + F_B*0.01, 2, 0,1,0, "torso_base", "F_B")
-            # light green vector - force Fr
-            self.publishVectorMarker(self.T_B_W * self.T_W_T * PyKDL.Vector(0,0,0), self.T_B_W * self.T_W_T * PyKDL.Vector(0,0,0) + Fr_versor_B*Fr_value*0.01, 3, 0.3,1,0.3, "torso_base", "Fr_B")
-            # dark green vector - force Ft
-            self.publishVectorMarker(self.T_B_W * self.T_W_T * PyKDL.Vector(0,0,0), self.T_B_W * self.T_W_T * PyKDL.Vector(0,0,0) + Ft_versor_B*Ft_value*0.01, 4, 0.3,1,0.3, "torso_base", "Ft_B")
-
-            # calculate spring offset from force and stiffness in T frame
-            spring_T = PyKDL.Vector(F_T.x()/self.k_open.force.x, F_T.y()/self.k_open.force.y, F_T.z()/self.k_open.force.z)
-            # calculate spring offset in B frame
-            spring_B = R_B_Td * spring_T
-
-            # apply spring constraint (limit max offset of the spring's end)
-            E_pt_dest = P_contact + spring_B
-            self.publishSinglePointMarker(E_pt_dest, 0, 0.0, 1, 1, "E_pt_dest_no_constraint")
-
-            # test begin
-            spring_B_actual2 = E_pt_dest - P_contact
-            spring_T_actual2 = R_B_Td.Inverse() * spring_B_actual2
-            F_T_actual2 = PyKDL.Vector(spring_T_actual2.x() * self.k_open.force.x, spring_T_actual2.y() * self.k_open.force.y, spring_T_actual2.z() * self.k_open.force.z)
-            F_B_actual2 = R_B_Td * F_T_actual2
-            Fr_value_actual2 = PyKDL.dot(F_B_actual2, Fr_versor_B)
-            Ft_value_actual2 = PyKDL.dot(F_B_actual2, Ft_versor_B)
-            # test end
-
-            # constrain spring
-            max_offset = 0.002
-            if E_pt_dest_prev != None:
-                v_offset = E_pt_dest - E_pt_dest_prev
-                if v_offset.Norm() > max_offset:
-                    v_offset.Normalize()
-                    v_offset = v_offset*max_offset
-                    E_pt_dest = E_pt_dest_prev + v_offset
-                print "v_offset: %s"%(v_offset)
 
             # calculate actual force after applying spring constraint
             spring_B_actual = E_pt_dest - P_contact
@@ -1036,11 +989,6 @@ Class for opening door with velma robot.
             Ft_value_actual = PyKDL.dot(F_B_actual, Ft_versor_B)
 
             print "actual: Fr: %s    Ft: %s"%(Fr_value_actual, Ft_value_actual)
-            print "actual2: Fr: %s    Ft: %s"%(Fr_value_actual2, Ft_value_actual2)
-
-            E_pt_dest_prev = copy.copy(E_pt_dest)
-######################
-
 
             # calculate new rotation of the gripper to align tool with force
             R_B_T = copy.deepcopy((self.T_B_W * self.T_W_T).M)
@@ -1049,12 +997,26 @@ Class for opening door with velma robot.
             alpha_norm = math.atan2(normal_B.y(), normal_B.x())
             alpha_force = math.atan2(F_B_actual.y(), F_B_actual.x())
             alpha_diff = self.fixAngleDiff(alpha_force-alpha_norm)
-            if alpha_diff > 0.02:
-                alpha += 0.02
-            elif alpha_diff < -0.02:
-                alpha -= 0.02
+            dead_angle = 10.0/180.0*math.pi
+            end_angle = 20.0/180.0*math.pi
+            fa = 0.0
+            alpha_add = 0.0
+            if (alpha_diff < dead_angle) and (alpha_diff > -dead_angle):
+                pass
             else:
-                alpha += alpha_diff
+                fa = (alpha_diff - dead_angle)/(end_angle - dead_angle)
+                if fa > 1.0:
+                    fa = 1.0
+                if fa < -1.0:
+                    fa = -1.0
+                alpha_add = fa * 0.2 * math.fabs(alpha_diff)
+                if alpha_add > 0.02:
+                    alpha_add = 0.02
+                if alpha_add < -0.02:
+                    alpha_add = -0.02
+                alpha += alpha_add
+
+            print "alpha: %s  alpha_diff: %s  fa: %s  alpha_add: %s"%(alpha/math.pi*180.0, alpha_diff/math.pi*180.0, fa, alpha_add/math.pi*180.0)
 
             # calculate the new rotation frame
             T_E_Ed = PyKDL.Frame(PyKDL.Rotation.RotX(-alpha))
@@ -1067,6 +1029,7 @@ Class for opening door with velma robot.
             T_B_Wd = self.calculateMoveGripperPointToPose( self.E_pt, R_B_Ed, E_pt_dest )
             self.moveWrist2(T_B_Wd)
 
+#            raw_input("Press Enter to continue...")
             self.moveWrist(T_B_Wd, 0.1, Wrench(Vector3(35,35,35), Vector3(5,5,5)))
             end_t = rospy.Time.now()+rospy.Duration(0.11)
             while rospy.Time.now()<end_t:
@@ -1094,10 +1057,6 @@ Class for opening door with velma robot.
                     rospy.sleep(1.0)
                     return 0
 
-            if arc == None:
-                last_dist = 0.0
-            else:
-                last_dist = arc[3]
             arc = self.calculateArc()
             if abs(arc[0]) > abs(arc[1]):
                 y1 = -2.0
@@ -1116,14 +1075,6 @@ Class for opening door with velma robot.
             # white line - tangent
             self.publishVectorMarker(PyKDL.Vector(x1,y1,self.pz),PyKDL.Vector(x2,y2,self.pz), 8, 1,1,1, "torso_base", "tangent_line")
 
-            speed = arc[3] - last_dist
-            speeds.append(speed)
-            if len(speeds) > 10:
-                speeds.popleft()
-
-            avg_speed = math.fsum(speeds)/float(len(speeds))
-            var_speed = math.fsum([(x-avg_speed)*(x-avg_speed) for x in speeds])/float(len(speeds))
-
             if arc[3] > 0.15:
                 alpha_door_init = math.atan2(self.py[0] - cy, self.px[0] - cx)
                 alpha_door_act = math.atan2(self.py[-1] - cy, self.px[-1] - cx)
@@ -1140,7 +1091,21 @@ Class for opening door with velma robot.
             if len(self.px) > 0:
                 self.publishVectorMarker(PyKDL.Vector(self.px[-1],self.py[-1],self.pz),PyKDL.Vector(self.px[-1]+arc[0],self.py[-1]+arc[1],self.pz), 7, 1,1,1, "torso_base", "radial_line")
 
-            print "arc_len: %s    avg_speed: %s   var_speed: %s    Ft: %s"%(arc[3], avg_speed, var_speed, Ft_value)
+            r_versor_B = PyKDL.Vector( -arc[0], -arc[1], 0 )
+            r_versor_B.Normalize()
+            t_versor_B = PyKDL.Vector( arc[1], -arc[0], 0 )
+            t_versor_B.Normalize()
+
+            E_pt_dest += t_versor_B*0.002
+            dist = arc[0]*E_pt_dest.x() + arc[1]*E_pt_dest.y() + arc[2]
+            print "arc: %s  %s  %s    dist: %s"%(arc[0], arc[1], arc[2],dist)
+            dist = -12.0/self.k_open.force.z - dist
+            print "dist_e: %s     r_versor_B: %s"%(dist, r_versor_B)
+            if dist > 0.003:
+                dist = 0.003
+            if dist < -0.003:
+                dist = -0.003
+            E_pt_dest -= r_versor_B*dist
 
             helper_versor = copy.deepcopy(Fr_versor_B * Ft_versor_B)
             Fr_versor_B = PyKDL.Vector( -arc[0], -arc[1], 0 )
@@ -1150,10 +1115,6 @@ Class for opening door with velma robot.
 
             if self.m_id > m_id_max:
                 self.m_id = m_id_start
-
-            Ft_value = 30.0
-
-#            raw_input("Press Enter to continue...")
 
             continue
 
@@ -1210,11 +1171,6 @@ Class for opening door with velma robot.
     def printQualityMeasure(self, score_open):
         print "quality measure:"
 
-        print "init_motion_time_left: %s"%(self.init_motion_time_left)
-        print "circle_cx: %s"%(self.circle_cx)
-        print "circle_cy: %s"%(self.circle_cy)
-        print "circle_r: %s"%(self.circle_r)
-
         wrench_total = math.sqrt(self.wrench_max.force.x*self.wrench_max.force.x + self.wrench_max.force.y*self.wrench_max.force.y + self.wrench_max.force.z*self.wrench_max.force.z) + 10*math.sqrt(self.wrench_max.torque.x*self.wrench_max.torque.x + self.wrench_max.torque.y*self.wrench_max.torque.y + self.wrench_max.torque.z*self.wrench_max.torque.z)
         wrench_mean_total = math.sqrt(self.wrench_mean.force.x*self.wrench_mean.force.x + self.wrench_mean.force.y*self.wrench_mean.force.y + self.wrench_mean.force.z*self.wrench_mean.force.z) + 10*math.sqrt(self.wrench_mean.torque.x*self.wrench_mean.torque.x + self.wrench_mean.torque.y*self.wrench_mean.torque.y + self.wrench_mean.torque.z*self.wrench_mean.torque.z)
 
@@ -1226,10 +1182,6 @@ Class for opening door with velma robot.
 
         with open("experiments.txt", "a") as exfile:
             exfile.write( "quality measure:" + "\n")
-            exfile.write( "init_motion_time_left:" + str(self.init_motion_time_left) + "\n" )
-            exfile.write( "circle_cx:" + str(self.circle_cx) + "\n" )
-            exfile.write( "circle_cy:" + str(self.circle_cy) + "\n" )
-            exfile.write( "circle_r:" + str(self.circle_r) + "\n" )
             exfile.write( "total max wrench:" + str(wrench_total) + "\n" )
             exfile.write( "total mean wrench:" + str(wrench_mean_total) + "\n" )
             exfile.write( "score_open:" + str(score_open) + "\n" )
@@ -1563,12 +1515,12 @@ if __name__ == '__main__':
     door.getAttribute("P3_end").value   = PyKDL.Frame( rot, PyKDL.Vector(0.15, 0.02, -0.10) )
 
     # for small radius
-    door.getAttribute("H_start").value = PyKDL.Vector(0.10, -0.12, 0.04)
-    door.getAttribute("H_end").value   = PyKDL.Vector(-0.10, -0.12, 0.04)
+#    door.getAttribute("H_start").value = PyKDL.Vector(0.10, -0.12, 0.04)
+#    door.getAttribute("H_end").value   = PyKDL.Vector(-0.10, -0.12, 0.04)
 
     # for big radius
-#    door.getAttribute("H_start").value = PyKDL.Vector(0.0, -0.12, 0.04)
-#    door.getAttribute("H_end").value   = PyKDL.Vector(-0.20, -0.12, 0.04)
+    door.getAttribute("H_start").value = PyKDL.Vector(0.0, -0.12, 0.04)
+    door.getAttribute("H_end").value   = PyKDL.Vector(-0.20, -0.12, 0.04)
 
     door.getAttribute("hinge_pos").value   = PyKDL.Vector(0.20, 0.0, 0.0)
 
