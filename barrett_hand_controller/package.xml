@@ -41,6 +41,7 @@
   <run_depend>std_srvs</run_depend> 
   <run_depend>rtt_std_srvs</run_depend> 
   <run_depend>rtt_barrett_hand_controller_srvs</run_depend>
+  <run_depend>kdl_parser</run_depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>

@@ -55,6 +55,8 @@ import numpy as np
 
 import copy
 
+import pose_lookup_table as plut
+
 # reference frames:
 # B - robot's base
 # W - wrist
@@ -814,6 +816,10 @@ Class for velma robot.
         return False
 
     def updateTransformations(self):
+        pose = self.listener.lookupTransform('torso_base', 'torso_link2', rospy.Time(0))
+        self.T_B_T2 = pm.fromTf(pose)
+        self.T_T2_B = self.T_B_T2.Inverse()
+
         pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
         self.T_B_W = pm.fromTf(pose)
 
@@ -1022,5 +1028,122 @@ Class for velma robot.
 #        if T_Fbase_F == None:
         return None
 #        return T_E_F * T_Fbase_F
+
+    def getClosestRotations(self, rot_set, rot):
+        buf = [[100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0]]
+        lbuf = len(buf)
+        def putToBuffer(data):
+            for i in range(0, lbuf):
+                if data[0] < buf[lbuf-1-i][0]:
+                    for j in range(0, lbuf-1-i):
+                        buf[j] = buf[j+1]
+                    buf[-1-i] = data
+                    break
+        i = 0
+        for r in rot_set:
+            twist = PyKDL.diff(PyKDL.Frame(r), PyKDL.Frame(rot), 1.0)
+            twist_v = (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
+            putToBuffer([twist_v,i])
+            i += 1
+        print "%s   %s   %s   %s   %s   %s   %s   %s   %s"%(buf[8][0], buf[7][0], buf[6][0], buf[5][0], buf[4][0], buf[3][0], buf[2][0], buf[1][0], buf[0][0])
+#        print "%s"%(buf[2][0])
+#        print "%s"%(buf[1][0])
+#        print "%s"%(buf[0][0])
+        return [buf[0][1], buf[1][1], buf[2][1]]
+
+    def getClosestRotation(self, rot_set, rot):
+        min_twist = 10000.0
+        i = 0
+        index = 0
+        for r in rot_set:
+            twist = PyKDL.diff(PyKDL.Frame(r), PyKDL.Frame(rot), 1.0)
+            twist_v = (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
+            if min_twist > twist_v:
+                min_twist = twist_v
+                index = i
+            i += 1
+        return [min_twist, index]
+
+    def isFramePossible(self, T_B_E):
+        T_T2_E = self.T_T2_B * T_B_E
+        pt_B = T_T2_E * PyKDL.Vector()
+        step = plut.x_set[1]-plut.x_set[0]
+        if pt_B.x() < plut.x_set[0]-step/2.0:
+            return False
+        if pt_B.x() > plut.x_set[-1]+step/2.0:
+            return False
+        if pt_B.y() < plut.y_set[0]-step/2.0:
+            return False
+        if pt_B.y() > plut.y_set[-1]+step/2.0:
+            return False
+        if pt_B.z() < plut.z_set[0]-step/2.0:
+            return False
+        if pt_B.z() > plut.z_set[-1]+step/2.0:
+            return False
+        i_x = int((pt_B.x() - (plut.x_set[0]-step/2.0))/step)
+        i_y = int((pt_B.y() - (plut.y_set[0]-step/2.0))/step)
+        i_z = int((pt_B.z() - (plut.z_set[0]-step/2.0))/step)
+#        print pt_B
+#        print "%s  %s  %s"%(i_x, i_y, i_z)
+#        closest_i = self.getClosestRotations(plut.rotations, T_T2_E.M)
+
+        min_twist = [10000.0, 0]
+        twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y][i_z]], T_T2_E.M)
+        if twist[0] < min_twist[0]:
+            min_twist = twist
+
+        if i_x > 0:
+            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x-1][i_y][i_z]], T_T2_E.M)
+            if twist[0] < min_twist[0]:
+                min_twist = twist
+
+        if i_x < len(plut.x_set)-1:
+            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x+1][i_y][i_z]], T_T2_E.M)
+            if twist[0] < min_twist[0]:
+                min_twist = twist
+
+        if i_y > 0:
+            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y-1][i_z]], T_T2_E.M)
+            if twist[0] < min_twist[0]:
+                min_twist = twist
+
+        if i_y < len(plut.y_set)-1:
+            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y+1][i_z]], T_T2_E.M)
+            if twist[0] < min_twist[0]:
+                min_twist = twist
+
+        if i_z > 0:
+            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y][i_z-1]], T_T2_E.M)
+            if twist[0] < min_twist[0]:
+                min_twist = twist
+
+        if i_z < len(plut.z_set)-1:
+            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y][i_z+1]], T_T2_E.M)
+            if twist[0] < min_twist[0]:
+                min_twist = twist
+
+        print "len: %s   pt: %s    min_twist: %s"%( len(plut.lookup_table[i_x][i_y][i_z]), pt_B, min_twist)
+
+        if min_twist[0] < 0.6:
+            return True
+        return False
+
+        print len(plut.lookup_table[i_x][i_y][i_z])
+        for index in closest_i:
+            if index in plut.lookup_table[i_x][i_y][i_z]:
+                return True
+            if i_x > 0 and index in plut.lookup_table[i_x-1][i_y][i_z]:
+                return True
+            if i_x < len(plut.x_set)-1 and index in plut.lookup_table[i_x+1][i_y][i_z]:
+                return True
+            if i_y > 0 and index in plut.lookup_table[i_x][i_y-1][i_z]:
+                return True
+            if i_y < len(plut.y_set)-1 and index in plut.lookup_table[i_x][i_y+1][i_z]:
+                return True
+            if i_z > 0 and index in plut.lookup_table[i_x][i_y][i_z-1]:
+                return True
+            if i_z < len(plut.z_set)-1 and index in plut.lookup_table[i_x][i_y][i_z+1]:
+                return True
+        return False
 
 
