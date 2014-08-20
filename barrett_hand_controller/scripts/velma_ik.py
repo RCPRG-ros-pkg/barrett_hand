@@ -62,6 +62,7 @@ from urdf_parser_py.urdf import URDF
 from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
 from velma import Velma
 import pose_lookup_table as plut
+from multiprocessing import Process, Queue
 
 # reference frames:
 # B - robot's base
@@ -234,16 +235,23 @@ def generateRotationsForDodecahedron():
 
     return ret
 
-def calculateIk(step, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist):
-    min_dist2 = min_dist*min_dist
-    max_dist2 = max_dist*max_dist
+class VelmaIkSolver:
 
-    robot = URDF.from_parameter_server()
-    tree = kdl_tree_from_urdf_model(robot)
-    print tree.getNrOfSegments()
+    def __init__(self, step, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist, rot):
+        self.min_dist2 = min_dist*min_dist
+        self.max_dist2 = max_dist*max_dist
+        self.x_set = list(np.arange(x_min, x_max, step))
+        self.y_set = list(np.arange(y_min, y_max, step))
+        self.z_set = list(np.arange(z_min, z_max, step))
+        self.pt_c_in_T2 = pt_c_in_T2
+        self.rot = rot
 
-    chain = tree.getChain("torso_link2", "right_HandPalmLink")
-    print chain.getNrOfJoints()
+        self.robot = URDF.from_parameter_server()
+        self.tree = kdl_tree_from_urdf_model(self.robot)
+#        print tree.getNrOfSegments()
+
+        self.chain = self.tree.getChain("torso_link2", "right_HandPalmLink")
+#        print chain.getNrOfJoints()
 
 # from velma_controller.launch:
 # upper_limit: [100.0, 100.0, 2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96, 2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96]
@@ -253,94 +261,119 @@ def calculateIk(step, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_
 # 2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96
 # -2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96
 # right_arm_0_joint, right_arm_1_joint, right_arm_2_joint, right_arm_3_joint, right_arm_4_joint, right_arm_5_joint, right_arm_6_joint
-    q_min = PyKDL.JntArray(7)#[-2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96]
-    q_max = PyKDL.JntArray(7)#[2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96]
-    q_limit = 0.26*0.1
-    q_min[0] = -2.96 + q_limit
-    q_min[1] = -2.09 + q_limit
-    q_min[2] = -2.96 + q_limit
-    q_min[3] = -2.09 + q_limit
-    q_min[4] = -2.96 + q_limit
-    q_min[5] = -2.09 + q_limit
-    q_min[6] = -2.96 + q_limit
-    q_max[0] = 2.96 - q_limit
-    q_max[1] = 2.09 - q_limit
-    q_max[2] = 2.96 - q_limit
-    q_max[3] = 2.09 - q_limit
-    q_max[4] = 2.96 - q_limit
-    q_max[5] = 2.09 - q_limit
-    q_max[6] = 2.96 - q_limit
-    fk_solver = PyKDL.ChainFkSolverPos_recursive(chain)
-    vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(chain)
-    ik_solver = PyKDL.ChainIkSolverPos_NR_JL(chain, q_min, q_max, fk_solver, vel_ik_solver, 100)
+        self.q_min = PyKDL.JntArray(7)#[-2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96]
+        self.q_max = PyKDL.JntArray(7)#[2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96]
+        self.q_limit = 0.26*0.5
+        self.q_min[0] = -2.96 + self.q_limit
+        self.q_min[1] = -2.09 + self.q_limit
+        self.q_min[2] = -2.96 + self.q_limit
+        self.q_min[3] = -2.09 + self.q_limit
+        self.q_min[4] = -2.96 + self.q_limit
+        self.q_min[5] = -2.09 + self.q_limit
+        self.q_min[6] = -2.96 + self.q_limit
+        self.q_max[0] = 2.96 - self.q_limit
+        self.q_max[1] = 2.09 - self.q_limit
+        self.q_max[2] = 2.96 - self.q_limit
+        self.q_max[3] = 2.09 - self.q_limit
+        self.q_max[4] = 2.96 - self.q_limit
+        self.q_max[5] = 2.09 - self.q_limit
+        self.q_max[6] = 2.96 - self.q_limit
+        self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
+        self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
+        self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
 
 #name: ['torso_0_joint', 'torso_1_joint', 'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint', 'left_arm_0_joint', 'left_arm_1_joint', 'left_arm_2_joint', 'left_arm_3_joint', 'left_arm_4_joint', 'left_arm_5_joint', 'left_arm_6_joint']
 #position: [0.01879189377789692, -1.5707963267948966, -1.256859302520752, 1.4936097860336304, -1.429112434387207, 1.8518760204315186, 0.12087352573871613, -1.626944661140442, 1.7902963161468506, -1.7999240159988403, -1.8513352870941162, 1.6786730289459229, -1.1203926801681519, 0.0015585091896355152, 1.8605016469955444, 1.3599008321762085]
 
-    q_init = PyKDL.JntArray(7)
-    q_init[0] = -1.256859302520752
-    q_init[1] = 1.4936097860336304
-    q_init[2] = -1.429112434387207
-    q_init[3] = 1.8518760204315186
-    q_init[4] = 0.12087352573871613
-    q_init[5] = -1.626944661140442
-    q_init[6] = 1.7902963161468506
+        self.q_init = PyKDL.JntArray(7)
+        self.q_init[0] = -1.256859302520752
+        self.q_init[1] = 1.4936097860336304
+        self.q_init[2] = -1.429112434387207
+        self.q_init[3] = 1.8518760204315186
+        self.q_init[4] = 0.12087352573871613
+        self.q_init[5] = -1.626944661140442
+        self.q_init[6] = 1.7902963161468506
 
-    q_out = PyKDL.JntArray(7)
+        self.q_out = PyKDL.JntArray(7)
 
-    x_set = np.arange(x_min, x_max, step)
-    y_set = np.arange(y_min, y_max, step)
-    z_set = np.arange(z_min, z_max, step)
-    print "#length: %s"%(len(x_set)*len(y_set)*len(z_set))
-    print "rotations=["
-    for r in rot:
-        q = r.GetQuaternion()
-        print "PyKDL.Rotation.Quaternion(%s,%s,%s,%s),"%(q[0],q[1],q[2],q[3])
-    print "]"
-    print "x_set=["
-    for x in x_set:
-        print "%s,"%(x)
-    print "]"
-    print "y_set=["
-    for x in y_set:
-        print "%s,"%(x)
-    print "]"
-    print "z_set=["
-    for x in z_set:
-        print "%s,"%(x)
-    print "]"
+    def printRotations(self):
+        print "rotations=["
+        for r in self.rot:
+            q = r.GetQuaternion()
+            print "PyKDL.Rotation.Quaternion(%s,%s,%s,%s),"%(q[0],q[1],q[2],q[3])
+        print "]"
+        
+    def printSets(self):
+        print "x_set="
+        print self.x_set
+#        for x in self.x_set:
+#            print "%s,"%(x)
+#        print "]"
+        print "y_set="
+        print self.y_set
+#        for x in self.y_set:
+#            print "%s,"%(x)
+#        print "]"
+        print "z_set="
+        print self.z_set
+#        for x in self.z_set:
+#            print "%s,"%(x)
+#        print "]"
 
-    print "lookup_table=["
-    for x in x_set:
-        print "# x=%s"%(x)
-        print "["
-        if rospy.is_shutdown():
-            break
-        y = 0
-        for y in y_set:
-            print "# y=%s"%(y)
+    def printLookupTable(self, tab):
+        print "lookup_table=["
+        for tab_x in tab:
             print "["
-            for z in z_set:
+            for tab_y in tab_x:
                 print "["
-                if rospy.is_shutdown():
-                    break
-                rot_index = 0
-                dist = (pt_c_in_T2.x()-x)*(pt_c_in_T2.x()-x) + (pt_c_in_T2.y()-y)*(pt_c_in_T2.y()-y) + (pt_c_in_T2.z()-z)*(pt_c_in_T2.z()-z)
-                if dist <= max_dist2 and dist >= min_dist2:
-                    for r in rot:
-                        fr = PyKDL.Frame(r, PyKDL.Vector(x,y,z))
-                        status = ik_solver.CartToJnt(q_init, fr, q_out)
-                        if status == 0:
-                            print "%s,"%(rot_index)
-                        rot_index += 1
-                else:
-                    print "# skipped"
+                for tab_z in tab_y:
+                    print tab_z
+                    print ","
                 print "],"
             print "],"
-        print "],"
-    print "]"
+        print "]"
 
-    print "# successfully generated"
+    def calculateIk(self, x_index_start, x_index_end, q):
+        ret = []
+#        print "#length: %s"%(len(x_set)*len(y_set)*len(z_set))
+#        print "lookup_table=["
+        for x in self.x_set[x_index_start:x_index_end]:
+            ret_x = []
+            print "# x=%s"%(x)
+#            print "["
+            if rospy.is_shutdown():
+                break
+            y = 0
+            for y in self.y_set:
+                ret_y = []
+#                print "# y=%s"%(y)
+#                print "["
+                for z in self.z_set:
+                    ret_z = []
+#                    print "["
+                    if rospy.is_shutdown():
+                        break
+                    rot_index = 0
+                    dist = (self.pt_c_in_T2.x()-x)*(self.pt_c_in_T2.x()-x) + (self.pt_c_in_T2.y()-y)*(self.pt_c_in_T2.y()-y) + (self.pt_c_in_T2.z()-z)*(self.pt_c_in_T2.z()-z)
+                    if dist <= self.max_dist2 and dist >= self.min_dist2:
+                        for r in self.rot:
+                            fr = PyKDL.Frame(r, PyKDL.Vector(x,y,z))
+                            status = self.ik_solver.CartToJnt(self.q_init, fr, self.q_out)
+                            if status == 0:
+#                                print "%s,"%(rot_index)
+                                ret_z.append(rot_index)
+                            rot_index += 1
+#                    else:
+#                        print "# skipped"
+#                    print "],"
+                    ret_y.append(ret_z)
+#                print "],"
+                ret_x.append(ret_y)
+#            print "],"
+            ret.append(ret_x)
+#        print "]"
+        q.put(ret)
+#        print "# successfully generated"
 
 if __name__ == '__main__':
 
@@ -426,7 +459,7 @@ if __name__ == '__main__':
         exit(0)   
 
     # test: draw the workspace
-    if True:
+    if False:
         rospy.init_node('velma_ik_draw_workspace')
         global pub_marker
         pub_marker = rospy.Publisher('/door_markers', MarkerArray)
@@ -457,7 +490,7 @@ if __name__ == '__main__':
                         if dist < min_dist:
                             min_dist = dist
                         size = float(l)/60.0
-                        publishSinglePointMarker(PyKDL.Vector(x,y,z), i, r=1, g=1, b=1, namespace='default', frame_id="torso_link2", m_type=Marker.SPHERE, scale=Vector3(0.05*size, 0.05*size, 0.05*size))
+                        publishSinglePointMarker(PyKDL.Vector(x,y,z), i, r=1.0, g=1*size, b=1*size, namespace='default', frame_id="torso_link2", m_type=Marker.SPHERE, scale=Vector3(0.05*size, 0.05*size, 0.05*size))#, scale=Vector3(0.05*size, 0.05*size, 0.05*size))
                         i += 1
                     z_i += 1
                 y_i += 1
@@ -500,11 +533,14 @@ if __name__ == '__main__':
         exit(0)
 
     # discretize the space
-    if False:
+    if True:
         rospy.init_node('velma_ik_solver')
         global pub_marker
         pub_marker = rospy.Publisher('/door_markers', MarkerArray)
         rospy.sleep(1)
+
+        print "#!/usr/bin/env python"
+        print "import PyKDL"
 
         velma = Velma()
         velma.updateTransformations()
@@ -513,17 +549,50 @@ if __name__ == '__main__':
         min_dist = 0.330680893438 - 0.05
         max_dist = 0.903499165003 + 0.05
 
-        print "#!/usr/bin/env python"
-        print "import PyKDL"
-
-        rot = generateRotationsForDodecahedron()
-        print "# number of rotations: %s"%(len(rot))
         x_min = 0.1
         x_max = 1.0
         y_min = -0.4
         y_max = 1.0
         z_min = -0.4
         z_max = 1.2
+
+        rot = generateRotationsForDodecahedron()
+
+        ik = VelmaIkSolver(0.025, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist, rot)
+
+        ik.printRotations()
+        ik.printSets()
+        q0 = Queue()
+        q1 = Queue()
+        q2 = Queue()
+        q3 = Queue()
+#        ik.calculateIk(0, int(1.0/4.0*len(ik.x_set)), ret)
+#        ik.calculateIk(int(1.0/4.0*len(ik.x_set)), int(2.0/4.0*len(ik.x_set)), ret)
+#        ik.calculateIk(int(2.0/4.0*len(ik.x_set)), int(3.0/4.0*len(ik.x_set)), ret)
+#        ik.calculateIk(int(3.0/4.0*len(ik.x_set)), int(4.0/4.0*len(ik.x_set)), ret)
+
+        p0 = Process(target=ik.calculateIk, args=(0, int(1.0/4.0*len(ik.x_set)), q0,))
+        p1 = Process(target=ik.calculateIk, args=(int(1.0/4.0*len(ik.x_set)), int(2.0/4.0*len(ik.x_set)), q1,))
+        p2 = Process(target=ik.calculateIk, args=(int(2.0/4.0*len(ik.x_set)), int(3.0/4.0*len(ik.x_set)), q2,))
+        p3 = Process(target=ik.calculateIk, args=(int(3.0/4.0*len(ik.x_set)), int(4.0/4.0*len(ik.x_set)), q3,))
+        p0.start()
+        p1.start()
+        p2.start()
+        p3.start()
+        p0.join()
+        p1.join()
+        p2.join()
+        p3.join()
+        ret0 = q0.get()
+        ret1 = q1.get()
+        ret2 = q2.get()
+        ret3 = q3.get()
+#        print "%s %s %s %s"%(len(ret0),len(ret1),len(ret2),len(ret3))
+        ik.printLookupTable(ret0 + ret1 + ret2 + ret3)
+
+        exit(0)
+
+        print "# number of rotations: %s"%(len(rot))
         publishSinglePointMarker(PyKDL.Vector((x_min+x_max)/2.0, (y_min+y_max)/2.0, (z_min+z_max)/2.0), 0, r=1, g=1, b=1, namespace='default', frame_id="torso_link2", m_type=Marker.CUBE, scale=Vector3(x_max-x_min, y_max-y_min, z_max-z_min))
         calculateIk(0.025, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist)
         exit(0)
