@@ -72,24 +72,12 @@ from velma import Velma
 # N - the end point of finger's nail
 # J - jar marker frame (jar cap)
 
-def publishSinglePointMarker(pt, i, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005)):
-    m = MarkerArray()
-    marker = Marker()
-    marker.header.frame_id = frame_id
-    marker.header.stamp = rospy.Time.now()
-    marker.ns = namespace
-    marker.id = i
-    marker.type = m_type
-    marker.action = 0
-    marker.pose = Pose( Point(pt.x(),pt.y(),pt.z()), Quaternion(0,0,0,1) )
-    marker.scale = scale
-    marker.color = ColorRGBA(r,g,b,0.5)
-    m.markers.append(marker)
-    pub_marker.publish(m)
+class MarkerPublisher:
+    def __init__(self):
+        self.pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
 
-def publishMultiPointsMarker(pt, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002)):
-    m = MarkerArray()
-    for i in range(0, len(pt)):
+    def publishSinglePointMarker(self, pt, i, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005)):
+        m = MarkerArray()
         marker = Marker()
         marker.header.frame_id = frame_id
         marker.header.stamp = rospy.Time.now()
@@ -97,36 +85,50 @@ def publishMultiPointsMarker(pt, r=1, g=0, b=0, namespace='default', frame_id='t
         marker.id = i
         marker.type = m_type
         marker.action = 0
-        marker.pose = Pose( Point(pt[i].x(),pt[i].y(),pt[i].z()), Quaternion(0,0,0,1) )
+        marker.pose = Pose( Point(pt.x(),pt.y(),pt.z()), Quaternion(0,0,0,1) )
         marker.scale = scale
         marker.color = ColorRGBA(r,g,b,0.5)
         m.markers.append(marker)
-    pub_marker.publish(m)
+        self.pub_marker.publish(m)
 
-def publishVectorMarker(v1, v2, i, r, g, b, frame='torso_base', namespace='default'):
-    m = MarkerArray()
+    def publishMultiPointsMarker(self, pt, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002)):
+        m = MarkerArray()
+        for i in range(0, len(pt)):
+            marker = Marker()
+            marker.header.frame_id = frame_id
+            marker.header.stamp = rospy.Time.now()
+            marker.ns = namespace
+            marker.id = i
+            marker.type = m_type
+            marker.action = 0
+            marker.pose = Pose( Point(pt[i].x(),pt[i].y(),pt[i].z()), Quaternion(0,0,0,1) )
+            marker.scale = scale
+            marker.color = ColorRGBA(r,g,b,0.5)
+            m.markers.append(marker)
+        self.pub_marker.publish(m)
 
-    marker = Marker()
-    marker.header.frame_id = frame
-    marker.header.stamp = rospy.Time.now()
-    marker.ns = namespace
-    marker.id = i
-    marker.type = Marker.ARROW
-    marker.action = 0
-    marker.points.append(Point(v1.x(), v1.y(), v1.z()))
-    marker.points.append(Point(v2.x(), v2.y(), v2.z()))
-    marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
-    marker.scale = Vector3(0.001, 0.002, 0)
-    marker.color = ColorRGBA(r,g,b,0.5)
-    m.markers.append(marker)
+    def publishVectorMarker(self, v1, v2, i, r, g, b, frame='torso_base', namespace='default'):
+        m = MarkerArray()
+        marker = Marker()
+        marker.header.frame_id = frame
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = namespace
+        marker.id = i
+        marker.type = Marker.ARROW
+        marker.action = 0
+        marker.points.append(Point(v1.x(), v1.y(), v1.z()))
+        marker.points.append(Point(v2.x(), v2.y(), v2.z()))
+        marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
+        marker.scale = Vector3(0.001, 0.002, 0)
+        marker.color = ColorRGBA(r,g,b,0.5)
+        m.markers.append(marker)
+        self.pub_marker.publish(m)
 
-    pub_marker.publish(m)
-
-def publishFrameMarker(T, base_id, scale=0.1, frame='torso_base', namespace='default'):
-    publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(scale,0,0), base_id, 1, 0, 0, frame, namespace)
-    publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(0,scale,0), base_id+1, 0, 1, 0, frame, namespace)
-    publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(0,0,scale), base_id+2, 0, 0, 1, frame, namespace)
-    return base_id+3
+    def publishFrameMarker(self, T, base_id, scale=0.1, frame='torso_base', namespace='default'):
+        self.publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(scale,0,0), base_id, 1, 0, 0, frame, namespace)
+        self.publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(0,scale,0), base_id+1, 0, 1, 0, frame, namespace)
+        self.publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(0,0,scale), base_id+2, 0, 0, 1, frame, namespace)
+        return base_id+3
 
 def getAngle(v1, v2):
     return math.atan2((v1*v2).Norm(), PyKDL.dot(v1,v2))
@@ -154,7 +156,8 @@ class Jar:
 #               self.pt.append(PyKDL.Vector(current_r*math.cos(angle), current_r*math.sin(angle), 0.0)) 
 #               self.pt.append(PyKDL.Vector(current_r*math.cos(angle), current_r*math.sin(angle), self.H)) 
 
-    def __init__(self):
+    def __init__(self, pub_marker = None):
+        self.pub_marker = pub_marker
         self.R = 0.04
         self.H = 0.195
         self.generatePoints(0.01)
@@ -166,7 +169,8 @@ class Jar:
 
     def drawPoints(self):
         print "drawPoints: %s"%(len(self.pt))
-        publishMultiPointsMarker(self.pt, 0, 1, 0, namespace="jar_points", frame_id="jar")
+        if self.pub_marker != None:
+            self.pub_marker.publishMultiPointsMarker(self.pt, 0, 1, 0, namespace="jar_points", frame_id="jar")
 
     def publishTf(self):
         pose = pm.toMsg(self.T_B_Jbase)
@@ -179,7 +183,8 @@ class Jar:
             rospy.sleep(interval)
 
     def drawJar(self):
-        publishSinglePointMarker(PyKDL.Vector(0,0,self.H*0.5), 0, r=0, g=1, b=0, namespace='jar', frame_id='jar', m_type=Marker.CYLINDER, scale=Vector3(self.R*2.0, self.R*2.0, self.H))
+        if self.pub_marker != None:
+            self.pub_marker.publishSinglePointMarker(PyKDL.Vector(0,0,self.H*0.5), 0, r=0, g=1, b=0, namespace='jar', frame_id='jar', m_type=Marker.CYLINDER, scale=Vector3(self.R*2.0, self.R*2.0, self.H))
 
     def addMarkerObservation(self, T_B_M):
         self.position_error = 0.05   # in meters: 0.05m -> "there is a jar somewhere around this marker"
@@ -194,7 +199,8 @@ class Jar:
 
     def drawContactObservations(self):
         print "drawContactObservations: %s"%(len(self.contacts_Jbase))
-        publishMultiPointsMarker(self.contacts_Jbase, 1, 0, 0, namespace="jar_obs", frame_id="jar")
+        if self.pub_marker != None:
+            self.pub_marker.publishMultiPointsMarker(self.contacts_Jbase, 1, 0, 0, namespace="jar_obs", frame_id="jar")
 
     def estPosition(self):
         def calc_R(xo, yo):
@@ -252,7 +258,8 @@ class JarOpener:
 Class for opening the jar.
 """
 
-    def __init__(self):
+    def __init__(self, pub_marker=None):
+        self.pub_marker = pub_marker
         self.listener = tf.TransformListener();
         self.joint_states_lock = Lock()
 
@@ -280,15 +287,18 @@ Class for opening the jar.
         while angle < 180.0:
             T_E_Fd = robot.get_T_E_Fd(0, math.pi*angle/180.0)
             pt = robot.T_B_W * robot.T_W_E * T_E_Fd * PyKDL.Vector(0.05, -0.01, 0)
-            publishSinglePointMarker(pt, 0, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+            if self.pub_marker != None:
+                self.pub_marker.publishSinglePointMarker(pt, 0, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
 
             T_E_Fd = robot.get_T_E_Fd(1, math.pi*angle/180.0)
             pt = robot.T_B_W * robot.T_W_E * T_E_Fd * PyKDL.Vector(0.05, -0.01, 0)
-            publishSinglePointMarker(pt, 1, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+            if self.pub_marker != None:
+                self.pub_marker.publishSinglePointMarker(pt, 1, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
 
             T_E_Fd = robot.get_T_E_Fd(2, math.pi*angle/180.0)
             pt = robot.T_B_W * robot.T_W_E * T_E_Fd * PyKDL.Vector(0.05, -0.01, 0)
-            publishSinglePointMarker(pt, 2, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+            if self.pub_marker != None:
+                self.pub_marker.publishSinglePointMarker(pt, 2, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
             if robot.checkStopCondition(0.02):
                 exit(0)
             angle += 0.5                
@@ -336,7 +346,7 @@ Class for opening the jar.
     def spin(self):
 
         # create the jar model
-        jar = Jar()
+        jar = Jar(self.pub_marker)
         # start thread for jar tf publishing and for visualization
         thread.start_new_thread(jar.tfBroadcasterLoop, (0.5, 1))
         # look for jar marker
@@ -351,19 +361,6 @@ Class for opening the jar.
         # calculate angle between jar_axis and vertical vector (z) in B
         jar_up_angle = 180.0*getAngle(PyKDL.Frame(T_B_J.M)*PyKDL.Vector(0,0,1), PyKDL.Vector(0,0,1))/math.pi
         print "angle between jar_axis and vertical vector (z) in B: %s deg."%(jar_up_angle)
-#        if jar_up_angle > 30.0:
-#            print "the jar angle is too big"
-#            exit(0)
-
-        # test for contact points observation
-        if False:
-            for i in range(0, 40):
-                jar.addContactObservation(jar.T_B_Jbase*(jar.pt[random.randint(0,len(jar.pt)-1)]+PyKDL.Vector(0.05,0,0)))
-            jar.drawContactObservations()
-            rospy.sleep(2)
-            jar.processContactObservations()
-            rospy.sleep(2)
-            exit(0)
 
         # stiffness for jar touching
         k_jar_touching = Wrench(Vector3(800.0, 800.0, 800.0), Vector3(200.0, 200.0, 200.0))
@@ -373,6 +370,84 @@ Class for opening the jar.
         velma = Velma()
 
         velma.updateTransformations()
+
+        spread_angle_cap_deg = 20.0
+
+        # calculate the best grip for the jar
+        if True:
+            # reset the gripper
+            self.resetGripper(velma)
+
+            # prepare hook gripper configuration
+            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi) )
+            if velma.checkStopCondition(4.0):
+                exit(0)
+
+            velma.updateTransformations()
+
+            # we move the jar along y axis i E frame
+            best_n = 0.0
+            x = 0.0
+            for y in np.arange(-0.03, 0.03, 0.001):
+                kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
+                finger_index = 0
+                contact = [False, False, False]
+                desired_angles = [0.0, 0.0, 0.0]
+                pt = [PyKDL.Vector(), PyKDL.Vector(), PyKDL.Vector()]
+                # for each finger iterate through joint angles until there is a contact with the jar
+                for k in kinematics:
+                    # calculate contact points we want to reach
+                    for data in k:
+                        desired_angles[finger_index] = data[0]
+                        T_E_Fd = velma.get_T_E_Fd(finger_index, data[0])
+                        # iterate through all cells of the sensor matrix
+                        for T_F_S in velma.pressure_frames:
+                            pt[finger_index] = T_E_Fd * T_F_S * PyKDL.Vector()
+                            z = pt[finger_index].z()
+                            r = (pt[finger_index]-PyKDL.Vector(x,y,z)).Norm()
+                            if r <= jar.R:
+                                contact[finger_index] = True
+                                break
+                        if contact[finger_index]:
+                            break
+                    # if we do not have contact for one finger, discard the whole try
+                    if not contact[finger_index]:
+                        break
+                    finger_index += 1
+                # if we have contact point for each finger, compute the plane for three points and its normal
+                if contact[0] and contact[1] and contact[2]:
+                    n = (pt[0]-pt[1])*(pt[0]-pt[2])
+                    n.Normalize()
+                    if math.fabs(n.z()) > best_n:
+                        best_n = math.fabs(n.z())
+                        best_y = y
+                        best_pt = copy.deepcopy(pt)
+                        best_desired_angles = copy.deepcopy(desired_angles)
+
+            print "best_desired_angles (rad): %s"%(best_desired_angles)
+            print "best_y: %s"%(best_y)
+            print "best_n: %s"%(best_n)
+
+            # prepare hook gripper configuration
+            velma.move_hand_client("right", (best_desired_angles[0], best_desired_angles[1], best_desired_angles[2], spread_angle_cap_deg/180.0*numpy.pi) )
+            if velma.checkStopCondition(4.0):
+                exit(0)
+
+            # the normal is the z versor of the new frame C
+            Cz_inE = (best_pt[0]-best_pt[1])*(best_pt[0]-best_pt[2])
+            if Cz_inE.z() < 0.0:
+                Cz_inE = -Cz_inE
+            Cx_inE = PyKDL.Vector(1,0,0)
+            Cy_inE = Cz_inE * Cx_inE
+            Cx_inE = Cy_inE * Cz_inE
+            Cx_inE.Normalize()
+            Cy_inE.Normalize()
+            Cz_inE.Normalize()
+            Cp_inE = PyKDL.Vector(x,best_y,((best_pt[0]+best_pt[1]+best_pt[2])*(1.0/3.0)).z())
+            T_E_JCdecap = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
+            T_JCdecap_E = T_E_JCdecap.Inverse()
+            cap_hangle_q = copy.deepcopy(best_desired_angles)
+#            exit(0)
 
         # start with very low stiffness
         print "setting stiffness to very low value"
@@ -469,18 +544,21 @@ Class for opening the jar.
             # set S frame destination for the best angle
             T_B_Sd = T_B_Sd * PyKDL.Frame(PyKDL.Rotation.RotZ(best_angle_deg/180.0*math.pi))
 
-            m_id = publishFrameMarker(T_B_Sd, 0, scale=0.1, frame='torso_base', namespace='default')
-            m_id = publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerThreeKnuckleThreeLink', namespace='default')
+#            if self.pub_marker != None:
+#                m_id = self.pub_marker.publishFrameMarker(T_B_Sd, 0, scale=0.1, frame='torso_base', namespace='default')
+#                m_id = self.pub_marker.publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerThreeKnuckleThreeLink', namespace='default')
 
-            raw_input("Press Enter to continue...")
+#            raw_input("Press Enter to continue...")
 
             T_B_Sd1 = T_B_Sd * PyKDL.Frame(PyKDL.Vector(0,0,-0.1))
-            m_id = publishFrameMarker(T_B_Sd1, m_id, scale=0.1, frame='torso_base', namespace='default')
+#            if self.pub_marker != None:
+#                m_id = self.pub_marker.publishFrameMarker(T_B_Sd1, m_id, scale=0.1, frame='torso_base', namespace='default')
 
-            raw_input("Press Enter to continue...")
+#            raw_input("Press Enter to continue...")
 
             T_B_Sd2 = T_B_Sd * PyKDL.Frame(PyKDL.Vector(0,0,0.05))
-            m_id = publishFrameMarker(T_B_Sd2, m_id, scale=0.1, frame='torso_base', namespace='default')
+#            if self.pub_marker != None:
+#                m_id = self.pub_marker.publishFrameMarker(T_B_Sd2, m_id, scale=0.1, frame='torso_base', namespace='default')
 
             T_B_Wd = T_B_Sd1 * T_S_F * velma.T_F_E * velma.T_E_W
 
@@ -583,9 +661,10 @@ Class for opening the jar.
                 exit(0)
             velma.updateTransformations()
 
-#            m_id = publishFrameMarker(T_F_S, 0, scale=0.1, frame='right_HandFingerOneKnuckleThreeLink', namespace='default')
-#            m_id = publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerTwoKnuckleThreeLink', namespace='default')
-#            m_id = publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerThreeKnuckleThreeLink', namespace='default')
+#            if self.pub_marker != None:
+#                m_id = self.pub_marker.publishFrameMarker(T_F_S, 0, scale=0.1, frame='right_HandFingerOneKnuckleThreeLink', namespace='default')
+#                m_id = self.pub_marker.publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerTwoKnuckleThreeLink', namespace='default')
+#                m_id = self.pub_marker.publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerThreeKnuckleThreeLink', namespace='default')
 
             # get the relative transformations between fingers' tactile sensors
             T_S1_S2 = T_S_F * velma.T_F13_E * velma.T_E_F23 * T_F_S
@@ -662,6 +741,7 @@ Class for opening the jar.
             T_F_E = [velma.T_F13_E, velma.T_F23_E, velma.T_F33_E]
 
             self.resetContacts()
+            jar.resetContactObservations()
 
             for i in range(0,3):
                 T_B_Wd = T_B_Sd1[i] * T_S_F * T_F_E[i] * velma.T_E_W
@@ -683,7 +763,7 @@ Class for opening the jar.
                     exit(0)
 
                 velma.moveWrist(T_B_Wd, 10, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                contacts = velma.waitForFirstContact(50, 11.0, emergency_stop=True, f1=True, f2=True, f3=True, palm=False)
+                contacts = velma.waitForFirstContact(50, 11.0, emergency_stop=True, f1=(i==0), f2=(i==1), f3=(i==2), palm=False)
                 if len(contacts) < 1:
                     print "no contact"
                     exit(0)
@@ -692,9 +772,9 @@ Class for opening the jar.
                     mean_contact += c
                 self.addContact(mean_contact*(1.0/len(contacts)))
 
-                for c in self.contacts:
-                    jar.addContactObservation(c)
-                jar.drawContactObservations()
+            for c in self.contacts:
+                jar.addContactObservation(c)
+            jar.drawContactObservations()
 
             T_B_Wd = T_B_Sd1[2] * T_S_F * T_F_E[2] * velma.T_E_W
 
@@ -714,54 +794,53 @@ Class for opening the jar.
             # get the fresh pose of the jar
             T_B_JC = copy.deepcopy(jar.getJarCapFrame())
 
-            spread_angle_decap_deg = 0.0
-
             # set gripper configuration for jar decap
-            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, spread_angle_decap_deg/180.0*numpy.pi) )
+            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi) )
             if velma.checkStopCondition(3.0):
                 exit(0)
             velma.updateTransformations()
 
-            jar_cap = PyKDL.Vector()
-            desired_angles = []
-            desired_points_E = []
-            kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
+#            jar_cap = PyKDL.Vector()
+#            desired_angles = []
+#            desired_points_E = []
+#            kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
 
-            finger = 0
-            for k in kinematics:
-                # calculate contact points we want to reach
-                for data in k:
-                    T_E_Fd = velma.get_T_E_Fd(finger, data[0])
-                    pt_E = T_E_Fd * velma.pressure_frames[7*3+1] * PyKDL.Vector()
-                    diff = pt_E-jar_cap
-                    diff = PyKDL.Vector(diff.x(), diff.y(), 0.0)
-                    if diff.Norm() < jar.R-0.005:
-                        publishSinglePointMarker(pt_E, finger, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
-                        desired_angles.append(data[0])
-                        desired_points_E.append(copy.deepcopy(pt_E))
-                        break
-                finger += 1
-            print "desired_angles: %s"%(desired_angles)
+#            finger = 0
+#            for k in kinematics:
+#                # calculate contact points we want to reach
+#                for data in k:
+#                    T_E_Fd = velma.get_T_E_Fd(finger, data[0])
+#                    pt_E = T_E_Fd * velma.pressure_frames[7*3+1] * PyKDL.Vector()
+#                    diff = pt_E-jar_cap
+#                    diff = PyKDL.Vector(diff.x(), diff.y(), 0.0)
+#                    if diff.Norm() < jar.R-0.005:
+#                        if self.pub_marker != None:
+#                            self.pub_marker.publishSinglePointMarker(pt_E, finger, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+#                        desired_angles.append(data[0])
+#                        desired_points_E.append(copy.deepcopy(pt_E))
+#                        break
+#                finger += 1
+#            print "desired_angles: %s"%(desired_angles)
 
-            velma.updateTransformations()
+#            velma.updateTransformations()
 
-            # calculate plane normal from desired contact points in E
-            contacts_normal_E = (desired_points_E[0]-desired_points_E[1])*(desired_points_E[0]-desired_points_E[2])
-            # make sure the normal is directed outside the gripper (E.z)
-            if contacts_normal_E.z() < 0:
-                contacts_normal_E = -contacts_normal_E
+#            # calculate plane normal from desired contact points in E
+#            contacts_normal_E = (desired_points_E[0]-desired_points_E[1])*(desired_points_E[0]-desired_points_E[2])
+#            # make sure the normal is directed outside the gripper (E.z)
+#            if contacts_normal_E.z() < 0:
+#                contacts_normal_E = -contacts_normal_E
 
-            # the normal is the z versor of the new frame C
-            Cz_inE = contacts_normal_E
-            Cx_inE = PyKDL.Vector(1,0,0)
-            Cy_inE = Cz_inE * Cx_inE
-            Cx_inE = Cy_inE * Cz_inE
-            Cx_inE.Normalize()
-            Cy_inE.Normalize()
-            Cz_inE.Normalize()
-            Cp_inE = PyKDL.Vector(0,0,((desired_points_E[0]+desired_points_E[1]+desired_points_E[2])*(1.0/3.0)).z())
-            T_E_JCdecap = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
-            T_JCdecap_E = T_E_JCdecap.Inverse()
+#            # the normal is the z versor of the new frame C
+#            Cz_inE = contacts_normal_E
+#            Cx_inE = PyKDL.Vector(1,0,0)
+#            Cy_inE = Cz_inE * Cx_inE
+#            Cx_inE = Cy_inE * Cz_inE
+#            Cx_inE.Normalize()
+#            Cy_inE.Normalize()
+#            Cz_inE.Normalize()
+#            Cp_inE = PyKDL.Vector(0,0,((desired_points_E[0]+desired_points_E[1]+desired_points_E[2])*(1.0/3.0)).z())
+#            T_E_JCdecap = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
+#            T_JCdecap_E = T_E_JCdecap.Inverse()
             T_B_JCdecap = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi))
 
             angle_cap_deg = 45.0
@@ -808,7 +887,7 @@ Class for opening the jar.
             pos_z = 0.0
             while True:
                 # correct gripper configuration for jar decap
-                velma.move_hand_client("right", (desired_angles[0] - 20.0/180.0*numpy.pi, desired_angles[1] - 20.0/180.0*numpy.pi, desired_angles[2] - 20.0/180.0*numpy.pi, spread_angle_decap_deg/180.0*numpy.pi) )
+                velma.move_hand_client("right", (cap_hangle_q[0] - 20.0/180.0*numpy.pi, cap_hangle_q[1] - 20.0/180.0*numpy.pi, cap_hangle_q[2] - 20.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi) )
                 if velma.checkStopCondition(3.0):
                     exit(0)
 
@@ -827,16 +906,22 @@ Class for opening the jar.
                 if velma.checkStopCondition(duration):
                     exit(0)
 
-                publishSinglePointMarker(desired_points_E[0], 10, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
-                publishSinglePointMarker(desired_points_E[1], 11, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
-                publishSinglePointMarker(desired_points_E[2], 12, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+#                if self.pub_marker != None:
+#                    self.pub_marker.publishSinglePointMarker(desired_points_E[0], 10, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+#                    self.pub_marker.publishSinglePointMarker(desired_points_E[1], 11, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
+#                    self.pub_marker.publishSinglePointMarker(desired_points_E[2], 12, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
                 raw_input("Press Enter to move the robot...")
                 if velma.checkStopCondition():
                     exit(0)
 
                 # close the fingers on the cap
-                velma.move_hand_client("right", (desired_angles[0] + 10.0/180.0*numpy.pi, desired_angles[1] + 10.0/180.0*numpy.pi, desired_angles[2] + 10.0/180.0*numpy.pi, spread_angle_decap_deg/180.0*numpy.pi), t=(1000, 1000, 1000, 1000) )
+                velma.move_hand_client("right", (cap_hangle_q[0], cap_hangle_q[1], cap_hangle_q[2], spread_angle_cap_deg/180.0*numpy.pi), t=(1000, 1000, 1000, 1000) )
                 if velma.checkStopCondition(3.0):
+                    exit(0)
+
+                # close the fingers stronger on the cap
+                velma.move_hand_client("right", (cap_hangle_q[0] + 10.0/180.0*numpy.pi, cap_hangle_q[1] + 10.0/180.0*numpy.pi, cap_hangle_q[2] + 10.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi), t=(2000, 2000, 2000, 2000) )
+                if velma.checkStopCondition(1.5):
                     exit(0)
 
                 # rotate the cap
@@ -853,22 +938,33 @@ Class for opening the jar.
                 raw_input("Press Enter to move the gripper...")
                 if velma.checkStopCondition():
                     exit(0)
-                velma.moveWrist(T_B_Wd, 7.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+                self.resetContacts()
+                velma.moveWrist(T_B_Wd, 6.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
 
-                end_t = rospy.Time.now() + rospy.Duration(8.0)
+                end_t = rospy.Time.now() + rospy.Duration(6.0)
+                lost_contact = False
+                no_contact = 0
                 while rospy.Time.now() < end_t:
                     contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
                     if len(contacts) < 1:
-                        break
+                         no_contact += 1
+                    else:
+                         no_contact = 0
+                    if no_contact > 5:
+                         lost_contact = True
+#                        break
                     for c in contacts:
                         self.addContact(c)
+                    if velma.checkStopCondition(0.05):
+                        exit(0)
 
                 if len(self.contacts) < 1:
                     print "no contact with the jar"
                     break
 
-                contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
-                if len(contacts) > 0:
+#                contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
+#                if len(contacts) > 0:
+                if not lost_contact:
                     print "we are still holding the cap -> the jar is opened!"
                     exit(0)
                 max_z = 0.0
@@ -892,10 +988,9 @@ if __name__ == '__main__':
 
     rospy.init_node('jar_opener')
 
-    global pub_marker
     global br
-    pub_marker = rospy.Publisher('/door_markers', MarkerArray)
-    task = JarOpener()
+    pub_marker = MarkerPublisher()
+    task = JarOpener(pub_marker)
     rospy.sleep(1)
     br = tf.TransformBroadcaster()
 
