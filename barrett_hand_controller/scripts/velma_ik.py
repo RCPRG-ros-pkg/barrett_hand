@@ -62,7 +62,7 @@ from urdf_parser_py.urdf import URDF
 from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
 from velma import Velma
 import pose_lookup_table as plut
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Lock
 
 # reference frames:
 # B - robot's base
@@ -304,18 +304,18 @@ class VelmaIkSolver:
         print "]"
         
     def printSets(self):
-        print "x_set="
-        print self.x_set
+        print "x_set="+str(self.x_set)
+#        print self.x_set
 #        for x in self.x_set:
 #            print "%s,"%(x)
 #        print "]"
-        print "y_set="
-        print self.y_set
+        print "y_set="+str(self.y_set)
+#        print self.y_set
 #        for x in self.y_set:
 #            print "%s,"%(x)
 #        print "]"
-        print "z_set="
-        print self.z_set
+        print "z_set="+str(self.z_set)
+#        print self.z_set
 #        for x in self.z_set:
 #            print "%s,"%(x)
 #        print "]"
@@ -333,13 +333,38 @@ class VelmaIkSolver:
             print "],"
         print "]"
 
-    def calculateIk(self, x_index_start, x_index_end, q):
+    def printLookupTableBegin(self):
+        print "lookup_table=["
+
+    def printLookupTablePart(self, tab):
+        for tab_x in tab:
+            print "["
+            for tab_y in tab_x:
+                print "["
+                for tab_z in tab_y:
+                    print tab_z
+                    print ","
+                print "],"
+            print "],"
+
+    def printLookupTableEnd(self):
+        print "]"
+
+    def calculateIk(self, x_index_start, x_index_end, print_lock, next_lock):
+
+#process...
+#print_lock.acquire
+#print
+#print_lock.release
+#next_lock.release
+
         ret = []
 #        print "#length: %s"%(len(x_set)*len(y_set)*len(z_set))
 #        print "lookup_table=["
         for x in self.x_set[x_index_start:x_index_end]:
             ret_x = []
-            print "# x=%s"%(x)
+            print >> sys.stderr, "x=%s"%(x)
+#            print "# x=%s"%(x)
 #            print "["
             if rospy.is_shutdown():
                 break
@@ -349,6 +374,7 @@ class VelmaIkSolver:
 #                print "# y=%s"%(y)
 #                print "["
                 for z in self.z_set:
+#                    print "# z=%s"%(z)
                     ret_z = []
 #                    print "["
                     if rospy.is_shutdown():
@@ -371,8 +397,17 @@ class VelmaIkSolver:
                 ret_x.append(ret_y)
 #            print "],"
             ret.append(ret_x)
+
+        if print_lock != None:
+            print_lock.acquire()
+        self.printLookupTablePart(ret)
+        if print_lock != None:
+            print_lock.release()
+        if next_lock != None:
+            next_lock.release()
+
 #        print "]"
-        q.put(ret)
+#        q.put(ret)
 #        print "# successfully generated"
 
 if __name__ == '__main__':
@@ -392,7 +427,7 @@ if __name__ == '__main__':
     if False:
         rospy.init_node('velma_ik_test')
         global pub_marker
-        pub_marker = rospy.Publisher('/door_markers', MarkerArray)
+        pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
         rospy.sleep(1)
 
         x_min = 0.1
@@ -415,7 +450,7 @@ if __name__ == '__main__':
     if False:
         rospy.init_node('velma_ik_draw_workspace_border')
         global pub_marker
-        pub_marker = rospy.Publisher('/door_markers', MarkerArray)
+        pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
         rospy.sleep(1)
 
         i = 0
@@ -462,7 +497,7 @@ if __name__ == '__main__':
     if False:
         rospy.init_node('velma_ik_draw_workspace')
         global pub_marker
-        pub_marker = rospy.Publisher('/door_markers', MarkerArray)
+        pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
         rospy.sleep(1)
 
         velma = Velma()
@@ -562,39 +597,66 @@ if __name__ == '__main__':
 
         ik.printRotations()
         ik.printSets()
-        q0 = Queue()
-        q1 = Queue()
-        q2 = Queue()
-        q3 = Queue()
-#        ik.calculateIk(0, int(1.0/4.0*len(ik.x_set)), ret)
-#        ik.calculateIk(int(1.0/4.0*len(ik.x_set)), int(2.0/4.0*len(ik.x_set)), ret)
-#        ik.calculateIk(int(2.0/4.0*len(ik.x_set)), int(3.0/4.0*len(ik.x_set)), ret)
-#        ik.calculateIk(int(3.0/4.0*len(ik.x_set)), int(4.0/4.0*len(ik.x_set)), ret)
 
-        p0 = Process(target=ik.calculateIk, args=(0, int(1.0/4.0*len(ik.x_set)), q0,))
-        p1 = Process(target=ik.calculateIk, args=(int(1.0/4.0*len(ik.x_set)), int(2.0/4.0*len(ik.x_set)), q1,))
-        p2 = Process(target=ik.calculateIk, args=(int(2.0/4.0*len(ik.x_set)), int(3.0/4.0*len(ik.x_set)), q2,))
-        p3 = Process(target=ik.calculateIk, args=(int(3.0/4.0*len(ik.x_set)), int(4.0/4.0*len(ik.x_set)), q3,))
-        p0.start()
-        p1.start()
-        p2.start()
-        p3.start()
-        p0.join()
-        p1.join()
-        p2.join()
-        p3.join()
-        ret0 = q0.get()
-        ret1 = q1.get()
-        ret2 = q2.get()
-        ret3 = q3.get()
-#        print "%s %s %s %s"%(len(ret0),len(ret1),len(ret2),len(ret3))
-        ik.printLookupTable(ret0 + ret1 + ret2 + ret3)
+#l0.lock
+#l1.lock
+#l2.lock
+#p0
+#process...
+#print...
+#l0.release
 
-        exit(0)
+#p1
+#process...
+#l0.lock
+#print
+#l0.release
+#l1.release
 
-        print "# number of rotations: %s"%(len(rot))
-        publishSinglePointMarker(PyKDL.Vector((x_min+x_max)/2.0, (y_min+y_max)/2.0, (z_min+z_max)/2.0), 0, r=1, g=1, b=1, namespace='default', frame_id="torso_link2", m_type=Marker.CUBE, scale=Vector3(x_max-x_min, y_max-y_min, z_max-z_min))
-        calculateIk(0.025, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist)
-        exit(0)
+#p2
+#process...
+#l1.lock
+#print...
+#l1.release
+#l2.release
+
+#p3
+#process...
+#l2.lock
+#print...
+#l2.release
+
+        l0 = Lock()
+        l1 = Lock()
+        l2 = Lock()
+        ik.printLookupTableBegin()
+        for i in range(0,len(ik.x_set),4):
+            l0.acquire()
+            p0 = Process(target=ik.calculateIk, args=(i, i+1, None, l0,))
+            p0.start()
+            if i+1 < len(ik.x_set):
+                l1.acquire()
+                p1 = Process(target=ik.calculateIk, args=(i+1, i+2, l0, l1,))
+                p1.start()
+            if i+2 < len(ik.x_set):
+                l2.acquire()
+                p2 = Process(target=ik.calculateIk, args=(i+2, i+3, l1, l2,))
+                p2.start()
+            if i+3 < len(ik.x_set):
+                p3 = Process(target=ik.calculateIk, args=(i+3, i+4, l2, None,))
+                p3.start()
+            p0.join()
+            print >> sys.stderr, "p0 joined"
+            if i+1 < len(ik.x_set):
+                p1.join()
+                print >> sys.stderr, "p1 joined"
+            if i+2 < len(ik.x_set):
+                p2.join()
+                print >> sys.stderr, "p2 joined"
+            if i+3 < len(ik.x_set):
+                p3.join()
+                print >> sys.stderr, "p3 joined"
+
+        ik.printLookupTableEnd()
 
 

@@ -78,6 +78,15 @@ Class for velma robot.
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
+    def calibrateTactileSensors(self):
+        service_name = '/' + self.prefix + '_hand/calibrate_tactile_sensors'
+        rospy.wait_for_service(service_name)
+        try:
+            calibrate_tactile_sensors = rospy.ServiceProxy(service_name, Empty)
+            resp = calibrate_tactile_sensors()
+        except rospy.ServiceException, e:
+            print "Service call failed: %s"%e
+
     def setSavedKinematics(self):
         self.F1_kinematics=[
         [0.00432582582184,PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.653729381398,-0.26951418496,-0.269514184961,0.653729381401),PyKDL.Vector(0.119921838723,-1.48167068892e-15,0.0247070333631))],
@@ -618,7 +627,6 @@ Class for velma robot.
         
         self.max_tactile_value = 0
 
-        print "Requesting pressure sensors info"
         self.pressure_info = self.get_pressure_sensors_info_client()
         self.pressure_frames = []
         for i in range(0, 24):

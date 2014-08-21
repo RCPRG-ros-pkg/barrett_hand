@@ -363,21 +363,22 @@ Class for opening the jar.
         print "angle between jar_axis and vertical vector (z) in B: %s deg."%(jar_up_angle)
 
         # stiffness for jar touching
-        k_jar_touching = Wrench(Vector3(800.0, 800.0, 800.0), Vector3(200.0, 200.0, 200.0))
-        k_jar_gripping = Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0))
+        k_jar_touching = Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0))
+        k_jar_cap_gripping = Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0))
+        k_jar_cap_rotating = Wrench(Vector3(100.0, 100.0, 1200.0), Vector3(300.0, 300.0, 300.0))
 
         # create the robot interface
         velma = Velma()
 
         velma.updateTransformations()
 
-        spread_angle_cap_deg = 20.0
+        spread_angle_cap_deg = 70.0
 
-        # calculate the best grip for the jar
+        # reset the gripper
+        self.resetGripper(velma)
+
+        # calculate the best grip for the jar cap
         if True:
-            # reset the gripper
-            self.resetGripper(velma)
-
             # prepare hook gripper configuration
             velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi) )
             if velma.checkStopCondition(4.0):
@@ -386,23 +387,25 @@ Class for opening the jar.
             velma.updateTransformations()
 
             # we move the jar along y axis i E frame
-            best_n = 0.0
+            # search for such configuration, that every finger touches the jar in the central plane of the finger
+            best_n = 1000.0
             x = 0.0
-            for y in np.arange(-0.03, 0.03, 0.001):
+            for y in np.arange(-0.04, 0.04, 0.001):
                 kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
                 finger_index = 0
                 contact = [False, False, False]
                 desired_angles = [0.0, 0.0, 0.0]
                 pt = [PyKDL.Vector(), PyKDL.Vector(), PyKDL.Vector()]
+                T_E_Fd = [PyKDL.Frame(), PyKDL.Frame(), PyKDL.Frame()]
                 # for each finger iterate through joint angles until there is a contact with the jar
                 for k in kinematics:
                     # calculate contact points we want to reach
                     for data in k:
                         desired_angles[finger_index] = data[0]
-                        T_E_Fd = velma.get_T_E_Fd(finger_index, data[0])
+                        T_E_Fd[finger_index] = velma.get_T_E_Fd(finger_index, data[0])
                         # iterate through all cells of the sensor matrix
                         for T_F_S in velma.pressure_frames:
-                            pt[finger_index] = T_E_Fd * T_F_S * PyKDL.Vector()
+                            pt[finger_index] = T_E_Fd[finger_index] * T_F_S * PyKDL.Vector()
                             z = pt[finger_index].z()
                             r = (pt[finger_index]-PyKDL.Vector(x,y,z)).Norm()
                             if r <= jar.R:
@@ -416,10 +419,15 @@ Class for opening the jar.
                     finger_index += 1
                 # if we have contact point for each finger, compute the plane for three points and its normal
                 if contact[0] and contact[1] and contact[2]:
-                    n = (pt[0]-pt[1])*(pt[0]-pt[2])
-                    n.Normalize()
-                    if math.fabs(n.z()) > best_n:
-                        best_n = math.fabs(n.z())
+                    center_E = PyKDL.Vector(x,y,0)
+                    center_F = T_E_Fd[0].Inverse() * center_E
+                    n = math.fabs(center_F.z())
+                    center_F = T_E_Fd[1].Inverse() * center_E
+                    n += math.fabs(center_F.z())
+                    center_F = T_E_Fd[2].Inverse() * center_E
+                    n += math.fabs(center_F.z())
+                    if n < best_n:
+                        best_n = n
                         best_y = y
                         best_pt = copy.deepcopy(pt)
                         best_desired_angles = copy.deepcopy(desired_angles)
@@ -427,11 +435,6 @@ Class for opening the jar.
             print "best_desired_angles (rad): %s"%(best_desired_angles)
             print "best_y: %s"%(best_y)
             print "best_n: %s"%(best_n)
-
-            # prepare hook gripper configuration
-            velma.move_hand_client("right", (best_desired_angles[0], best_desired_angles[1], best_desired_angles[2], spread_angle_cap_deg/180.0*numpy.pi) )
-            if velma.checkStopCondition(4.0):
-                exit(0)
 
             # the normal is the z versor of the new frame C
             Cz_inE = (best_pt[0]-best_pt[1])*(best_pt[0]-best_pt[2])
@@ -447,7 +450,59 @@ Class for opening the jar.
             T_E_JCdecap = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
             T_JCdecap_E = T_E_JCdecap.Inverse()
             cap_hangle_q = copy.deepcopy(best_desired_angles)
-#            exit(0)
+
+        # calculate the best grip for the jar touching
+        if True:
+            # prepare hook gripper configuration
+            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 90.0/180.0*numpy.pi) )
+            if velma.checkStopCondition(4.0):
+                exit(0)
+
+            velma.updateTransformations()
+
+            # we move the jar along y axis i E frame
+            # search for such configuration, that every finger touches the jar in the central plane of the finger
+            best_n = 1000.0
+            x = 0.0
+            y = 0.0
+            kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
+            finger_index = 0
+            contact = [False, False, False]
+            desired_angles = [0.0, 0.0, 0.0]
+            pt = [PyKDL.Vector(), PyKDL.Vector()]
+            T_E_Fd = [PyKDL.Frame(), PyKDL.Frame()]
+            # for 2 fingers iterate through joint angles until there is a contact with the jar
+            for k in kinematics[0:2]:
+                # calculate contact points we want to reach
+                for data in k:
+                    desired_angles[finger_index] = data[0]
+                    T_E_Fd[finger_index] = velma.get_T_E_Fd(finger_index, data[0])
+                    # iterate through all cells of the sensor matrix
+                    for T_F_S in velma.pressure_frames:
+                        pt[finger_index] = T_E_Fd[finger_index] * T_F_S * PyKDL.Vector()
+                        z = pt[finger_index].z()
+                        r = (pt[finger_index]-PyKDL.Vector(x,y,z)).Norm()
+                        if r <= jar.R:
+                            contact[finger_index] = True
+                            break
+                    if contact[finger_index]:
+                        break
+                finger_index += 1
+            # if we have contact point for each finger, compute the middle point for two points
+            if contact[0] and contact[1]:
+                center_pt = (pt[0] + pt[1]) * 0.5
+
+            # the normal is the z versor of the new frame C
+            Cz_inE = PyKDL.Vector(0,0,1)
+            Cx_inE = PyKDL.Vector(1,0,0)
+            Cy_inE = Cz_inE * Cx_inE
+            Cx_inE = Cy_inE * Cz_inE
+            Cx_inE.Normalize()
+            Cy_inE.Normalize()
+            Cz_inE.Normalize()
+            Cp_inE = center_pt
+            T_E_JC_side_touch = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
+            T_JC_E_side_touch = T_E_JC_side_touch.Inverse()
 
         # start with very low stiffness
         print "setting stiffness to very low value"
@@ -459,7 +514,8 @@ Class for opening the jar.
         if velma.checkStopCondition():
             exit(0)
 
-        velma.updateAndMoveTool( PyKDL.Frame(PyKDL.Vector(0.2,0,-0.05)), 2.0 )
+        velma.updateTransformations()
+        velma.updateAndMoveTool( velma.T_W_E, 2.0 )
         if velma.checkStopCondition(2.0):
             exit(0)
 
@@ -470,23 +526,9 @@ Class for opening the jar.
         if velma.checkStopCondition(5.0):
             exit(0)
 
-        # test hand kinematics
-        #self.testHandKinematics(velma)
-
-        # collect gripper kinematics
-        #self.collectGripperKinematics(velma)
-
         # get contact points observations
         # we want to touch the jar's cap with the middle of the 5th row of tactile matrix
         if True:
-            # reset the gripper
-            self.resetGripper(velma)
-
-            # prepare hook gripper configuration
-            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 180.0/180.0*numpy.pi) )
-            if velma.checkStopCondition(2.0):
-                exit(0)
-
             # set hook gripper configuration for one finger (middle - 3rd)
             velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 10.0/180.0*numpy.pi, 180.0/180.0*numpy.pi) )
             if velma.checkStopCondition(3.0):
@@ -520,7 +562,7 @@ Class for opening the jar.
                 total_score = 0.0
                 print "angle_deg: %s"%(angle_deg)
                 # simulate the approach
-                for pos in np.arange(-0.1, 0.05, 0.01):
+                for pos in np.arange(-0.05, 0.05, 0.01):
                     # calculate the transform
                     T_B_Ed = T_B_Sd * PyKDL.Frame(PyKDL.Rotation.RotZ(angle_deg/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,pos)) * T_S_F * velma.T_F_E
                     twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
@@ -544,21 +586,9 @@ Class for opening the jar.
             # set S frame destination for the best angle
             T_B_Sd = T_B_Sd * PyKDL.Frame(PyKDL.Rotation.RotZ(best_angle_deg/180.0*math.pi))
 
-#            if self.pub_marker != None:
-#                m_id = self.pub_marker.publishFrameMarker(T_B_Sd, 0, scale=0.1, frame='torso_base', namespace='default')
-#                m_id = self.pub_marker.publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerThreeKnuckleThreeLink', namespace='default')
-
-#            raw_input("Press Enter to continue...")
-
-            T_B_Sd1 = T_B_Sd * PyKDL.Frame(PyKDL.Vector(0,0,-0.1))
-#            if self.pub_marker != None:
-#                m_id = self.pub_marker.publishFrameMarker(T_B_Sd1, m_id, scale=0.1, frame='torso_base', namespace='default')
-
-#            raw_input("Press Enter to continue...")
+            T_B_Sd1 = T_B_Sd * PyKDL.Frame(PyKDL.Vector(0,0,-0.05))
 
             T_B_Sd2 = T_B_Sd * PyKDL.Frame(PyKDL.Vector(0,0,0.05))
-#            if self.pub_marker != None:
-#                m_id = self.pub_marker.publishFrameMarker(T_B_Sd2, m_id, scale=0.1, frame='torso_base', namespace='default')
 
             T_B_Wd = T_B_Sd1 * T_S_F * velma.T_F_E * velma.T_E_W
 
@@ -571,6 +601,8 @@ Class for opening the jar.
             if velma.checkStopCondition(15):
                 exit(0)
 
+            velma.calibrateTactileSensors()
+
             # move down
             self.resetContacts()
 
@@ -581,9 +613,9 @@ Class for opening the jar.
             if velma.checkStopCondition():
                 exit(0)
 
-            velma.moveWrist(T_B_Wd, 10, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+            velma.moveWrist(T_B_Wd, 6, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
             # wait for contact
-            contacts = velma.waitForFirstContact(50, 11.0, emergency_stop=True, f1=False, f2=False, f3=True, palm=False)
+            contacts = velma.waitForFirstContact(50, 6.0, emergency_stop=True, f1=False, f2=False, f3=True, palm=False)
             if len(contacts) < 1:
                 return
             for c in contacts:
@@ -596,11 +628,6 @@ Class for opening the jar.
 
             # move up
             T_B_Wd = T_B_Sd1 * T_S_F * velma.T_F_E * velma.T_E_W
-
-            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            raw_input("Press Enter to move the robot...")
-            if velma.checkStopCondition():
-                exit(0)
 
             velma.moveWrist(T_B_Wd, 3, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
             if velma.checkStopCondition(3):
@@ -616,103 +643,50 @@ Class for opening the jar.
 
             raw_input("Press Enter to continue...")
 
-        # now we want to touch the jar cap from 3 different sides using all fingers
+        # now we want to touch the jar cap from 4 different sides using 2 fingers
         if True:
-            # we want to touch the jar's cap with the middle of the 5th row of tactile matrix of each finger
-            tactile_row = 4
-            # S is the tactile sensor frame
-            T_F_S = velma.pressure_frames[tactile_row*3 + 1]
-            T_S_F = T_F_S.Inverse()
+            # get the fresh pose of the jar
+            T_B_JC = copy.deepcopy(jar.getJarCapFrame())
 
-            # JC is the jar cap frame
-            T_B_JC = copy.deepcopy(jar.getJarCapFrame()) * PyKDL.Frame(PyKDL.Vector(0,0,-0.01))
-
-            # set cylindrical gripper configuration
-            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 60.0/180.0*numpy.pi) )
-            if velma.checkStopCondition(4.0):
-                exit(0)
-
-            # for each finger we choose such joint angle that F.z axis is perpendicular to E.z axis
-            desired_angles = []
-            kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
-            finger = 0
-            for k in kinematics:
-                # calculate contact points we want to reach
-                F_z_z_min = 1000.0
-                angle_min = 0.0
-                for data in k:
-                    T_E_Sd = velma.get_T_E_Fd(finger, data[0]) * T_F_S
-                    F_z = PyKDL.Frame(T_E_Sd.M)*PyKDL.Vector(0,0,1)
-                    F_z_z = math.fabs(F_z.z())
-                    if F_z_z_min > F_z_z:
-                        F_z_z_min = F_z_z
-                        angle_min = data[0]
-                desired_angles.append(angle_min)
-                finger += 1
-            print "desired_angles (rad): %s"%(desired_angles)
-
-            raw_input("Press Enter to move the fingers...")
-            if velma.checkStopCondition():
-                exit(0)
-
-            # set cylindrical gripper configuration with proper finger angles
-            velma.move_hand_client("right", (desired_angles[0], desired_angles[1], desired_angles[2], 60.0/180.0*numpy.pi) )
-            if velma.checkStopCondition(4.0):
+            # set gripper configuration for jar touching
+            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 90.0/180.0*numpy.pi) )
+            if velma.checkStopCondition(3.0):
                 exit(0)
             velma.updateTransformations()
 
-#            if self.pub_marker != None:
-#                m_id = self.pub_marker.publishFrameMarker(T_F_S, 0, scale=0.1, frame='right_HandFingerOneKnuckleThreeLink', namespace='default')
-#                m_id = self.pub_marker.publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerTwoKnuckleThreeLink', namespace='default')
-#                m_id = self.pub_marker.publishFrameMarker(T_F_S, m_id, scale=0.1, frame='right_HandFingerThreeKnuckleThreeLink', namespace='default')
-
-            # get the relative transformations between fingers' tactile sensors
-            T_S1_S2 = T_S_F * velma.T_F13_E * velma.T_E_F23 * T_F_S
-            T_S1_S3 = T_S_F * velma.T_F13_E * velma.T_E_F33 * T_F_S
+            T_B_JCd = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
 
             velma.updateTransformations()
+            z5 = PyKDL.Frame(copy.deepcopy(velma.T_B_L5.M)) * PyKDL.Vector(0,0,1)
             T_B_E = velma.T_B_W * velma.T_W_E
-
+            # find the best angle for touching the cap
+            # iterate through angles
             best_score = 1000000.0
             best_angle_deg = 0.0
             for angle_deg in np.arange(0.0, 360.0, 10.0):
-                success = True
                 total_score = 0.0
                 print "angle_deg: %s"%(angle_deg)
+                T_B_Ed = T_B_JCd * PyKDL.Frame(PyKDL.Rotation.RotZ(angle_deg/180.0*math.pi)) * T_JC_E_side_touch
+                twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
+                twist_v = (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
+                result1 = velma.isFramePossible(T_B_Ed)
+                T_B_Ed = T_B_JCd * PyKDL.Frame(PyKDL.Rotation.RotZ((angle_deg+70.0)/180.0*math.pi)) * T_JC_E_side_touch
+                twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
+                twist_v += (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
+                result2 = velma.isFramePossible(T_B_Ed)
 
-                # we make the destination frame at the end of the movement for the first finger:
-                T_B_S1d2 = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotZ(angle_deg/180.0*math.pi)) * PyKDL.Frame(PyKDL.Rotation.RotY(90.0/180.0*math.pi))
-                T_B_S2d2 = T_B_S1d2 * PyKDL.Frame(copy.deepcopy(T_S1_S2.M))
-                T_B_S3d2 = T_B_S1d2 * PyKDL.Frame(copy.deepcopy(T_S1_S3.M))
+                # add penalty for singularity between L5 and L7
+                T_B_W = T_B_Ed * velma.T_E_W
+                z7 = PyKDL.Frame(T_B_W.M) * PyKDL.Vector(0,0,1)
+                angle_5_7 = math.fabs(getAngle(z5, z7))
+                if angle_5_7 < 20.0/180.0*math.pi:
+                    penalty = 20.0 #20.0*(30.0/180.0*math.pi - angle_5_7)/(30.0/180.0*math.pi)
+                else:
+                    penalty = 0.0
 
-                # simulate the approach for each finger
-                for pos in np.arange(-0.07, 0.05, 0.01):
-                    # calculate the transform
-                    T_B_S1d1 = T_B_S1d2 * PyKDL.Frame(PyKDL.Vector(0,0,pos))
-                    T_B_Ed = T_B_S1d1 * T_S_F * velma.T_F13_E
-                    twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
-                    twist_v = (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
-                    result1 = velma.isFramePossible(T_B_Ed)
-
-                    T_B_S2d1 = T_B_S2d2 * PyKDL.Frame(PyKDL.Vector(0,0,pos))
-                    T_B_Ed = T_B_S2d1 * T_S_F * velma.T_F23_E
-                    twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
-                    twist_v += (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
-                    result2 = velma.isFramePossible(T_B_Ed)
-
-                    T_B_S3d1 = T_B_S3d2 * PyKDL.Frame(PyKDL.Vector(0,0,pos))
-                    T_B_Ed = T_B_S3d1 * T_S_F * velma.T_F33_E
-                    twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
-                    twist_v += (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
-                    result3 = velma.isFramePossible(T_B_Ed)
-
-                    if result1[0] == False or result2[0] == False or result3[0] == False:
-                        success = False
-                        break
-                    total_score += twist_v
-
+                total_score = twist_v + penalty
                 # prefer the pose with the smallest twist to the current pose
-                if success and total_score < best_score:
+                if result1[0] and result2[0] and total_score < best_score:
                     best_score = total_score
                     best_angle_deg = angle_deg
 
@@ -721,69 +695,80 @@ Class for opening the jar.
                 rospy.sleep(1)
                 exit(0)
 
+            velma.calibrateTactileSensors()
+
             print "best_score: %s        best_angle_deg: %s"%(best_score, best_angle_deg)
-
-            # we make the destination frame at the end of the movement for the first finger:
-            T_B_S1d2 = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotZ(best_angle_deg/180.0*math.pi)) * PyKDL.Frame(PyKDL.Rotation.RotY(90.0/180.0*math.pi))
-            T_B_S2d2 = T_B_S1d2 * PyKDL.Frame(copy.deepcopy(T_S1_S2.M))
-            T_B_S3d2 = T_B_S1d2 * PyKDL.Frame(copy.deepcopy(T_S1_S3.M))
-
-            T_B_S1d1 = T_B_S1d2 * PyKDL.Frame(PyKDL.Vector(0,0,-0.07))
-            T_B_S2d1 = T_B_S2d2 * PyKDL.Frame(PyKDL.Vector(0,0,-0.07))
-            T_B_S3d1 = T_B_S3d2 * PyKDL.Frame(PyKDL.Vector(0,0,-0.07))
-
-            T_B_S1d2 = T_B_S1d2 * PyKDL.Frame(PyKDL.Vector(0,0,0.05))
-            T_B_S2d2 = T_B_S2d2 * PyKDL.Frame(PyKDL.Vector(0,0,0.05))
-            T_B_S3d2 = T_B_S3d2 * PyKDL.Frame(PyKDL.Vector(0,0,0.05))
-
-            T_B_Sd1 = [T_B_S1d1, T_B_S2d1, T_B_S3d1]
-            T_B_Sd2 = [T_B_S1d2, T_B_S2d2, T_B_S3d2]
-            T_F_E = [velma.T_F13_E, velma.T_F23_E, velma.T_F33_E]
-
-            self.resetContacts()
             jar.resetContactObservations()
 
-            for i in range(0,3):
-                T_B_Wd = T_B_Sd1[i] * T_S_F * T_F_E[i] * velma.T_E_W
+            T_B_Wd = T_B_JCd * PyKDL.Frame(PyKDL.Rotation.RotZ(best_angle_deg/180.0*math.pi)) * T_JC_E_side_touch * velma.T_E_W
+            velma.moveWrist2(T_B_Wd*velma.T_W_T)
+            raw_input("Press Enter to move the robot...")
+            if velma.checkStopCondition():
+                exit(0)
 
-                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-                raw_input("Press Enter to move the robot...")
-                if velma.checkStopCondition():
-                    exit(0)
+            velma.moveWrist(T_B_Wd, 8, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+            if velma.checkStopCondition(8):
+                exit(0)
 
-                velma.moveWrist(T_B_Wd, 5, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                if velma.checkStopCondition(5):
-                    exit(0)
+            velma.move_hand_client("right", (100.0/180.0*numpy.pi, 100.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 90.0/180.0*numpy.pi), t=(1000, 1000, 1000, 1000) )
+            if velma.checkStopCondition(3.0):
+                exit(0)
 
-                T_B_Wd = T_B_Sd2[i] * T_S_F * T_F_E[i] * velma.T_E_W
-
-                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-                raw_input("Press Enter to move the robot...")
-                if velma.checkStopCondition():
-                    exit(0)
-
-                velma.moveWrist(T_B_Wd, 10, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                contacts = velma.waitForFirstContact(50, 11.0, emergency_stop=True, f1=(i==0), f2=(i==1), f3=(i==2), palm=False)
-                if len(contacts) < 1:
-                    print "no contact"
-                    exit(0)
+            self.resetContacts()
+            # get contacts for each finger
+            for f in range(0, 2):
+                contacts = velma.getContactPoints(200, f1=(f==0), f2=(f==1), f3=False, palm=False)
                 mean_contact = PyKDL.Vector()
                 for c in contacts:
                     mean_contact += c
-                self.addContact(mean_contact*(1.0/len(contacts)))
+                if len(contacts) > 0:
+                    self.addContact((1.0/len(contacts))*mean_contact)
 
             for c in self.contacts:
                 jar.addContactObservation(c)
             jar.drawContactObservations()
 
-            T_B_Wd = T_B_Sd1[2] * T_S_F * T_F_E[2] * velma.T_E_W
+            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 90.0/180.0*numpy.pi), t=(3000, 3000, 3000, 3000) )
+            if velma.checkStopCondition(3.0):
+                exit(0)
 
+
+
+
+
+
+
+
+            T_B_Wd = T_B_JCd * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg+70.0)/180.0*math.pi)) * T_JC_E_side_touch * velma.T_E_W
             velma.moveWrist2(T_B_Wd*velma.T_W_T)
             raw_input("Press Enter to move the robot...")
             if velma.checkStopCondition():
                 exit(0)
-            velma.moveWrist(T_B_Wd, 5, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            if velma.checkStopCondition(5):
+
+            velma.moveWrist(T_B_Wd, 6, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+            if velma.checkStopCondition(6):
+                exit(0)
+
+            velma.move_hand_client("right", (100.0/180.0*numpy.pi, 100.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 90.0/180.0*numpy.pi), t=(1000, 1000, 1000, 1000) )
+            if velma.checkStopCondition(3.0):
+                exit(0)
+
+            self.resetContacts()
+            # get contacts for each finger
+            for f in range(0, 2):
+                contacts = velma.getContactPoints(200, f1=(f==0), f2=(f==1), f3=False, palm=False)
+                mean_contact = PyKDL.Vector()
+                for c in contacts:
+                    mean_contact += c
+                if len(contacts) > 0:
+                    self.addContact((1.0/len(contacts))*mean_contact)
+
+            for c in self.contacts:
+                jar.addContactObservation(c)
+            jar.drawContactObservations()
+
+            velma.move_hand_client("right", (0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 0.0/180.0*numpy.pi, 90.0/180.0*numpy.pi), t=(3000, 3000, 3000, 3000) )
+            if velma.checkStopCondition(3.0):
                 exit(0)
 
             # now, we have very good pose of the jar
@@ -800,50 +785,9 @@ Class for opening the jar.
                 exit(0)
             velma.updateTransformations()
 
-#            jar_cap = PyKDL.Vector()
-#            desired_angles = []
-#            desired_points_E = []
-#            kinematics = [velma.F1_kinematics, velma.F2_kinematics, velma.F3_kinematics]
+            T_B_JCd = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
 
-#            finger = 0
-#            for k in kinematics:
-#                # calculate contact points we want to reach
-#                for data in k:
-#                    T_E_Fd = velma.get_T_E_Fd(finger, data[0])
-#                    pt_E = T_E_Fd * velma.pressure_frames[7*3+1] * PyKDL.Vector()
-#                    diff = pt_E-jar_cap
-#                    diff = PyKDL.Vector(diff.x(), diff.y(), 0.0)
-#                    if diff.Norm() < jar.R-0.005:
-#                        if self.pub_marker != None:
-#                            self.pub_marker.publishSinglePointMarker(pt_E, finger, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
-#                        desired_angles.append(data[0])
-#                        desired_points_E.append(copy.deepcopy(pt_E))
-#                        break
-#                finger += 1
-#            print "desired_angles: %s"%(desired_angles)
-
-#            velma.updateTransformations()
-
-#            # calculate plane normal from desired contact points in E
-#            contacts_normal_E = (desired_points_E[0]-desired_points_E[1])*(desired_points_E[0]-desired_points_E[2])
-#            # make sure the normal is directed outside the gripper (E.z)
-#            if contacts_normal_E.z() < 0:
-#                contacts_normal_E = -contacts_normal_E
-
-#            # the normal is the z versor of the new frame C
-#            Cz_inE = contacts_normal_E
-#            Cx_inE = PyKDL.Vector(1,0,0)
-#            Cy_inE = Cz_inE * Cx_inE
-#            Cx_inE = Cy_inE * Cz_inE
-#            Cx_inE.Normalize()
-#            Cy_inE.Normalize()
-#            Cz_inE.Normalize()
-#            Cp_inE = PyKDL.Vector(0,0,((desired_points_E[0]+desired_points_E[1]+desired_points_E[2])*(1.0/3.0)).z())
-#            T_E_JCdecap = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
-#            T_JCdecap_E = T_E_JCdecap.Inverse()
-            T_B_JCdecap = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi))
-
-            angle_cap_deg = 45.0
+            angle_cap_deg = 60.0
 
             velma.updateTransformations()
             T_B_E = velma.T_B_W * velma.T_W_E
@@ -851,21 +795,30 @@ Class for opening the jar.
             # iterate through angles
             best_score = 1000000.0
             best_angle_deg = 0.0
+            z5 = PyKDL.Frame(copy.deepcopy(velma.T_B_L5.M)) * PyKDL.Vector(0,0,1)
             for angle_deg in np.arange(0.0, 360.0, 10.0):
                 success = True
                 total_score = 0.0
                 print "angle_deg: %s"%(angle_deg)
                 # simulate the approach
-                for beta_deg in np.arange(0.0, angle_cap_deg+0.1, 5.0):
+                for beta_deg in np.arange(0.0, angle_cap_deg+0.1, 1.0):
                     # calculate the transform
-                    T_B_Ed = T_B_JCdecap * PyKDL.Frame(PyKDL.Rotation.RotZ((angle_deg + beta_deg)/180.0*math.pi)) * T_JCdecap_E
+                    T_B_Ed = T_B_JCd * PyKDL.Frame(PyKDL.Rotation.RotZ((angle_deg + beta_deg)/180.0*math.pi)) * T_JCdecap_E
                     twist = PyKDL.diff(T_B_E, T_B_Ed, 1.0)
                     twist_v = (twist.rot.x()*twist.rot.x() + twist.rot.y()*twist.rot.y() + twist.rot.z()*twist.rot.z())
                     result = velma.isFramePossible(T_B_Ed)
                     if result[0] == False:
                         success = False
                         break
-                    total_score += twist_v
+                    # add penalty for singularity between L5 and L7
+                    T_B_W = T_B_Ed * velma.T_E_W
+                    z7 = PyKDL.Frame(T_B_W.M) * PyKDL.Vector(0,0,1)
+                    angle_5_7 = math.fabs(getAngle(z5, z7))
+                    if angle_5_7 < 30.0/180.0*math.pi:
+                        penalty = 30.0
+                    else:
+                        penalty = 0.0
+                    total_score += twist_v + penalty                    
 
                 # prefer the pose with the smallest twist to the current pose
                 if success and total_score < best_score:
@@ -879,61 +832,64 @@ Class for opening the jar.
 
             print "best_score: %s        best_angle_deg: %s"%(best_score, best_angle_deg)
 
-            velma.moveImpedance(k_jar_gripping, 2.0)
-            if velma.checkStopCondition(2.0):
+            pos_z = 0.0
+
+            # move to the start position
+            T_B_Wd = T_B_JCd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg+angle_cap_deg)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
+            velma.moveWrist2(T_B_Wd*velma.T_W_T)
+            raw_input("Press Enter to move the robot...")
+            if velma.checkStopCondition():
+                exit(0)
+            velma.moveWrist(T_B_Wd, 10, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+            if velma.checkStopCondition(10):
                 exit(0)
 
-            first_iteration = True
-            pos_z = 0.0
+            opened = False
             while True:
-                # correct gripper configuration for jar decap
+                # correct gripper configuration for jar cap
                 velma.move_hand_client("right", (cap_hangle_q[0] - 20.0/180.0*numpy.pi, cap_hangle_q[1] - 20.0/180.0*numpy.pi, cap_hangle_q[2] - 20.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi) )
                 if velma.checkStopCondition(3.0):
                     exit(0)
 
                 # move to the start position
-                T_B_Wd = T_B_JCdecap * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg+angle_cap_deg)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
+                T_B_Wd = T_B_JCd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg+angle_cap_deg)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
                 velma.moveWrist2(T_B_Wd*velma.T_W_T)
                 raw_input("Press Enter to move the robot...")
                 if velma.checkStopCondition():
                     exit(0)
-                if first_iteration:
-                    first_iteration = False
-                    duration = 15.0
-                else:
-                    duration = 3.0
-                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                if velma.checkStopCondition(duration):
+                velma.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+                velma.moveImpedance(k_jar_cap_gripping, 2.0)
+                if velma.checkStopCondition(3.0):
                     exit(0)
 
-#                if self.pub_marker != None:
-#                    self.pub_marker.publishSinglePointMarker(desired_points_E[0], 10, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
-#                    self.pub_marker.publishSinglePointMarker(desired_points_E[1], 11, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
-#                    self.pub_marker.publishSinglePointMarker(desired_points_E[2], 12, r=0, g=1, b=0, namespace='default', frame_id='right_HandPalmLink', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005))
                 raw_input("Press Enter to move the robot...")
                 if velma.checkStopCondition():
                     exit(0)
 
                 # close the fingers on the cap
-                velma.move_hand_client("right", (cap_hangle_q[0], cap_hangle_q[1], cap_hangle_q[2], spread_angle_cap_deg/180.0*numpy.pi), t=(1000, 1000, 1000, 1000) )
+                velma.move_hand_client("right", (cap_hangle_q[0], cap_hangle_q[1], cap_hangle_q[2], spread_angle_cap_deg/180.0*numpy.pi), t=(3000, 3000, 3000, 3000) )
                 if velma.checkStopCondition(3.0):
                     exit(0)
 
                 # close the fingers stronger on the cap
-                velma.move_hand_client("right", (cap_hangle_q[0] + 10.0/180.0*numpy.pi, cap_hangle_q[1] + 10.0/180.0*numpy.pi, cap_hangle_q[2] + 10.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi), t=(2000, 2000, 2000, 2000) )
+                velma.move_hand_client("right", (cap_hangle_q[0] + 10.0/180.0*numpy.pi, cap_hangle_q[1] + 10.0/180.0*numpy.pi, cap_hangle_q[2] + 10.0/180.0*numpy.pi, spread_angle_cap_deg/180.0*numpy.pi), t=(1000, 1000, 1000, 1000) )
                 if velma.checkStopCondition(1.5):
+                    exit(0)
+
+                velma.moveImpedance(k_jar_cap_rotating, 2.0)
+                if velma.checkStopCondition(2.0):
                     exit(0)
 
                 # rotate the cap
                 for beta_deg in np.arange(angle_cap_deg, -0.1, -2.0):
                     print "beta_deg: %s"%(beta_deg)
-                    T_B_Wd = T_B_JCdecap * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg + beta_deg)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
+                    T_B_Wd = T_B_JCd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg + beta_deg)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
                     velma.moveWrist(T_B_Wd, 0.5, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
                     if velma.checkStopCondition(0.5):
                         exit(0)
 
                 # pull the cap
-                T_B_Wd = T_B_JCdecap * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Vector(0,0,-0.07)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg + 0.0)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
+                T_B_Wd = T_B_JCd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Vector(0,0,-0.07)) * PyKDL.Frame(PyKDL.Rotation.RotZ((best_angle_deg + 0.0)/180.0*math.pi)) * T_JCdecap_E * velma.T_E_W
                 velma.moveWrist2(T_B_Wd * velma.T_W_T)
                 raw_input("Press Enter to move the gripper...")
                 if velma.checkStopCondition():
@@ -952,7 +908,6 @@ Class for opening the jar.
                          no_contact = 0
                     if no_contact > 5:
                          lost_contact = True
-#                        break
                     for c in contacts:
                         self.addContact(c)
                     if velma.checkStopCondition(0.05):
@@ -962,27 +917,65 @@ Class for opening the jar.
                     print "no contact with the jar"
                     break
 
-#                contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
-#                if len(contacts) > 0:
                 if not lost_contact:
                     print "we are still holding the cap -> the jar is opened!"
-                    exit(0)
+                    opened = True
+                    break
                 max_z = 0.0
                 for c in self.contacts:
                     c_in_J = T_B_JC.Inverse() * c
                     if c_in_J.z() > max_z:
                         max_z = c_in_J.z()
 
-                pos_z = max_z - 0.01
+                pos_z = max_z - 0.015
                 print "max_z: %s"%(max_z)
                 print "pos_z: %s"%(pos_z)
                 raw_input("Press Enter to continue...")
                 if velma.checkStopCondition():
                     exit(0)
 
+        # for test
+#        opened = True
 
+        if not opened:
             exit(0)
 
+        # get the angle of L6 in L5 anlong L5.y axis
+        velma.updateTransformations()
+        T_L6_L7 = velma.T_B_L6.Inverse() * velma.T_B_L7
+        T_L5_L6 = velma.T_B_L5.Inverse() * velma.T_B_L6
+        z6in5 = PyKDL.Frame(T_L5_L6.M) * PyKDL.Vector(0,0,1)
+        angle6in5 = math.atan2(z6in5.x(), z6in5.z())
+
+        angle6in5_dest = -90.0/180.0*math.pi
+        omega = 10.0/180.0*math.pi
+        time_d = 0.01
+        if angle6in5_dest < angle6in5:
+           omega = -omega
+        stop = False
+        angle = angle6in5
+        times = []
+        time = 0.5
+        tab_T_B_Wd = []
+        while not stop:
+            angle += omega * time_d
+            time += time_d
+            if angle6in5_dest > angle6in5 and angle > angle6in5_dest:
+                angle = angle6in5_dest
+                stop = True
+            if angle6in5_dest < angle6in5 and angle < angle6in5_dest:
+                angle = angle6in5_dest
+                stop = True
+            T_L5_L6d = PyKDL.Frame(PyKDL.Rotation.RotY(angle),T_L5_L6.p)
+            T_B_Wd = velma.T_B_L5 * T_L5_L6d * T_L6_L7
+            tab_T_B_Wd.append(T_B_Wd)
+            times.append(time)
+
+        velma.moveWristTraj( tab_T_B_Wd, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)) )
+        if velma.checkStopCondition(time):
+            exit(0)
+
+        exit(0)
 
 if __name__ == '__main__':
 
