@@ -263,15 +263,17 @@ class VelmaIkSolver:
 # right_arm_0_joint, right_arm_1_joint, right_arm_2_joint, right_arm_3_joint, right_arm_4_joint, right_arm_5_joint, right_arm_6_joint
         self.q_min = PyKDL.JntArray(7)#[-2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96]
         self.q_max = PyKDL.JntArray(7)#[2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96]
-        self.q_limit = 0.26*0.5
+        self.q_limit = 0.26#*0.5
         self.q_min[0] = -2.96 + self.q_limit
         self.q_min[1] = -2.09 + self.q_limit
         self.q_min[2] = -2.96 + self.q_limit
-        self.q_min[3] = -2.09 + self.q_limit
+#        self.q_min[3] = -2.09 + self.q_limit
+        self.q_min[3] = 0.0    # constraint on elbow
         self.q_min[4] = -2.96 + self.q_limit
         self.q_min[5] = -2.09 + self.q_limit
         self.q_min[6] = -2.96 + self.q_limit
-        self.q_max[0] = 2.96 - self.q_limit
+#        self.q_max[0] = 2.96 - self.q_limit
+        self.q_max[0] = 0.2    # constraint on first joint to avoid head hitting
         self.q_max[1] = 2.09 - self.q_limit
         self.q_max[2] = 2.96 - self.q_limit
         self.q_max[3] = 2.09 - self.q_limit
@@ -281,9 +283,6 @@ class VelmaIkSolver:
         self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
         self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
         self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
-
-#name: ['torso_0_joint', 'torso_1_joint', 'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint', 'left_arm_0_joint', 'left_arm_1_joint', 'left_arm_2_joint', 'left_arm_3_joint', 'left_arm_4_joint', 'left_arm_5_joint', 'left_arm_6_joint']
-#position: [0.01879189377789692, -1.5707963267948966, -1.256859302520752, 1.4936097860336304, -1.429112434387207, 1.8518760204315186, 0.12087352573871613, -1.626944661140442, 1.7902963161468506, -1.7999240159988403, -1.8513352870941162, 1.6786730289459229, -1.1203926801681519, 0.0015585091896355152, 1.8605016469955444, 1.3599008321762085]
 
         self.q_init = PyKDL.JntArray(7)
         self.q_init[0] = -1.256859302520752
@@ -296,6 +295,8 @@ class VelmaIkSolver:
 
         self.q_out = PyKDL.JntArray(7)
 
+        self.singularity_angle = 15.0/180.0*math.pi
+
     def printRotations(self):
         print "rotations=["
         for r in self.rot:
@@ -305,20 +306,9 @@ class VelmaIkSolver:
         
     def printSets(self):
         print "x_set="+str(self.x_set)
-#        print self.x_set
-#        for x in self.x_set:
-#            print "%s,"%(x)
-#        print "]"
+
         print "y_set="+str(self.y_set)
-#        print self.y_set
-#        for x in self.y_set:
-#            print "%s,"%(x)
-#        print "]"
         print "z_set="+str(self.z_set)
-#        print self.z_set
-#        for x in self.z_set:
-#            print "%s,"%(x)
-#        print "]"
 
     def printLookupTable(self, tab):
         print "lookup_table=["
@@ -350,8 +340,19 @@ class VelmaIkSolver:
     def printLookupTableEnd(self):
         print "]"
 
-    def calculateIk(self, x_index_start, x_index_end, print_lock, next_lock):
+    def hasSingularity(self, q):
+        if (math.fabs(q[1]) <= self.singularity_angle) or (math.fabs(q[3]) <= self.singularity_angle) or (math.fabs(q[5]) <= self.singularity_angle):
+            return True
+        return False
 
+    def violatedOtherLimits(self, q):
+        if q[0] >= 0.2:
+            return True
+        if q[3] <= 0.0:
+            return True
+        return False
+
+    def calculateIk(self, x_index_start, x_index_end, print_lock, next_lock):
 #process...
 #print_lock.acquire
 #print
@@ -359,24 +360,16 @@ class VelmaIkSolver:
 #next_lock.release
 
         ret = []
-#        print "#length: %s"%(len(x_set)*len(y_set)*len(z_set))
-#        print "lookup_table=["
         for x in self.x_set[x_index_start:x_index_end]:
             ret_x = []
             print >> sys.stderr, "x=%s"%(x)
-#            print "# x=%s"%(x)
-#            print "["
             if rospy.is_shutdown():
                 break
             y = 0
             for y in self.y_set:
                 ret_y = []
-#                print "# y=%s"%(y)
-#                print "["
                 for z in self.z_set:
-#                    print "# z=%s"%(z)
                     ret_z = []
-#                    print "["
                     if rospy.is_shutdown():
                         break
                     rot_index = 0
@@ -384,18 +377,21 @@ class VelmaIkSolver:
                     if dist <= self.max_dist2 and dist >= self.min_dist2:
                         for r in self.rot:
                             fr = PyKDL.Frame(r, PyKDL.Vector(x,y,z))
-                            status = self.ik_solver.CartToJnt(self.q_init, fr, self.q_out)
-                            if status == 0:
-#                                print "%s,"%(rot_index)
+                            success = False
+                            for i in range(0,5):
+                                q_init = PyKDL.JntArray(7)
+                                for j in range(0,7):
+                                    q_init[j] = random.uniform(self.q_min[j]+0.1, self.q_max[j]-0.1)
+                                status = self.ik_solver.CartToJnt(q_init, fr, self.q_out)
+                                if status == 0 and not self.hasSingularity(self.q_out):
+                                    success = True
+#                                    print >> sys.stderr, "sing. %s"%(i)
+                                    break
+                            if success:
                                 ret_z.append(rot_index)
                             rot_index += 1
-#                    else:
-#                        print "# skipped"
-#                    print "],"
                     ret_y.append(ret_z)
-#                print "],"
                 ret_x.append(ret_y)
-#            print "],"
             ret.append(ret_x)
 
         if print_lock != None:
@@ -405,10 +401,6 @@ class VelmaIkSolver:
             print_lock.release()
         if next_lock != None:
             next_lock.release()
-
-#        print "]"
-#        q.put(ret)
-#        print "# successfully generated"
 
 if __name__ == '__main__':
 
@@ -494,7 +486,7 @@ if __name__ == '__main__':
         exit(0)   
 
     # test: draw the workspace
-    if False:
+    if True:
         rospy.init_node('velma_ik_draw_workspace')
         global pub_marker
         pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
@@ -529,7 +521,7 @@ if __name__ == '__main__':
                         i += 1
                     z_i += 1
                 y_i += 1
-            rospy.sleep(0.1)
+                rospy.sleep(0.1)
             x_i += 1
         print i
         print math.sqrt(min_dist)
@@ -587,13 +579,14 @@ if __name__ == '__main__':
         x_min = 0.1
         x_max = 1.0
         y_min = -0.4
-        y_max = 1.0
+#        y_max = 1.0
+        y_max = 0.4
         z_min = -0.4
         z_max = 1.2
 
         rot = generateRotationsForDodecahedron()
 
-        ik = VelmaIkSolver(0.025, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist, rot)
+        ik = VelmaIkSolver(0.05, x_min, x_max, y_min, y_max, z_min, z_max, pt_c_in_T2, min_dist, max_dist, rot)
 
         ik.printRotations()
         ik.printSets()

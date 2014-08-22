@@ -1003,15 +1003,17 @@ Class for velma robot.
         joint_states_listener.unregister()
 
 
-    def get_T_E_Fd(self, finger, angle):
+    def get_T_E_Fd(self, finger, angle, spread_angle):
         if finger == 0:
-            T_E_F = self.T_E_F11
+            T_E_F = PyKDL.Frame(PyKDL.Rotation.RotZ(90.0/180.0*math.pi - spread_angle), self.T_E_F11.p)
+#            T_E_F = self.T_E_F11
             kinematics_tab = self.F1_kinematics
         elif finger == 1:
-            T_E_F = self.T_E_F21
+            T_E_F = PyKDL.Frame(PyKDL.Rotation.RotZ(90.0/180.0*math.pi + spread_angle), self.T_E_F21.p)
+#            T_E_F = self.T_E_F21
             kinematics_tab = self.F2_kinematics
         elif finger == 2:
-            T_E_F = self.T_E_F31
+            T_E_F = PyKDL.Frame()#self.T_E_F31
             kinematics_tab = self.F3_kinematics
 
         if angle >= kinematics_tab[-1][0]:
@@ -1021,14 +1023,7 @@ Class for velma robot.
         for data in kinematics_tab:
             if angle < data[0]:
                 return T_E_F * data[1]
-#        for i in range(0, len(kinematics_tab)-1):
-#             if (angle >= kinematics_tab[i][0]) and (angle <= kinematics_tab[i+1][0]):
-#                 f = (angle-kinematics_tab[i][0])/(kinematics_tab[i+1][0]-kinematics_tab[i][0])
-#                 T_Fbase_F = f*kinematics_tab[i][1] + (1.0-f)*kinematics_tab[i+1][1]
-#                 break
-#        if T_Fbase_F == None:
         return None
-#        return T_E_F * T_Fbase_F
 
     def getClosestRotations(self, rot_set, rot):
         buf = [[100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0], [100000.0,0]]
