@@ -248,22 +248,12 @@ class VelmaIkSolver:
 
         self.robot = URDF.from_parameter_server()
         self.tree = kdl_tree_from_urdf_model(self.robot)
-#        print tree.getNrOfSegments()
 
         self.chain = self.tree.getChain("torso_link2", "right_HandPalmLink")
-#        print chain.getNrOfJoints()
 
-# from velma_controller.launch:
-# upper_limit: [100.0, 100.0, 2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96, 2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96]
-# lower_limit: [-100.0, -100.0, -2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96, -2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96]
-# joint_names: [torso_0_joint, torso_1_joint, right_arm_0_joint, right_arm_1_joint, right_arm_2_joint, right_arm_3_joint, right_arm_4_joint, right_arm_5_joint, right_arm_6_joint, left_arm_0_joint, left_arm_1_joint, left_arm_2_joint, left_arm_3_joint, left_arm_4_joint, left_arm_5_joint, left_arm_6_joint]
-
-# 2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96
-# -2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96
-# right_arm_0_joint, right_arm_1_joint, right_arm_2_joint, right_arm_3_joint, right_arm_4_joint, right_arm_5_joint, right_arm_6_joint
-        self.q_min = PyKDL.JntArray(7)#[-2.96, -2.09, -2.96, -2.09, -2.96, -2.09, -2.96]
-        self.q_max = PyKDL.JntArray(7)#[2.96, 2.09, 2.96, 2.09, 2.96, 2.09, 2.96]
-        self.q_limit = 0.26#*0.5
+        self.q_min = PyKDL.JntArray(7)
+        self.q_max = PyKDL.JntArray(7)
+        self.q_limit = 0.26
         self.q_min[0] = -2.96 + self.q_limit
         self.q_min[1] = -2.09 + self.q_limit
         self.q_min[2] = -2.96 + self.q_limit
@@ -283,15 +273,6 @@ class VelmaIkSolver:
         self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
         self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
         self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
-
-        self.q_init = PyKDL.JntArray(7)
-        self.q_init[0] = -1.256859302520752
-        self.q_init[1] = 1.4936097860336304
-        self.q_init[2] = -1.429112434387207
-        self.q_init[3] = 1.8518760204315186
-        self.q_init[4] = 0.12087352573871613
-        self.q_init[5] = -1.626944661140442
-        self.q_init[6] = 1.7902963161468506
 
         self.q_out = PyKDL.JntArray(7)
 
