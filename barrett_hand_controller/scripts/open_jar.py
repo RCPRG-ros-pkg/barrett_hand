@@ -107,7 +107,7 @@ class MarkerPublisher:
             m.markers.append(marker)
         self.pub_marker.publish(m)
 
-    def publishVectorMarker(self, v1, v2, i, r, g, b, frame='torso_base', namespace='default'):
+    def publishVectorMarker(self, v1, v2, i, r, g, b, frame='torso_base', namespace='default', scale=0.001):
         m = MarkerArray()
         marker = Marker()
         marker.header.frame_id = frame
@@ -119,7 +119,7 @@ class MarkerPublisher:
         marker.points.append(Point(v1.x(), v1.y(), v1.z()))
         marker.points.append(Point(v2.x(), v2.y(), v2.z()))
         marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
-        marker.scale = Vector3(0.001, 0.002, 0)
+        marker.scale = Vector3(scale, 2.0*scale, 0)
         marker.color = ColorRGBA(r,g,b,0.5)
         m.markers.append(marker)
         self.pub_marker.publish(m)
@@ -238,13 +238,13 @@ class Jar:
             self.contacts_Jbase[i] += position
         self.T_B_Jbase = copy.deepcopy( self.T_B_Jbase * PyKDL.Frame(-position) )
 
-    def processContactObservationsForTop(self):
+    def processContactObservationsForTop(self, top_offset=0.0):
         if len(self.contacts_Jbase) < 1:
             return
         max_z = 0.0
         for i in range(0, len(self.contacts_Jbase)):
             if self.contacts_Jbase[i].z() > max_z:
-                max_z = self.contacts_Jbase[i].z()
+                max_z = self.contacts_Jbase[i].z() + top_offset
         position = PyKDL.Vector(0,0,self.H-max_z)
         for i in range(0, len(self.contacts_Jbase)):
             self.contacts_Jbase[i] += position
@@ -254,17 +254,245 @@ class Jar:
         return self.T_B_Jbase * self.T_Jbase_Jmarker
 
 class Grasp:
-    def __init__(self, T_E_G, name, q, q_pre, q_post = None):
+    def __init__(self, T_E_Ge, name, q, q_pre, t=(3000, 3000, 3000, 3000), t_pre=(3000, 3000, 3000, 3000)):
         # E is the gripper frame, G is the object's grasp frame
-        self.T_E_G = T_E_G
-        if self.T_E_G == None:
-            self.T_G_E = None
+        self.T_E_Ge = T_E_Ge
+        if self.T_E_Ge == None:
+            self.T_Ge_E = None
         else:
-            self.T_G_E = self.T_E_G.Inverse()
+            self.T_Ge_E = self.T_E_Ge.Inverse()
         self.name = name
         self.q_pre = q_pre
         self.q = q
-        self.q_post = q_post
+        self.t = t
+        self.t_pre = t_pre
+
+class Relation:
+    # stop_on_contact=[f1, f2, f3, palm] (bool)
+    def __init__(self, name, grasp, T_Go_Ge, on_success, on_failure, stop_on_contact=[False, False, False, False], collect_contacts=False, max_v_l=0.1, max_v_r=0.2, k_pre=None, k_post=None):
+        self.name = name
+        self.grasp = grasp
+        self.T_Go_Ge = T_Go_Ge
+        self.on_success = on_success
+        self.on_failure = on_failure
+        self.stop_on_contact = stop_on_contact
+        self.collect_contacts = collect_contacts
+        self.max_v_l = max_v_l
+        self.max_v_r = max_v_r
+        self.k_pre = k_pre
+        self.k_post = k_post
+
+class Action:
+    def __init__(self, velma):
+        self.velma = velma
+        self.relations = []
+
+    def getNumberOfRelations(self):
+        return len(self.relations)
+
+    def setTarget(self, T_B_JC):
+        pass
+
+    def getRelIndex(self, name):
+        i = 0
+        for r in self.relations:
+            if r.name == name:
+                return i
+            i += 1
+        return -1
+
+class RemoveJarLidAction(Action):
+    def __init__(self, velma):
+        Action.__init__(self, velma)
+        self.relations = [None, None, None]
+
+    def setTarget(self, T_B_JC):
+        # recalculate grasp pose
+        self.T_B_Go = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
+
+    def getBestGraspForCurrentPose(self, grasps):
+        # find the best angle for rotating the cap
+        # iterate through angles
+        best_score = 1000000.0
+        self.velma.updateTransformations()
+        best_grasp = None
+        for angle_cap in [180.0/180.0*math.pi, 120.0/180.0*math.pi, 90.0/180.0*math.pi, 60.0/180.0*math.pi, 45.0/180.0*math.pi, 30.0/180.0*math.pi]:
+            count = int(angle_cap/(5.0/180.0*math.pi))
+            if count < 2:
+                count = 2
+            angles = np.linspace(angle_cap, 0.0, count)
+            for grasp in grasps:
+                if grasp.name == "JarCapForce":
+                    # simulate the approach
+                    traj_T_B_Ed = []
+                    # calculate the transform
+                    T_B_Ed = self.T_B_Go * PyKDL.Frame() * grasp.T_Ge_E
+                    traj_T_B_Ed.append(T_B_Ed)
+                    T_B_Ed_last = traj_T_B_Ed[-1]
+                    q = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    cost = self.velma.getTrajCost(traj_T_B_Ed, True, False, q_end=q)
+                    print "cost1: %s"%(cost)
+                    if cost > 1000.0:
+                        continue
+                    # simulate the approach
+                    traj_T_B_Ed = []
+                    for beta in angles:
+                        # calculate the transform
+                        T_B_Ed = self.T_B_Go * PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * grasp.T_Ge_E
+                        traj_T_B_Ed.append(T_B_Ed)
+                    cost += self.velma.getTrajCost(traj_T_B_Ed, False, False, q_start=q, T_B_Eprev=T_B_Ed_last)
+                    print "cost2: %s"%(cost)
+                    if cost > 1000.0:
+                        continue
+                    # prefer the pose with the smallest twist to the current pose
+                    if cost < best_score:
+                        best_score = cost
+                        best_grasp = grasp
+            if best_score > 1000.0:
+                print "it is impossible to reach the jar for rotation angle %s deg"%(angle_cap/math.pi*180.0)
+            else:
+                break
+        if best_score > 1000.0:
+            return [None,[]]
+        return [best_grasp, angles]
+
+    def recalculateRelations(self, grasps):
+        [best_grasp, angles] = self.getBestGraspForCurrentPose(grasps)
+        grasp0 = copy.deepcopy(best_grasp)
+        grasp0.q_pre = [0,0,0,0]
+        grasp0.t_pre=(3000, 3000, 3000, 3000)
+        grasp0.q = None
+        grasp1 = copy.deepcopy(best_grasp)
+        grasp1.t=(3000, 3000, 3000, 3000)
+        grasp1.t_pre=(3000, 3000, 3000, 3000)
+        grasp2 = copy.deepcopy(best_grasp)
+        grasp2.q_pre = [grasp1.q[0]+10.0/180.0*math.pi, grasp1.q[1]+10.0/180.0*math.pi, grasp1.q[2]+10.0/180.0*math.pi, grasp1.q[3]]
+        grasp2.t_pre=(1000, 1000, 1000, 1000)
+        grasp2.q = None
+        pos_z = 0.0
+        self.relations = []
+        self.relations.append(
+        Relation("reset_gripper", grasp0, PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(angles[0])), "move_above", "RECALCULATE,reset_gripper", k_pre=Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0)) ) )
+        self.relations.append(
+        Relation("move_above", grasp1, PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(angles[0])), "rotate_lid_0", "RECALCULATE,reset_gripper", k_pre=Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0)), k_post=Wrench(Vector3(500.0, 500.0, 1200.0), Vector3(300.0, 300.0, 300.0)) ) )
+        i = 0
+        for beta in angles:
+            if beta == angles[-1]:
+                next_state = "pull_lid"
+            else:
+                next_state = "rotate_lid_"+str(i+1)
+            self.relations.append( Relation("rotate_lid_"+str(i), grasp2, PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(beta)), next_state, "FAILURE", k_pre=Wrench(Vector3(100.0, 100.0, 1200.0), Vector3(300.0, 300.0, 300.0))) )
+            i += 1
+
+        self.relations.append( Relation("pull_lid", grasp2, PyKDL.Frame(PyKDL.Vector(0,0,-pos_z-0.05)) * PyKDL.Frame(PyKDL.Rotation.RotZ(beta)), "SUCCESS", "FAILURE", max_v_l=0.01, max_v_r=0.05, collect_contacts=True) )
+        i += 1
+
+class JarLidPinchGraspAction(Action):
+    def __init__(self, velma):
+        Action.__init__(self, velma)
+        self.relations = [None, None, None]
+
+    def setTarget(self, T_B_JC):
+        # recalculate grasp pose
+        self.T_B_Go = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
+
+    def getBestGraspForCurrentPose(self, grasps):
+        # then, we search for the best angle about S.Z axis for jar cap approach
+        # iterate through angles
+        best_score = 1000000.0
+        self.velma.updateTransformations()
+        best_grasp = None
+        for beta_diff in [90.0/180.0*math.pi, -90.0/180.0*math.pi]:#, 70.0/180.0*math.pi]:
+            for grasp in grasps:
+                if grasp.name == "JarCapPinch":
+                    traj_T_B_Ed = []
+                    # calculate the transform
+                    T_B_Ed = self.T_B_Go * PyKDL.Frame() * grasp.T_Ge_E
+                    traj_T_B_Ed.append(T_B_Ed)
+                    T_B_Ed_last = traj_T_B_Ed[-1]
+                    q = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    cost = self.velma.getTrajCost(traj_T_B_Ed, True, False, q_end=q)
+                    print "cost1: %s"%(cost)
+                    if cost > 1000.0:
+                        continue
+
+                    traj_T_B_Ed = []
+                    T_B_Ed = self.T_B_Go * PyKDL.Frame(PyKDL.Rotation.RotZ(beta_diff)) * grasp.T_Ge_E
+                    traj_T_B_Ed.append(T_B_Ed)
+                    cost += self.velma.getTrajCost(traj_T_B_Ed, True, False, q_start=q, T_B_Eprev=T_B_Ed_last)
+                    print "cost2: %s"%(cost)
+                    if cost > 1000.0:
+                        continue
+
+                    # prefer the pose with the smallest twist to the current pose
+                    if cost < best_score:
+                        best_score = cost
+                        best_grasp = grasp
+            if best_score > 1000.0:
+                print "it is impossible to reach the jar for angle %s deg"%(beta_diff/math.pi*180.0)
+            else:
+                break
+        if best_score > 1000.0:
+            return [None, 0]
+        return [best_grasp, beta_diff]
+
+    def recalculateRelations(self, grasps):
+        [best_grasp, beta_diff] = self.getBestGraspForCurrentPose(grasps)
+        grasp1 = copy.deepcopy(best_grasp)
+        grasp1.t_pre=(3000, 3000, 3000, 3000)
+        grasp1.q = None
+        grasp2 = copy.deepcopy(best_grasp)
+        grasp2.t_pre=(3000, 3000, 3000, 3000)
+        grasp2.t=(2000, 2000, 2000, 2000)
+        self.relations = []
+        self.relations.append( Relation("move_above", grasp1, PyKDL.Frame(), "RECALCULATE,first_grip", "RECALCULATE,move_above", k_pre=Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0)) ) )
+        self.relations.append( Relation("first_grip", copy.deepcopy(best_grasp), PyKDL.Frame(), "second_grip", "RECALCULATE,move_above", collect_contacts=True, k_pre=Wrench(Vector3(200.0, 200.0, 1200.0), Vector3(300.0, 300.0, 300.0)) ) )
+        self.relations.append( Relation("second_grip", copy.deepcopy(best_grasp), PyKDL.Frame(PyKDL.Rotation.RotZ(beta_diff)), "SUCCESS", "second_grip2", collect_contacts=True) )
+        self.relations.append( Relation("second_grip2", copy.deepcopy(best_grasp), PyKDL.Frame(PyKDL.Rotation.RotZ(beta_diff)), "SUCCESS", "FAILURE", collect_contacts=True) )
+
+class JarLidTopTouchAction(Action):
+    def __init__(self, velma):
+        Action.__init__(self, velma)
+        self.relations = [None, None, None]
+
+    def setTarget(self, T_B_JC):
+        # recalculate grasp pose
+        self.T_B_Go = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
+
+    def getBestGraspForCurrentPose(self, grasps):
+        # then, we search for the best angle about S.Z axis for jar cap approach
+        # iterate through angles
+        best_score = 1000000.0
+        self.velma.updateTransformations()
+        best_grasp = None
+        for grasp in grasps:
+            if grasp.name == "JarCapTopTouch":
+                traj_T_B_Ed = []
+                T_B_Ed = self.T_B_Go * self.relations[0].T_Go_Ge * grasp.T_Ge_E
+                traj_T_B_Ed.append(T_B_Ed)
+                T_B_Ed = self.T_B_Go * self.relations[1].T_Go_Ge * grasp.T_Ge_E
+                traj_T_B_Ed.append(T_B_Ed)
+                cost = self.velma.getTrajCost(traj_T_B_Ed, True, False)
+                if cost < best_score:
+                    best_score = cost
+                    best_grasp = grasp
+        if best_score > 1000.0:
+            print "it is impossible to reach the jar"
+            return None
+        return best_grasp
+
+    def recalculateRelations(self, grasps):
+        self.relations[0] = Relation("move_above", None, PyKDL.Frame(PyKDL.Vector(0,0,-0.05)), "touch", "RECALCULATE,move_above", k_pre=Wrench(Vector3(1200.0, 1200.0, 1200.0), Vector3(300.0, 300.0, 300.0)))
+        self.relations[1] = Relation("touch", None, PyKDL.Frame(PyKDL.Vector(0,0,0.05)), "return", "FAILURE", stop_on_contact=[True, True, True, False], collect_contacts=True, max_v_l=0.01, max_v_r=0.05)
+        self.relations[2] = Relation("return", None, PyKDL.Frame(PyKDL.Vector(0,0,-0.05)), "SUCCESS", "FAILURE")
+        best_grasp = self.getBestGraspForCurrentPose(grasps)
+        self.relations[0].grasp = copy.deepcopy(best_grasp)
+        self.relations[1].grasp = copy.deepcopy(best_grasp)
+        self.relations[1].grasp.q_pre = None
+        self.relations[1].grasp.q = None
+        self.relations[2].grasp = copy.deepcopy(best_grasp)
+        self.relations[2].grasp.q_pre = None
+        self.relations[2].grasp.q = None
 
 class JarOpener:
     """
@@ -419,14 +647,13 @@ Class for opening the jar.
         Cy_inE.Normalize()
         Cz_inE.Normalize()
         Cp_inE = PyKDL.Vector(x,best_y,((best_pt[0]+best_pt[1]+best_pt[2])*(1.0/3.0)).z())
-        T_E_G = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
+        T_E_Ge = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
 
         grasps = []
         for angle in np.arange(0.0, 360.0/180.0*math.pi, 10.0/180.0*math.pi):
-            grasps.append(Grasp(copy.deepcopy(T_E_G*PyKDL.Frame( PyKDL.Rotation.RotZ(angle))), "JarCapForce",
+            grasps.append(Grasp(copy.deepcopy(T_E_Ge*PyKDL.Frame( PyKDL.Rotation.RotZ(angle))), "JarCapForce",
             [best_desired_angles[0], best_desired_angles[1], best_desired_angles[2], spread_angle],
-            [best_desired_angles[0]-20.0/180.0*math.pi, best_desired_angles[1]-20.0/180.0*math.pi, best_desired_angles[2]-20.0/180.0*math.pi, spread_angle],
-            q_post=[best_desired_angles[0]+10.0/180.0*math.pi, best_desired_angles[1]+10.0/180.0*math.pi, best_desired_angles[2]+10.0/180.0*math.pi, spread_angle]))
+            [best_desired_angles[0]-20.0/180.0*math.pi, best_desired_angles[1]-20.0/180.0*math.pi, best_desired_angles[2]-20.0/180.0*math.pi, spread_angle]))
 
         return grasps
 
@@ -475,15 +702,15 @@ Class for opening the jar.
         Cy_inE.Normalize()
         Cz_inE.Normalize()
         Cp_inE = center_pt
-        T_E_G = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
+        T_E_Ge = PyKDL.Frame( PyKDL.Rotation(Cx_inE, Cy_inE, Cz_inE), Cp_inE)
         grasps = []
         for angle in np.arange(0.0, 360.0/180.0*math.pi, 10.0/180.0*math.pi):
-            grasps.append(Grasp(copy.deepcopy(T_E_G*PyKDL.Frame( PyKDL.Rotation.RotZ(angle))), "JarCapPinch",
+            grasps.append(Grasp(copy.deepcopy(T_E_Ge*PyKDL.Frame( PyKDL.Rotation.RotZ(angle))), "JarCapPinch",
             [100.0/180.0*math.pi, 100.0/180.0*math.pi, 0.0, spread_angle],
             [0.0, 0.0, 0.0, spread_angle]))
         return grasps
 
-    def GenerateGrasps_jarCapTopTouch(self,velma,jar):
+    def GenerateGrasps_jarCapTopTouch(self,velma):
         hand_q = [
         [0, [0.0, 0.0, 0.0, 0.0], [20.0/180.0*math.pi, 0.0, 130.0/180.0*math.pi, 0.0]],
         [0, [0.0, 0.0, 0.0, 90.0/180.0*math.pi], [20.0/180.0*math.pi, 130.0/180.0*math.pi, 0.0, 90.0/180.0*math.pi]],
@@ -496,16 +723,14 @@ Class for opening the jar.
         grasps = []
         for angle in np.arange(0.0, 360.0/180.0*math.pi, 10.0/180.0*math.pi):
             for q in hand_q:
-                T_E_G = velma.get_T_E_Fd(q[0], q[2][q[0]], q[2][3]) * velma.pressure_frames[tactile_row*3 + 1]
-                grasps.append(Grasp(copy.deepcopy(T_E_G*PyKDL.Frame( PyKDL.Rotation.RotZ(angle))), "JarCapTopTouch",
+                T_E_Ge = velma.get_T_E_Fd(q[0], q[2][q[0]], q[2][3]) * velma.pressure_frames[tactile_row*3 + 1]
+                grasps.append(Grasp(copy.deepcopy(T_E_Ge*PyKDL.Frame( PyKDL.Rotation.RotZ(angle))), "JarCapTopTouch",
                 q[2],
-                q[1],
-                q_post=q[1]))
+                q[1]))
         return grasps
 
     def poseCallback(self, data):
          print data.pose.position
-         print self.point_inside_polygon(data.pose.position.x, data.pose.position.y, self.polygon)
 
     def spin(self):
 
@@ -539,19 +764,6 @@ Class for opening the jar.
         # reset the gripper
         self.resetGripper(velma)
 
-        print "generating grasps..."
-        # calculate the best grip for the jar cap
-        jarCapForceGrasps = self.generateGrasps_jarCapForce(velma, jar, 70.0/180.0*math.pi)
-        print "generated %s grasps: %s"%(len(jarCapForceGrasps), jarCapForceGrasps[0].name)
-
-        # calculate the best grip for the jar side touching
-        jarCapPinchGrasps = self.generateGrasps_jarCapPinch(velma, jar)
-        print "generated %s grasps: %s"%(len(jarCapPinchGrasps), jarCapPinchGrasps[0].name)
-
-        # calculate the best grip for the jar top touching
-        jarCapTopTouchGrasps = self.GenerateGrasps_jarCapTopTouch(velma,jar)
-        print "generated %s grasps: %s"%(len(jarCapTopTouchGrasps), jarCapTopTouchGrasps[0].name)
-
         # start with very low stiffness
         print "setting stiffness to very low value"
         velma.moveImpedance(velma.k_error, 0.5)
@@ -563,535 +775,287 @@ Class for opening the jar.
             exit(0)
 
         velma.updateTransformations()
-        velma.updateAndMoveTool( velma.T_W_E, 2.0 )
-        if velma.checkStopCondition(2.0):
+        velma.updateAndMoveTool( velma.T_W_E, 1.0 )
+        if velma.checkStopCondition(1.0):
             exit(0)
 
         raw_input("Press Enter to continue...")
         print "setting stiffness to bigger value"
 
-        velma.moveImpedance(k_jar_touching, 5.0)
-        if velma.checkStopCondition(5.0):
+        velma.moveImpedance(k_jar_touching, 3.0)
+        if velma.checkStopCondition(3.0):
             exit(0)
+
+        if False:
+            velma.moveAroundQ5Singularity(5.0/180.0*math.pi)
+            print "aborted_on_q5_singularity: %s"%(velma.aborted_on_q5_singularity)
+            exit(0)
+
+        if False:
+            velma.updateTransformations()
+            i = 6
+            omega = 5.0/180.0*math.pi
+            if velma.q_r[i] > 0.0:
+                angle = -0.0/180.0*math.pi
+                omega = -math.fabs(omega)
+            else:
+                angle = 0.0/180.0*math.pi
+                omega = math.fabs(omega)
+            traj, times = velma.generateTrajectoryInJoint(i, -velma.q_r[i]+angle, omega)
+
+            velma.moveWrist2(traj[-1]*velma.T_W_T)
+            raw_input("Press Enter to move the robot in " + str(times[-1]) + " s...")
+            if velma.checkStopCondition():
+                exit(0)
+            velma.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=False)
+            velma.checkStopCondition(times[-1]+0.5)
+            exit(0)
+
+        velma.calibrateTactileSensors()
+        print "generating grasps..."
+        # calculate the best grip for the jar cap
+        jarCapForceGrasps = self.generateGrasps_jarCapForce(velma, jar, 70.0/180.0*math.pi)
+        print "generated %s grasps: %s"%(len(jarCapForceGrasps), jarCapForceGrasps[0].name)
+
+        # calculate the best grip for the jar side touching
+        jarCapPinchGrasps = self.generateGrasps_jarCapPinch(velma, jar)
+        print "generated %s grasps: %s"%(len(jarCapPinchGrasps), jarCapPinchGrasps[0].name)
+
+        # calculate the best grip for the jar top touching
+        jarCapTopTouchGrasps = self.GenerateGrasps_jarCapTopTouch(velma)
+        print "generated %s grasps: %s"%(len(jarCapTopTouchGrasps), jarCapTopTouchGrasps[0].name)
+
+        self.grasps = jarCapForceGrasps + jarCapPinchGrasps + jarCapTopTouchGrasps
+        print "Total %s grasps"%(len(self.grasps))
 
         # get contact points observations
         # we want to touch the jar's cap with the middle of the 5th row of tactile matrix
         if True:
-            # get the fresh pose of the jar
-            T_B_JC = copy.deepcopy(jar.getJarCapFrame())
-            T_B_Gd = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
+            actions = []
+            actions.append(JarLidTopTouchAction(velma))
+            actions.append(JarLidPinchGraspAction(velma))
+            actions.append(RemoveJarLidAction(velma))
+            actions.append(RemoveJarLidAction(velma))
+            actions.append(RemoveJarLidAction(velma))
+            actions.append(RemoveJarLidAction(velma))
+            actions.append(RemoveJarLidAction(velma))
 
-            # then, we search for the best angle about S.Z axis for jar cap approach
-            # iterate through angles
-            best_score = 1000000.0
-            velma.updateTransformations()
-            T_B_E = velma.T_B_W * velma.T_W_E
-
-            for grasp in jarCapTopTouchGrasps:
-                traj_T_B_Ed = []
-                T_B_Ed = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-0.05)) * grasp.T_G_E
-                traj_T_B_Ed.append(T_B_Ed)
-                T_B_Ed = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,0.05)) * grasp.T_G_E
-                traj_T_B_Ed.append(T_B_Ed)
-
-                cost = velma.getTrajCost(traj_T_B_Ed, True, False)
-                print cost
-
-                if cost < best_score:
-                    best_score = cost
-                    best_grasp = grasp
-
-            if best_score > 1000.0:
-                print "it is impossible to reach the jar"
-                rospy.sleep(1)
-                exit(0)
-
-            T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-0.05)) * best_grasp.T_G_E * velma.T_E_W
-            duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.2, max_v_r = 0.4)
-            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-            if velma.checkStopCondition():
-                exit(0)
-            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            velma.move_hand_client("right", best_grasp.q_pre )
-            if velma.checkStopCondition(3.0):
-                exit(0)
-            velma.move_hand_client("right", best_grasp.q )
-            if velma.checkStopCondition(3.0):
-                exit(0)
-            if duration > 6.1:
-                if velma.checkStopCondition(6.0):
-                    exit(0)
-
-            # move down
-            velma.calibrateTactileSensors()
             self.resetContacts()
-
-            T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,0.05)) * best_grasp.T_G_E * velma.T_E_W
-
-            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            raw_input("Press Enter to move the robot...")
-            if velma.checkStopCondition():
-                exit(0)
-
-            velma.moveWrist(T_B_Wd, 6, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            # wait for contact
-            contacts = velma.waitForFirstContact(80, 6.0, emergency_stop=True, f1=True, f2=True, f3=True, palm=False)
-            if len(contacts) < 1:
-                return
-            for c in contacts:
-                self.addContact(c)
-
-            print "found contact point"
-            for c in self.contacts:
-                jar.addContactObservation(c)
-            jar.drawContactObservations()
-
-            # move up
-            T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-0.05)) * best_grasp.T_G_E * velma.T_E_W
-
-            velma.moveWrist(T_B_Wd, 3, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            if velma.checkStopCondition(3):
-                exit(0)
-
-            velma.move_hand_client("right", best_grasp.q_post )
-            if velma.checkStopCondition(3):
-                exit(0)
-
-            # update jar position
-            print T_B_JC
-            jar.processContactObservationsForTop()
-            rospy.sleep(1.0)
-            jar.drawContactObservations()
-            T_B_JC = copy.deepcopy(jar.getJarCapFrame())
-            print T_B_J
-
-        # now we want to touch the jar cap from 4 different sides using 2 fingers
-        if True:
-            # get the fresh pose of the jar
-            T_B_JC = copy.deepcopy(jar.getJarCapFrame())
-
-            velma.updateTransformations()
-
-            T_B_Gd = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
-
-            velma.updateTransformations()
-            z5 = PyKDL.Frame(copy.deepcopy(velma.T_B_L5.M)) * PyKDL.Vector(0,0,1)
-            T_B_E = velma.T_B_W * velma.T_W_E
-            # find the best angle for touching the cap
-            # iterate through angles
-            best_score = 1000000.0
-
-            set_T_G_G_rot = [PyKDL.Frame(), PyKDL.Frame(PyKDL.Rotation.RotZ(90.0/180.0*math.pi))]
-
-            for grasp in jarCapPinchGrasps:
-
-                traj_T_B_Ed = []
-                for beta in np.arange(0.0, 90.1/180.0*math.pi, 5.0/180.0*math.pi):
-                    # calculate the transform
-                    T_B_Ed = T_B_Gd * PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * grasp.T_G_E
-                    traj_T_B_Ed.append(T_B_Ed)
-
-                cost = velma.getTrajCost(traj_T_B_Ed, True, False)
-                print cost
-
-                # prefer the pose with the smallest twist to the current pose
-                if cost < best_score:
-                    best_score = cost
-                    best_grasp = grasp
-
-            if best_score > 1000.0:
-                print "it is impossible to reach the jar"
-                rospy.sleep(1)
-                exit(0)
-
-            velma.calibrateTactileSensors()
-
-            print "best_score: %s"%(best_score)
             jar.resetContactObservations()
 
-            # set gripper configuration for jar touching
-            velma.move_hand_client("right", best_grasp.q_pre, t=(3000, 3000, 3000, 3000) )
-            if velma.checkStopCondition(3.0):
-                exit(0)
+            action_index = 0
 
-            T_B_Wd = T_B_Gd * best_grasp.T_G_E * velma.T_E_W
-            duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.2, max_v_r = 0.4)
-            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-            if velma.checkStopCondition():
-                exit(0)
+            last_k = copy.deepcopy(k_jar_touching)
+            last_q = [0.0, 0.0, 0.0, 0.0]
 
-            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            if velma.checkStopCondition(duration):
-                exit(0)
+            for action in actions:
+                # get the fresh pose of the jar
+                T_B_JC = copy.deepcopy(jar.getJarCapFrame())
+                action.setTarget(T_B_JC)
 
-            velma.move_hand_client("right", best_grasp.q, t=(1500, 1500, 1500, 1500) )
-            if velma.checkStopCondition(3.0):
-                exit(0)
+                stop = False
+                action.recalculateRelations(self.grasps)
+                rel_index = 0
+                while not stop:
+                    rel = action.relations[rel_index]
+                    print "rel: %s"%(rel.name)
 
-            self.resetContacts()
-            # get contacts for each finger
-            for f in range(0, 2):
-                contacts = velma.getContactPoints(200, f1=(f==0), f2=(f==1), f3=False, palm=False)
-                mean_contact = PyKDL.Vector()
-                for c in contacts:
-                    mean_contact += c
-                if len(contacts) > 0:
-                    self.addContact((1.0/len(contacts))*mean_contact)
+                    if rel.grasp.q_pre != None and (last_q[0] != rel.grasp.q_pre[0] or last_q[1] != rel.grasp.q_pre[1] or last_q[2] != rel.grasp.q_pre[2] or last_q[3] != rel.grasp.q_pre[3]):
+                        last_q = copy.deepcopy(rel.grasp.q_pre)
+                        velma.move_hand_client("right", rel.grasp.q_pre, t=rel.grasp.t_pre )
+                        if velma.checkStopCondition(3.0):
+                            exit(0)
+                    if rel.k_pre != None and (last_k.force.x != rel.k_pre.force.x or last_k.force.y != rel.k_pre.force.y or last_k.force.z != rel.k_pre.force.z or last_k.torque.x != rel.k_pre.torque.x or last_k.torque.y != rel.k_pre.torque.y or last_k.torque.z != rel.k_pre.torque.z):
+                        last_k = copy.deepcopy(rel.k_pre)
+                        print "moveImpedance(%s)"%(rel.k_pre)
+                        velma.moveImpedance(rel.k_pre, 2.0)
+                        if velma.checkStopCondition(2.0):
+                            exit(0)
 
-            for c in self.contacts:
-                jar.addContactObservation(c)
-            jar.drawContactObservations()
-
-            # set gripper configuration for jar touching
-            velma.move_hand_client("right", best_grasp.q_pre, t=(3000, 3000, 3000, 3000) )
-            if velma.checkStopCondition(3.0):
-                exit(0)
-
-            # first touch is performed, try to move to the other position
-            traj_T_B_Ed = []
-            # calculate the transform
-            T_B_Ed = T_B_Gd * PyKDL.Frame(PyKDL.Rotation.RotZ(90.1/180.0*math.pi)) * best_grasp.T_G_E
-            traj_T_B_Ed.append(T_B_Ed)
-            cost = velma.getTrajCost(traj_T_B_Ed, False, False)
-            print cost
-
-            if cost > 1000.0:
-                print "It is impossible to move without singularity."
-                velma.updateTransformations()
-                if PyKDL.dot(PyKDL.Frame(T_B_Gd.M) * PyKDL.Vector(0,0,1), PyKDL.Frame(velma.T_B_L6.M) * PyKDL.Vector(0,1,0)) > 0.0:
-                    rel_angle = 90.0/180.0*math.pi
-                else:
-                    rel_angle = -90.0/180.0*math.pi
-                traj, times = velma.generateTrajectoryInJoint(5, rel_angle, rel_angle/5.0)
-
-                velma.moveWrist2(traj[-1]*velma.T_W_T)
-                raw_input("Press Enter to move the robot in " + str(times[-1]) + " s...")
-                if velma.checkStopCondition():
-                    exit(0)
-
-                velma.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                if velma.checkStopCondition(times[-1]+0.5):
-                    exit(0)
-
-                if velma.hasQ5Singularity():
-                    traj, times = velma.generateTrajectoryInJoint(5, rel_angle/3.0, rel_angle/5.0)
-
-                    velma.moveWrist2(traj[-1]*velma.T_W_T)
-                    raw_input("Press Enter to move the robot in " + str(times[-1]) + " s...")
+                    T_B_Wd = action.T_B_Go * rel.T_Go_Ge * rel.grasp.T_Ge_E * velma.T_E_W
+                    duration = velma.getMovementTime(T_B_Wd, max_v_l = rel.max_v_l, max_v_r = rel.max_v_r)
+                    velma.moveWrist2(T_B_Wd*velma.T_W_T)
+                    raw_input("Press Enter to move the robot in " + str(duration) + " s...")
                     if velma.checkStopCondition():
                         exit(0)
+                    velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+                    if True in rel.stop_on_contact:
+                        # wait for contact
+                        contacts = velma.waitForFirstContact(80, duration, emergency_stop=True, f1=True, f2=True, f3=True, palm=False)
+                        if rel.collect_contacts:
+                            if len(contacts) < 1:
+                                return
+                            for c in contacts:
+                                self.addContact(c)
+#                            print "found contact point"
+                    else:
+                        if rel.collect_contacts:
+                            end_time = rospy.Time.now() + rospy.Duration(duration)
+                            while rospy.Time.now() < end_time:
+                                contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
+                                for c in contacts:
+                                    self.addContact(c)
+                                if velma.checkStopCondition(0.01):
+                                    exit(0)
+                                if velma.aborted_on_q5_singularity:
+                                    break
+                        else:
+                            if velma.checkStopCondition(duration):
+                                exit(0)
 
-                    velma.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                    if velma.checkStopCondition(times[-1]+0.5):
-                        exit(0)
+                    aborted = False
+                    if velma.aborted_on_q5_singularity:
+                        print "moving away from singularity in q_5..."
+                        velma.moveAwayQ5Singularity(20.0/180.0*math.pi, T_B_Wd)
+                        aborted = True
 
-                best_score = 1000000.0
-                for grasp in jarCapPinchGrasps:
+                    if velma.aborted_on_q5_q6_self_collision:
+                        print "moving away from self collision in q_5 and q_6..."
+                        closest_sector = velma.getClosestQ5Q6SpaceSector(velma.q_r[5], velma.q_r[6])
+                        print "closest sector: %s"%(closest_sector)
+                        q5 = (velma.q5_q6_restricted_area[closest_sector][0]+velma.q5_q6_restricted_area[closest_sector][1])/2.0
+                        q6 = (velma.q5_q6_restricted_area[closest_sector][2]+velma.q5_q6_restricted_area[closest_sector][3])/2.0
+                        print "q_5: %s   q_6: %s"%(q5,q6)
+                        traj, times = velma.generateTrajectoryInQ5Q6(q5,q6,5.0/180.0*math.pi)
 
-                    traj_T_B_Ed = []
-                    # calculate the transform
-                    T_B_Ed = T_B_Gd * grasp.T_G_E
-                    traj_T_B_Ed.append(T_B_Ed)
+                        velma.moveWrist2(traj[-1]*velma.T_W_T)
+                        raw_input("Press Enter to move the robot in " + str(times[-1]) + " s...")
+                        if velma.checkStopCondition():
+                            exit(0)
+                        velma.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=False)
+                        velma.checkStopCondition(times[-1]+0.5)
+                        aborted = True
 
-                    cost = velma.getTrajCost(traj_T_B_Ed, False, False)
-                    print cost
+                    if aborted:
+                        next_actions = rel.on_failure.split(',')
+                    else:
+                        next_actions = rel.on_success.split(',')
+                        if rel.grasp.q != None and (last_q[0] != rel.grasp.q[0] or last_q[1] != rel.grasp.q[1] or last_q[2] != rel.grasp.q[2] or last_q[3] != rel.grasp.q[3]):
+                            last_q = copy.deepcopy(rel.grasp.q)
+                            velma.move_hand_client("right", rel.grasp.q, t=rel.grasp.t )
+                            if rel.collect_contacts:
+                                end_time = rospy.Time.now() + rospy.Duration(3.0)
+                                while rospy.Time.now() < end_time:
+                                    contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
+                                    if velma.checkStopCondition(0.01):
+                                        exit(0)
+                                    for c in contacts:
+                                        self.addContact(c)
+                            else:
+                                if velma.checkStopCondition(3.0):
+                                    exit(0)
+                        if rel.k_post != None and (last_k.force.x != rel.k_post.force.x or last_k.force.y != rel.k_post.force.y or last_k.force.z != rel.k_post.force.z or last_k.torque.x != rel.k_post.torque.x or last_k.torque.y != rel.k_post.torque.y or last_k.torque.z != rel.k_post.torque.z):
+                            last_k = copy.deepcopy(rel.k_post)
+                            print "moveImpedance(%s)"%(rel.k_post)
+                            velma.moveImpedance(rel.k_post, 2.0)
+                            if velma.checkStopCondition(2.0):
+                                exit(0)
 
-                    # prefer the pose with the smallest twist to the current pose
-                    if cost < best_score:
-                        best_score = cost
-                        best_grasp = grasp
+                    print "aborted %s   next_actions: %s"%(aborted, next_actions)
+                    for next in next_actions:
+                        if next == "RECALCULATE":
+                            action.recalculateRelations(self.grasps)
+                        elif next == "FAILURE":
+                            exit(0)
+                        elif next == "SUCCESS":
+                            if rel.grasp.q != None and (last_q[0] != rel.grasp.q[0] or last_q[1] != rel.grasp.q[1] or last_q[2] != rel.grasp.q[2] or last_q[3] != rel.grasp.q[3]):
+                                last_q = copy.deepcopy(rel.grasp.q)
+                                velma.move_hand_client("right", rel.grasp.q, t=rel.grasp.t)
+                                if rel.collect_contacts:
+                                    end_time = rospy.Time.now() + rospy.Duration(3.0)
+                                    while rospy.Time.now() < end_time:
+                                        contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
+                                        if velma.checkStopCondition(0.01):
+                                            exit(0)
+                                        for c in contacts:
+                                            self.addContact(c)
+                                else:
+                                    if velma.checkStopCondition(3.0):
+                                        exit(0)
+                            if rel.k_post != None and (last_k.force.x != rel.k_post.force.x or last_k.force.y != rel.k_post.force.y or last_k.force.z != rel.k_post.force.z or last_k.torque.x != rel.k_post.torque.x or last_k.torque.y != rel.k_post.torque.y or last_k.torque.z != rel.k_post.torque.z):
+                                last_k = copy.deepcopy(rel.k_post)
+                                velma.moveImpedance(rel.k_post, 2.0)
+                                if velma.checkStopCondition(2.0):
+                                    exit(0)
+                            stop = True
+                            break
+                        elif action.getRelIndex(next) >= 0:
+                            rel_index = action.getRelIndex(next)
+                            break
+                        else:
+                            print "error: could not find relation: %s"%(next)
+                            exit(0)
 
-                if best_score > 1000.0:
-                    print "it is impossible to reach the jar"
-                    rospy.sleep(1)
-                    exit(0)
+                if action_index == 0:
+                    for c in self.contacts:
+                        jar.addContactObservation(c)
+                    jar.processContactObservationsForTop()
+                    jar.drawContactObservations()
+                    self.resetContacts()
+                    jar.resetContactObservations()
+                elif action_index == 1:
+                    used_points = [False for c in self.contacts]
+                    index = 0
+                    for c in self.contacts:
+                        if used_points[index]:
+                            index += 1
+                            continue
+                        mean_point = PyKDL.Vector()
+                        mean_count = 0
+                        index_2 = 0
+                        for d in self.contacts:
+                            if (c-d).Norm() < 0.02:
+                                mean_point += d
+                                mean_count += 1
+                                used_points[index_2] = True
+                            index_2 += 1
+                        if mean_count > 0:
+                            jar.addContactObservation(mean_point*(1.0/mean_count))
+                            
+                    # now, we have very good pose of the jar
+                    jar.processContactObservations()
+                    jar.drawContactObservations()
+                else:
+                    contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
+                    if len(contacts) > 0:
+                        print "the jar is opened"
+                        break
+                    for c in self.contacts:
+                        jar.addContactObservation(c)
+                    jar.processContactObservationsForTop(top_offset=-0.02)
+                    jar.drawContactObservations()
+                    jar.resetContactObservations()
 
-                T_B_Wd = T_B_Gd * best_grasp.T_G_E * velma.T_E_W
-                duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.2, max_v_r = 0.4)
-                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-                if velma.checkStopCondition():
-                    exit(0)
-
-                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                if velma.checkStopCondition(duration):
-                    exit(0)
-            else:
-                print "It is possible to move without singularity."
-                T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Rotation.RotZ(90.0/180.0*math.pi)) * best_grasp.T_G_E * velma.T_E_W
-                duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.2, max_v_r = 0.4)
-                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-                if velma.checkStopCondition():
-                    exit(0)
-                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                if velma.checkStopCondition(duration):
-                    exit(0)
-
-
-            velma.move_hand_client("right", best_grasp.q, t=(1500, 1500, 1500, 1500) )
-            if velma.checkStopCondition(3.0):
-                exit(0)
-
-            self.resetContacts()
-            # get contacts for each finger
-            for f in range(0, 2):
-                contacts = velma.getContactPoints(200, f1=(f==0), f2=(f==1), f3=False, palm=False)
-                mean_contact = PyKDL.Vector()
-                for c in contacts:
-                    mean_contact += c
-                if len(contacts) > 0:
-                    self.addContact((1.0/len(contacts))*mean_contact)
-
-            for c in self.contacts:
-                jar.addContactObservation(c)
-            jar.drawContactObservations()
-
-            # set gripper configuration for jar touching
-            velma.move_hand_client("right", best_grasp.q_pre, t=(3000, 3000, 3000, 3000) )
-            if velma.checkStopCondition(3.0):
-                exit(0)
-
-#            rospy.sleep(1)
-#            exit(0)
+                    used_points = [False for c in self.contacts]
+                    index = 0
+                    for c in self.contacts:
+                        if used_points[index]:
+                            index += 1
+                            continue
+                        mean_point = PyKDL.Vector()
+                        mean_count = 0
+                        index_2 = 0
+                        for d in self.contacts:
+                            if (c-d).Norm() < 0.02:
+                                mean_point += d
+                                mean_count += 1
+                                used_points[index_2] = True
+                            index_2 += 1
+                        if mean_count > 0:
+                            jar.addContactObservation(mean_point*(1.0/mean_count))
+                            
+                    # now, we have very good pose of the jar
+                    jar.processContactObservations()
 
 
-
-#            for T_G_G_rot in set_T_G_G_rot:
-#                # set gripper configuration for jar touching
-#                velma.move_hand_client("right", best_grasp.q_pre, t=(3000, 3000, 3000, 3000) )
-#                if velma.checkStopCondition(3.0):
-#                    exit(0)
-#                T_B_Wd = T_B_Gd * T_G_G_rot * best_grasp.T_G_E * velma.T_E_W
-#                duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.1, max_v_r = 0.2)
-#                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-#                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-#                if velma.checkStopCondition():
-#                    exit(0)
-#                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-#                if velma.checkStopCondition(duration):
-#                    exit(0)
-#                velma.move_hand_client("right", best_grasp.q, t=(1500, 1500, 1500, 1500) )
-#                if velma.checkStopCondition(3.0):
-#                    exit(0)
-#                self.resetContacts()
-#                # get contacts for each finger
-#                for f in range(0, 2):
-#                    contacts = velma.getContactPoints(200, f1=(f==0), f2=(f==1), f3=False, palm=False)
-#                    mean_contact = PyKDL.Vector()
-#                    for c in contacts:
-#                        mean_contact += c
-#                    if len(contacts) > 0:
-#                        self.addContact((1.0/len(contacts))*mean_contact)
-#                for c in self.contacts:
-#                    jar.addContactObservation(c)
 #                jar.drawContactObservations()
 
-#            velma.move_hand_client("right", best_grasp.q_pre, t=(3000, 3000, 3000, 3000) )
-#            if velma.checkStopCondition(3.0):
-#                exit(0)
+                action_index += 1
+#                jar.drawContactObservations()
 
-            # now, we have very good pose of the jar
-            jar.processContactObservations()
+            rospy.sleep(2.0)
 
-        # remove the cap
-        if True:
-            # get the fresh pose of the jar
-            T_B_JC = copy.deepcopy(jar.getJarCapFrame())
-
-            velma.updateTransformations()
-
-            T_B_Gd = T_B_JC * PyKDL.Frame(PyKDL.Rotation.RotY(-180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,0.01))
-
-            angle_cap = 60.0/180.0*math.pi
-
-            velma.updateTransformations()
-            T_B_E = velma.T_B_W * velma.T_W_E
-            # find the best angle for rotating the cap
-            # iterate through angles
-            best_score = 1000000.0
-            z5 = PyKDL.Frame(copy.deepcopy(velma.T_B_L5.M)) * PyKDL.Vector(0,0,1)
-
-            for grasp in jarCapForceGrasps:
-                success = True
-                total_score = 0.0
-
-                traj_T_B_Ed = []
-                # simulate the approach
-                for beta in np.arange(0.0, angle_cap+0.1/180.0*math.pi, 5.0/180.0*math.pi):
-                    # calculate the transform
-                    T_B_Ed = T_B_Gd * PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * grasp.T_G_E
-                    traj_T_B_Ed.append(T_B_Ed)
-
-                cost = velma.getTrajCost(traj_T_B_Ed, False, False)
-                print cost
-
-                # prefer the pose with the smallest twist to the current pose
-                if success and cost < best_score:
-                    best_score = cost
-                    best_grasp = grasp
-
-            if best_score > 1000.0:
-                print "it is impossible to reach the jar"
-                rospy.sleep(1)
-                exit(0)
-
-            print "best_score: %s"%(best_score)
-
-            pos_z = 0.0
-
-            # move to the start position
-            T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(angle_cap)) * best_grasp.T_G_E * velma.T_E_W
-            duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.2, max_v_r = 0.4)
-            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-#            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-#            raw_input("Press Enter to move the robot...")
-            if velma.checkStopCondition():
-                exit(0)
-            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            if velma.checkStopCondition(duration):
-                exit(0)
-
-            opened = False
-            while True:
-                # correct gripper configuration for jar cap
-                velma.move_hand_client("right", best_grasp.q_pre )
-                if velma.checkStopCondition(3.0):
-                    exit(0)
-
-                # move to the start position
-                T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(angle_cap)) * best_grasp.T_G_E * velma.T_E_W
-                duration = velma.getMovementTime(T_B_Wd, max_v_l = 0.2, max_v_r = 0.4)
-                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
-#                velma.moveWrist2(T_B_Wd*velma.T_W_T)
-#                raw_input("Press Enter to move the robot...")
-                if velma.checkStopCondition():
-                    exit(0)
-                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                velma.moveImpedance(k_jar_cap_gripping, 2.0)
-                if velma.checkStopCondition(duration):
-                    exit(0)
-
-                raw_input("Press Enter to move the robot...")
-                if velma.checkStopCondition():
-                    exit(0)
-
-                # close the fingers on the cap
-                velma.move_hand_client("right", best_grasp.q, t=(3000, 3000, 3000, 3000) )
-                if velma.checkStopCondition(3.0):
-                    exit(0)
-
-                # close the fingers stronger on the cap
-                velma.move_hand_client("right", best_grasp.q_post, t=(1000, 1000, 1000, 1000) )
-                if velma.checkStopCondition(1.5):
-                    exit(0)
-
-                velma.moveImpedance(k_jar_cap_rotating, 2.0)
-                if velma.checkStopCondition(2.0):
-                    exit(0)
-
-                # rotate the cap
-                for beta in np.arange(angle_cap, -0.1/180.0*math.pi, -2.0/180.0*math.pi):
-                    print "beta: %s deg"%(beta/math.pi*180.0)
-                    T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(beta)) * best_grasp.T_G_E * velma.T_E_W
-                    velma.moveWrist(T_B_Wd, 0.2, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                    if velma.checkStopCondition(0.2):
-                        exit(0)
-
-                # pull the cap
-                T_B_Wd = T_B_Gd * PyKDL.Frame(PyKDL.Vector(0,0,-pos_z)) * PyKDL.Frame(PyKDL.Vector(0,0,-0.07)) * best_grasp.T_G_E * velma.T_E_W
-                velma.moveWrist2(T_B_Wd * velma.T_W_T)
-                raw_input("Press Enter to move the gripper...")
-                if velma.checkStopCondition():
-                    exit(0)
-                self.resetContacts()
-                velma.moveWrist(T_B_Wd, 6.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-
-                end_t = rospy.Time.now() + rospy.Duration(6.0)
-                lost_contact = False
-                no_contact = 0
-                while rospy.Time.now() < end_t:
-                    contacts = velma.getContactPoints(200, f1=True, f2=True, f3=True, palm=False)
-                    if len(contacts) < 1:
-                         no_contact += 1
-                    else:
-                         no_contact = 0
-                    if no_contact > 5:
-                         lost_contact = True
-                    for c in contacts:
-                        self.addContact(c)
-                    if velma.checkStopCondition(0.05):
-                        exit(0)
-
-                if len(self.contacts) < 1:
-                    print "no contact with the jar"
-                    break
-
-                if not lost_contact:
-                    print "we are still holding the cap -> the jar is opened!"
-                    opened = True
-                    break
-                max_z = 0.0
-                for c in self.contacts:
-                    c_in_J = T_B_JC.Inverse() * c
-                    if c_in_J.z() > max_z:
-                        max_z = c_in_J.z()
-
-                pos_z = max_z - 0.015
-                print "max_z: %s"%(max_z)
-                print "pos_z: %s"%(pos_z)
-                raw_input("Press Enter to continue...")
-                if velma.checkStopCondition():
-                    exit(0)
-
-        # for test
-#        opened = True
-
-        exit(0)
-
-        if not opened:
             exit(0)
-
-        # get the angle of L6 in L5 anlong L5.y axis
-        velma.updateTransformations()
-        T_L6_L7 = velma.T_B_L6.Inverse() * velma.T_B_L7
-        T_L5_L6 = velma.T_B_L5.Inverse() * velma.T_B_L6
-        z6in5 = PyKDL.Frame(T_L5_L6.M) * PyKDL.Vector(0,0,1)
-        angle6in5 = math.atan2(z6in5.x(), z6in5.z())
-
-        angle6in5_dest = -90.0/180.0*math.pi
-        omega = 10.0/180.0*math.pi
-        time_d = 0.01
-        if angle6in5_dest < angle6in5:
-           omega = -omega
-        stop = False
-        angle = angle6in5
-        times = []
-        time = 0.5
-        tab_T_B_Wd = []
-        while not stop:
-            angle += omega * time_d
-            time += time_d
-            if angle6in5_dest > angle6in5 and angle > angle6in5_dest:
-                angle = angle6in5_dest
-                stop = True
-            if angle6in5_dest < angle6in5 and angle < angle6in5_dest:
-                angle = angle6in5_dest
-                stop = True
-            T_L5_L6d = PyKDL.Frame(PyKDL.Rotation.RotY(angle),T_L5_L6.p)
-            T_B_Wd = velma.T_B_L5 * T_L5_L6d * T_L6_L7
-            tab_T_B_Wd.append(T_B_Wd)
-            times.append(time)
-
-        velma.moveWristTraj( tab_T_B_Wd, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)) )
-        if velma.checkStopCondition(time):
-            exit(0)
-
-        exit(0)
 
 if __name__ == '__main__':
 

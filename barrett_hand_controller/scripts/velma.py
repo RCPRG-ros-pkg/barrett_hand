@@ -117,12 +117,12 @@ Class for velma robot.
         self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
         self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
         self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
-        self.singularity_angle = 15.0/180.0*math.pi
+#        self.singularity_angle = 15.0/180.0*math.pi
 
-    def hasSingularity(self, q):
-        if (math.fabs(q[1]) <= self.singularity_angle) or (math.fabs(q[3]) <= self.singularity_angle) or (math.fabs(q[5]) <= self.singularity_angle):
-            return True
-        return False
+#    def hasSingularity(self, q):
+#        if (math.fabs(q[1]) <= self.singularity_angle) or (math.fabs(q[3]) <= self.singularity_angle) or (math.fabs(q[5]) <= self.singularity_angle):
+#            return True
+#        return False
 
     def setSavedKinematics(self):
         self.F1_kinematics=[
@@ -567,29 +567,88 @@ Class for velma robot.
             p1x,p1y = p2x,p2y
         return inside
 
-    def isRightQ5Q6Collision(self, q5, q6):
-        return not self.point_inside_polygon(q5, q6, self.right_q5_q6_collision_polygon)
+#    def isRightQ5Q6Collision(self, q5, q6):
+#        return not self.point_inside_polygon(q5, q6, self.right_q5_q6_collision_polygon)
+
+    def getQ5Q6SpaceSector(self, q5, q6, margin=0.0):
+        i = 0
+        # x1,x2,y1,y2
+        for r in self.q5_q6_restricted_area:
+            if q5 > r[0]+margin and q5 < r[1]-margin and q6 > r[2]+margin and q6 < r[3]-margin:
+                return i
+            i += 1
+        return -1
+
+    def getClosestQ5Q6SpaceSector(self, q5, q6):
+        dist = []
+        sect = self.getQ5Q6SpaceSector(q5, q6)
+        if sect >= 0:
+            return sect
+        # x1,x2,y1,y2
+        for r in self.q5_q6_restricted_area:
+            d5 = 1000000.0
+            d6 = 1000000.0
+            if q5 < r[0]:
+                d5 = r[0] - q5
+            elif q5 > r[1]:
+                d5 = q5 - r[1]
+            if q6 < r[2]:
+                d6 = r[2] - q6
+            elif q6 > r[3]:
+                d6 = q6 - r[3]
+            dist.append( min( d5, d6 ) )
+
+#        print dist
+
+        i = 0
+        min_dist = 1000000.0
+        min_index = -1
+        for d in dist:
+            if d < min_dist:
+                min_dist = d
+                min_index = i
+            i += 1
+        return min_index
+
+#1.92521262169
+#-1.44746339321
+#-0.428265035152
+#-2.89507389069
+
+#-2.16006875038
+#-1.44746339321
+#0.273337930441
+#2.22040915489
+
+#2.07619023323
+#0.932657182217
+#-0.819031119347
+#2.86872577667
+
 
     def initRightQ5Q6SelfCollisionDetection(self):
         self.right_q5_q6_collision_polygon = [
-        [-0.397855401039,-2.90307354927],
-        [2.12894010544,-2.90307354927],
-        [2.12043237686,-1.87363839149],
-        [1.92475450039,-1.43123674393],
-        [0.77621114254,-1.39720571041],
-        [0.350824713707,-1.00585031509],
-        [0.401871085167,-0.571956157684],
-        [0.810242056847,0.414940297604],
-        [1.34622907639,0.942419290543],
-        [2.11192464828,1.01898884773],
-        [2.12894010544,2.8906891346],
-        [-0.814733862877,2.8906891346],
-        [-1.22310483456,2.27813267708],
-        [-2.21850919724,2.29514837265],
-        [-2.22701668739,-1.32063627243],
-        [-1.81013822556,-1.66945314407],
-        [-0.814733862877,-1.73751521111],
-        [-0.423378348351,-2.09483933449],
+        [2.12191557884,-2.90171504021],
+        [1.90023589134,-1.52496743202],
+        [0.465151429176,-1.25661826134],
+        [0.319309473038,-0.218223929405],
+        [1.30520093441,1.01851558685],
+        [2.11024808884,1.01851534843],
+        [2.12191557884,2.89695906639],
+        [-0.812423944473,2.8736243248],
+        [-1.2324488163,2.25525474548],
+        [-2.18333816528,2.27858948708],
+        [-2.22417378426,-1.30328762531],
+        [-0.41573381424,-1.85165309906],
+        [-0.386565506458,-2.89588117599],
+        ]
+
+        self.r1_r2_point = [0.00486671971157, -1.43977892399]
+        self.r2_r3_point = [-0.202122956514, 1.60210323334]
+        self.q5_q6_restricted_area = [
+        [-0.428265035152,1.92521262169,-2.89507389069,-1.38213706017],
+        [-2.11473441124,0.435783565044,-1.52231526375,2.22040915489],
+        [-0.819031119347,2.07619023323,0.932657182217,2.86872577667],
         ]
 
 
@@ -608,6 +667,20 @@ Class for velma robot.
                 self.q_r[4] = data.position[6]
                 self.q_r[5] = data.position[7]
                 self.q_r[6] = data.position[8]
+
+                if self.abort_on_q5_singularity and self.q_r[5] > -self.abort_on_q5_singularity_angle and self.q_r[5] < self.abort_on_q5_singularity_angle and not self.aborted_on_q5_singularity:
+                    try:
+                        self.aborted_on_q5_singularity = True
+                        self.action_right_trajectory_client.cancel_goal()
+                    except:
+                        pass
+
+                if self.abort_on_q5_q6_self_collision and self.getQ5Q6SpaceSector(self.q_r[5], self.q_r[6], margin=10.0/180.0*math.pi) < 0 and not self.aborted_on_q5_q6_self_collision:    # self-collision
+                    try:
+                        self.aborted_on_q5_q6_self_collision = True
+                        self.action_right_trajectory_client.cancel_goal()
+                    except:
+                        pass
 
     def tactileCallback(self, data):
         max_tactile_value = -1.0
@@ -677,6 +750,13 @@ Class for velma robot.
         # barrett hand kinematics
         self.setSavedKinematics()
 
+        self.abort_on_q5_singularity = False
+        self.abort_on_q5_singularity_angle = 20.0/180.0*math.pi
+        self.aborted_on_q5_singularity = False
+        self.abort_on_q5_q6_self_collision = False
+        self.aborted_on_q5_q6_self_collision = False
+
+        self.T_B_L = [PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame()]
         self.initIkSolver()
 
         self.initRightQ5Q6SelfCollisionDetection()
@@ -766,7 +846,12 @@ Class for velma robot.
         wrist_pose = pm.toMsg(wrist_frame)
         self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
 
-    def moveWrist(self, wrist_frame, t, max_wrench, start_time=0.01, stamp=None):
+    def moveWrist(self, wrist_frame, t, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        self.abort_on_q5_singularity = abort_on_q5_singularity
+        self.aborted_on_q5_singularity = False
+        self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
+        self.aborted_on_q5_q6_self_collision = False
+
         # we are moving the tool, so: T_B_Wd*T_W_T
         wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
         self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
@@ -785,7 +870,12 @@ Class for velma robot.
         self.current_max_wrench = max_wrench
         self.action_right_trajectory_client.send_goal(action_trajectory_goal)
 
-    def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None):
+    def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        self.abort_on_q5_singularity = abort_on_q5_singularity
+        self.aborted_on_q5_singularity = False
+        self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
+        self.aborted_on_q5_q6_self_collision = False
+
         # we are moving the tool, so: T_B_Wd*T_W_T
         action_trajectory_goal = CartesianTrajectoryGoal()
         if stamp != None:
@@ -843,10 +933,19 @@ Class for velma robot.
         self.action_impedance_client.send_goal(self.action_impedance_goal)
 
     def stopArm(self):
-        if self.action_right_trajectory_client.gh:
-            self.action_right_trajectory_client.cancel_all_goals()
-        if self.action_tool_client.gh:
-            self.action_tool_client.cancel_all_goals()
+#        if self.action_right_trajectory_client.gh:
+#            self.action_right_trajectory_client.cancel_all_goals()
+#        if self.action_tool_client.gh:
+#            self.action_tool_client.cancel_all_goals()
+
+        try:
+            self.action_right_trajectory_client.cancel_goal()
+        except:
+            pass
+        try:
+            self.action_tool_client.cancel_goal()
+        except:
+            pass
 
     def emergencyStop(self):
         self.moveImpedance(self.k_error, 0.5)
@@ -868,6 +967,9 @@ Class for velma robot.
                 print "too big wrench"
                 self.failure_reason = "too_big_wrench"
                 rospy.sleep(1.0)
+            if self.aborted_on_q5_singularity:
+#                print "aborted_on_q5_singularity"
+                break
 
             if (self.action_right_trajectory_client.gh) and ((self.action_right_trajectory_client.get_state()==GoalStatus.REJECTED) or (self.action_right_trajectory_client.get_state()==GoalStatus.ABORTED)):
                 state = self.action_right_trajectory_client.get_state()
@@ -911,17 +1013,21 @@ Class for velma robot.
         pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
         self.T_B_W = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_2_link', rospy.Time(0))
-        self.T_B_L2 = pm.fromTf(pose)
+        for i in range(0,7):
+            pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_' + str(i+1) + '_link', rospy.Time(0))
+            self.T_B_L[i] = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_5_link', rospy.Time(0))
-        self.T_B_L5 = pm.fromTf(pose)
+#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_2_link', rospy.Time(0))
+#        self.T_B_L2 = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_6_link', rospy.Time(0))
-        self.T_B_L6 = pm.fromTf(pose)
+#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_5_link', rospy.Time(0))
+#        self.T_B_L5 = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
-        self.T_B_L7 = pm.fromTf(pose)
+#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_6_link', rospy.Time(0))
+#        self.T_B_L6 = pm.fromTf(pose)
+
+#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
+#        self.T_B_L7 = pm.fromTf(pose)
 
         pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', rospy.Time(0))
         self.T_E_F = pm.fromTf(pose)
@@ -1153,103 +1259,36 @@ Class for velma robot.
             i += 1
         return [min_twist, index]
 
-    def isFramePossible(self, T_B_E):
-        T_T2_E = self.T_T2_B * T_B_E
-#        T_T2_W = self.T_T2_B * T_B_E * self.T_E_W
-        pt_B = T_T2_E * PyKDL.Vector()
-        step = plut.x_set[1]-plut.x_set[0]
-        if pt_B.x() < plut.x_set[0]-step/2.0:
-            return [False, 1000.0]
-        if pt_B.x() > plut.x_set[-1]+step/2.0:
-            return [False, 1000.0]
-        if pt_B.y() < plut.y_set[0]-step/2.0:
-            return [False, 1000.0]
-        if pt_B.y() > plut.y_set[-1]+step/2.0:
-            return [False, 1000.0]
-        if pt_B.z() < plut.z_set[0]-step/2.0:
-            return [False, 1000.0]
-        if pt_B.z() > plut.z_set[-1]+step/2.0:
-            return [False, 1000.0]
-        i_x = int((pt_B.x() - (plut.x_set[0]-step/2.0))/step)
-        i_y = int((pt_B.y() - (plut.y_set[0]-step/2.0))/step)
-        i_z = int((pt_B.z() - (plut.z_set[0]-step/2.0))/step)
-#        print pt_B
-#        print "%s  %s  %s"%(i_x, i_y, i_z)
-#        closest_i = self.getClosestRotations(plut.rotations, T_T2_E.M)
-
-        min_twist = [10000.0, 0]
-        twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y][i_z]], T_T2_E.M)
-        if twist[0] < min_twist[0]:
-            min_twist = twist
-
-        if i_x > 0:
-            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x-1][i_y][i_z]], T_T2_E.M)
-            if twist[0] < min_twist[0]:
-                min_twist = twist
-
-        if i_x < len(plut.x_set)-1:
-            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x+1][i_y][i_z]], T_T2_E.M)
-            if twist[0] < min_twist[0]:
-                min_twist = twist
-
-        if i_y > 0:
-            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y-1][i_z]], T_T2_E.M)
-            if twist[0] < min_twist[0]:
-                min_twist = twist
-
-        if i_y < len(plut.y_set)-1:
-            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y+1][i_z]], T_T2_E.M)
-            if twist[0] < min_twist[0]:
-                min_twist = twist
-
-        if i_z > 0:
-            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y][i_z-1]], T_T2_E.M)
-            if twist[0] < min_twist[0]:
-                min_twist = twist
-
-        if i_z < len(plut.z_set)-1:
-            twist = self.getClosestRotation([plut.rotations[i] for i in plut.lookup_table[i_x][i_y][i_z+1]], T_T2_E.M)
-            if twist[0] < min_twist[0]:
-                min_twist = twist
-
-#        print "len: %s   pt: %s    min_twist: %s"%( len(plut.lookup_table[i_x][i_y][i_z]), pt_B, min_twist)
-
-        if min_twist[0] < 0.6:
-            return [True, min_twist[0]]
-        return [False, 1000.0]
-
-        print len(plut.lookup_table[i_x][i_y][i_z])
-        for index in closest_i:
-            if index in plut.lookup_table[i_x][i_y][i_z]:
-                return True
-            if i_x > 0 and index in plut.lookup_table[i_x-1][i_y][i_z]:
-                return True
-            if i_x < len(plut.x_set)-1 and index in plut.lookup_table[i_x+1][i_y][i_z]:
-                return True
-            if i_y > 0 and index in plut.lookup_table[i_x][i_y-1][i_z]:
-                return True
-            if i_y < len(plut.y_set)-1 and index in plut.lookup_table[i_x][i_y+1][i_z]:
-                return True
-            if i_z > 0 and index in plut.lookup_table[i_x][i_y][i_z-1]:
-                return True
-            if i_z < len(plut.z_set)-1 and index in plut.lookup_table[i_x][i_y][i_z+1]:
-                return True
-        return False
-
-    def getTrajCost(self, traj_T_B_Ed, allow_q5_singularity_before_end, allow_q5_singularity_on_end):
+    def getTrajCost(self, traj_T_B_Ed, allow_q5_singularity_before_end, allow_q5_singularity_on_end, q_start=None, q_end=None, T_B_Eprev=None):
         self.updateTransformations()
         q_init = PyKDL.JntArray(7)
-        q_init[0] = self.q_r[0]
-        q_init[1] = self.q_r[1]
-        q_init[2] = self.q_r[2]
-        q_init[3] = self.q_r[3]
-        q_init[4] = self.q_r[4]
-        q_init[5] = self.q_r[5]
-        q_init[6] = self.q_r[6]
+        if q_start == None:
+            q_init[0] = self.q_r[0]
+            q_init[1] = self.q_r[1]
+            q_init[2] = self.q_r[2]
+            q_init[3] = self.q_r[3]
+            q_init[4] = self.q_r[4]
+            q_init[5] = self.q_r[5]
+            q_init[6] = self.q_r[6]
+        else:
+            q_init[0] = q_start[0]
+            q_init[1] = q_start[1]
+            q_init[2] = q_start[2]
+            q_init[3] = q_start[3]
+            q_init[4] = q_start[4]
+            q_init[5] = q_start[5]
+            q_init[6] = q_start[6]
 
-        T_B_Eprev = self.T_B_W * self.T_W_E
+        for i in range(0, 7):
+            if q_init[i] > self.q_max[i]-0.02:
+                q_init[i] = self.q_max[i]-0.02
+            if q_init[i] < self.q_min[i]+0.02:
+                q_init[i] = self.q_min[i]+0.02
+
+        if T_B_Eprev == None:
+            T_B_Eprev = self.T_B_W * self.T_W_E
         q_out = PyKDL.JntArray(7)
-        steps = 10
+        steps = 1
         time_set = np.linspace(1.0/steps, 1.0, steps)
         cost = 0.0
         for T_B_Ed in traj_T_B_Ed:
@@ -1259,23 +1298,17 @@ Class for velma robot.
                 T_T2_Ei = self.T_T2_B * T_B_Ei
                 status = self.ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
                 if status != 0:
-#                    print "c"
-                    cost += 10000.0
-                    return cost
-                if self.isRightQ5Q6Collision(q_out[5], q_out[6]):    # self-collision
-#                    print "a"
+                    print "c"
                     cost += 10000.0
                     return cost
                 q5abs = math.fabs(q_out[5])
-                singularity = q5abs < self.singularity_angle
-
+                singularity = q5abs < self.abort_on_q5_singularity_angle + 5.0/180.0*math.pi
                 if allow_q5_singularity_before_end:
                     pass
                 else:
                     # punish for singularity
                     if singularity:
-#                        cost += 5.0*(self.singularity_angle-q5abs)/self.singularity_angle
-#                        print "a"
+                        print "b"
                         cost += 10000.0
                         return cost
                 for i in range(0, 7):
@@ -1283,8 +1316,13 @@ Class for velma robot.
                     q_init[i] = q_out[i]
             T_B_Eprev = copy.deepcopy(T_B_Ed)
         if not allow_q5_singularity_on_end and singularity:
+            print "a"
             cost += 10000.0
             return cost
+
+        if q_end != None:
+            for i in range(0, 7):
+                q_end[i] = q_out[i]
         return cost
 
     def getMovementTime(self, T_B_Wd, max_v_l = 0.1, max_v_r = 0.2):
@@ -1303,14 +1341,16 @@ Class for velma robot.
             duration = 0.5
         return duration
 
-    def generateTrajectoryInJoint(self, joint_index, rel_angle, omega):
-        if joint_index != 5:
-            return None
-        if rel_angle*omega <= 0.0:
+    def generateTrajectoryInJoint(self, i, rel_angle, om):
+        if rel_angle > 0.0:
+            omega = math.fabs(om)
+        elif rel_angle < 0.0:
+            omega = -math.fabs(om)
+        else:
             return None
 
         self.updateTransformations()
-        T_L6_L7 = self.T_B_L6.Inverse() * self.T_B_L7
+        T_Li_L7 = self.T_B_L[i].Inverse() * self.T_B_L[6]
 
         time_d = 0.01
         stop = False
@@ -1327,15 +1367,105 @@ Class for velma robot.
             if rel_angle < 0.0 and angle < rel_angle:
                 angle = rel_angle
                 stop = True
-            T_L6_L6d = PyKDL.Frame(PyKDL.Rotation.RotY(angle))
-            T_B_Wd = self.T_B_L6 * T_L6_L6d * T_L6_L7
+            if i == 0:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotZ(angle))
+            elif i == 1:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotY(angle))
+            elif i == 2:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotZ(angle))
+            elif i == 3:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotY(-angle))
+            elif i == 4:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotZ(angle))
+            elif i == 5:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotY(angle))
+            elif i == 6:
+                T_Li_Lid = PyKDL.Frame(PyKDL.Rotation.RotZ(angle))
+            T_B_Wd = self.T_B_L[i] * T_Li_Lid * T_Li_L7
             tab_T_B_Wd.append(T_B_Wd)
             times.append(time)
         return [tab_T_B_Wd, times]
 
-    def hasQ5Singularity(self):
-        return math.fabs(self.q_r[5]) < self.singularity_angle
+    def moveAwayQ5Singularity(self, omega, T_B_Wd=None):
+        self.updateTransformations()
+        sector0 = self.getQ5Q6SpaceSector(self.q_r[5], self.q_r[6])
+        sector0 = self.getQ5Q6SpaceSector(self.q_r[5], self.q_r[6])
+        angle = 25.0/180.0*math.pi
+        if T_B_Wd == None:
+            if self.q_r[5] > 0.0:
+                angle = 25.0/180.0*math.pi
+            else:
+                angle = -25.0/180.0*math.pi
+            traj, times = self.generateTrajectoryInJoint(5, -self.q_r[5]+angle, omega)
+        else:
+            traj1, times1 = self.generateTrajectoryInJoint(5, -self.q_r[5]+angle, omega)
+            traj2, times2 = self.generateTrajectoryInJoint(5, -self.q_r[5]-angle, omega)
+            diff1 = PyKDL.diff(T_B_Wd,traj1[-1])
+            diff2 = PyKDL.diff(T_B_Wd,traj2[-1])
+            if diff1.rot.Norm() < diff2.rot.Norm():
+                traj = traj1
+                times = times1
+            else:
+                traj = traj2
+                times = times2
 
+        self.moveWrist2(traj[-1]*self.T_W_T)
+        raw_input("Press Enter to move the robot in " + str(times[-1]) + " s...")
+        if self.checkStopCondition():
+            exit(0)
+        self.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=False)
+        self.checkStopCondition(times[-1]+0.5)
 
+    def generateTrajectoryInQ5Q6(self, q5, q6, omega):
+        actual_q5 = copy.copy(self.q_r[5])
+        actual_q6 = copy.copy(self.q_r[6])
 
+        rel_q5 = q5 - actual_q5
+        rel_q6 = q6 - actual_q6
+        if math.fabs(rel_q5) > math.fabs(rel_q6):
+            omega_q5 = math.fabs(omega)
+            omega_q6 = math.fabs(omega)*math.fabs(rel_q6)/math.fabs(rel_q5)
+        else:
+            omega_q6 = math.fabs(omega)
+            omega_q5 = math.fabs(omega)*math.fabs(rel_q5)/math.fabs(rel_q6)
+
+        if rel_q5 < 0.0:
+            omega_q5 = -omega_q5
+        if rel_q6 < 0.0:
+            omega_q6 = -omega_q6
+
+        self.updateTransformations()
+        T_L5_L6 = self.T_B_L[5].Inverse() * self.T_B_L[6]
+
+        time_d = 0.01
+        stop = False
+        angle_q5 = 0.0
+        angle_q6 = 0.0
+        times = []
+        time = 0.5
+        tab_T_B_Wd = []
+        while not stop:
+            angle_q5 += omega_q5 * time_d
+            angle_q6 += omega_q6 * time_d
+            time += time_d
+            if rel_q5 > 0.0 and angle_q5 > rel_q5:
+                angle_q5 = rel_q5
+                stop = True
+            if rel_q5 < 0.0 and angle_q5 < rel_q5:
+                angle_q5 = rel_q5
+                stop = True
+
+            if rel_q6 > 0.0 and angle_q6 > rel_q6:
+                angle_q6 = rel_q6
+                stop = True
+            if rel_q6 < 0.0 and angle_q6 < rel_q6:
+                angle_q6 = rel_q6
+                stop = True
+
+            T_L5_L5d = PyKDL.Frame(PyKDL.Rotation.RotY(angle_q5))
+            T_L6_L6d = PyKDL.Frame(PyKDL.Rotation.RotZ(angle_q6))
+            T_B_Wd = self.T_B_L[5] * T_L5_L5d * T_L5_L6 * T_L6_L6d
+            tab_T_B_Wd.append(T_B_Wd)
+            times.append(time)
+        return [tab_T_B_Wd, times]
 
