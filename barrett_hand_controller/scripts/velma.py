@@ -101,8 +101,8 @@ Class for velma robot.
         self.q_min[0] = -2.96 + self.q_limit
         self.q_min[1] = -2.09 + self.q_limit
         self.q_min[2] = -2.96 + self.q_limit
-#        self.q_min[3] = -2.09 + self.q_limit
-        self.q_min[3] = 0.0    # constraint on elbow
+        self.q_min[3] = -2.09 + self.q_limit
+#        self.q_min[3] = 0.0    # constraint on elbow
         self.q_min[4] = -2.96 + self.q_limit
         self.q_min[5] = -2.09 + self.q_limit
         self.q_min[6] = -2.96 + self.q_limit
