@@ -33,6 +33,7 @@
 #include <barrett_hand_controller_srvs/Empty.h>
 #include <barrett_hand_controller_srvs/BHGetPressureInfo.h>
 #include <barrett_hand_controller_srvs/BHMoveHand.h>
+#include <barrett_hand_controller_srvs/BHSetMedianFilter.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -79,7 +80,7 @@ private:
 	int32_t maxDynamicTorque_;
 	int torqueSwitch_;
 
-	Tactile ts_[4];
+	Tactile *ts_[4];
 	barrett_hand_controller_srvs::BHCmd cmd_;
 	barrett_hand_controller_srvs::BHTemp temp_;
 	sensor_msgs::JointState joint_states_;
@@ -117,6 +118,7 @@ private:
 	int resetFingersCounter_;
 
 	int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s, mode1, mode2, mode3, mode4;
+        int32_t median_filter_samples_, median_filter_max_samples_;
 
 public:
 	BarrettHand(const std::string& name):
@@ -138,12 +140,18 @@ public:
 		torqueSwitch_(-1),
 		move_hand_cmd_(false),
 		set_max_vel_(false),
-		ctrl_(NULL)
+		ctrl_(NULL),
+                median_filter_samples_(1),
+                median_filter_max_samples_(8)
 	{
-		ts_[0].setGeometry("finger1_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
-		ts_[1].setGeometry("finger2_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
-		ts_[2].setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
-		ts_[3].setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
+		ts_[0] = new Tactile(median_filter_max_samples_);
+		ts_[1] = new Tactile(median_filter_max_samples_);
+		ts_[2] = new Tactile(median_filter_max_samples_);
+		ts_[3] = new Tactile(median_filter_max_samples_);
+		ts_[0]->setGeometry("finger1_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
+		ts_[1]->setGeometry("finger2_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
+		ts_[2]->setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
+		ts_[3]->setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
 
 		temp[0] = 0;
 		temp[1] = 0;
@@ -178,6 +186,8 @@ public:
 		this->provides()->addOperation("set_max_vel",&BarrettHand::setMaxVel,this,RTT::OwnThread);
 		this->provides()->addOperation("move_hand",&BarrettHand::moveHand,this,RTT::OwnThread);
 		this->provides()->addOperation("move_hand_ros",&BarrettHand::moveHandRos,this,RTT::OwnThread);
+		this->provides()->addOperation("set_median_filter",&BarrettHand::setMedianFilter,this,RTT::OwnThread);
+		this->provides()->addOperation("set_median_filter_ros",&BarrettHand::setMedianFilterRos,this,RTT::OwnThread);
 
 		this->addProperty("device_name", dev_name_);
 		this->addProperty("prefix", prefix_);
@@ -345,33 +355,33 @@ public:
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(0, tact);
-			ts_[0].updatePressure(tact);
+			ts_[0]->updatePressure(tact);
 		}
 		else if (i==6)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(1, tact);
-			ts_[1].updatePressure(tact);
+			ts_[1]->updatePressure(tact);
 		}
 		else if (i==12)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(2, tact);
-			ts_[2].updatePressure(tact);
+			ts_[2]->updatePressure(tact);
 		}
 		else if (i==18)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(3, tact);
-			ts_[3].updatePressure(tact);
+			ts_[3]->updatePressure(tact);
 			pressure_states_.header.stamp = rtt_rosclock::host_now();
 
 			for (int i=0; i<24; ++i)
 			{
-				pressure_states_.finger1_tip[i] = ts_[0].getForce(i);
-				pressure_states_.finger2_tip[i] = ts_[1].getForce(i);
-				pressure_states_.finger3_tip[i] = ts_[2].getForce(i);
-				pressure_states_.palm_tip[i] = ts_[3].getForce(i);
+				pressure_states_.finger1_tip[i] = ts_[0]->getPressure(i,median_filter_samples_);
+				pressure_states_.finger2_tip[i] = ts_[1]->getPressure(i,median_filter_samples_);
+				pressure_states_.finger3_tip[i] = ts_[2]->getPressure(i,median_filter_samples_);
+				pressure_states_.palm_tip[i] = ts_[3]->getPressure(i,median_filter_samples_);
 			}
 
 			tactile_out_.write(pressure_states_);
@@ -423,7 +433,7 @@ public:
 		res.info.sensor.resize(4);
 		for (int id=0; id<4; ++id)
 		{
-			res.info.sensor[id].frame_id = ts_[id].getName();
+			res.info.sensor[id].frame_id = ts_[id]->getName();
 			res.info.sensor[id].center.resize(24);
 			res.info.sensor[id].halfside1.resize(24);
 			res.info.sensor[id].halfside2.resize(24);
@@ -438,9 +448,9 @@ public:
 		{
 			for (int i=0; i<24; ++i)
 			{
-				res.info.sensor[id].center[i] = ts_[id].getCenter(i);
-				res.info.sensor[id].halfside1[i] = ts_[id].getHalfside1(i);
-				res.info.sensor[id].halfside2[i] = ts_[id].getHalfside2(i);
+				res.info.sensor[id].center[i] = ts_[id]->getCenter(i);
+				res.info.sensor[id].halfside1[i] = ts_[id]->getHalfside1(i);
+				res.info.sensor[id].halfside2[i] = ts_[id]->getHalfside2(i);
 			}
 		}
 
@@ -451,7 +461,7 @@ public:
 	{
 		for (int id=0; id<4; ++id)
 		{
-			ts_[id].startCalibration();
+			ts_[id]->startCalibration();
 		}
 	}
 
@@ -501,6 +511,23 @@ public:
 		setMaxTorque(req.f1_torque, req.f2_torque, req.f3_torque, req.sp_torque);
 		setMaxVel(req.f1_speed, req.f2_speed, req.f3_speed, req.sp_speed);		
 		res.result = moveHand(req.f1, req.f2, req.f3, req.sp);
+		return true;
+	}
+
+	bool setMedianFilter(int32_t median_filter_samples)
+	{
+		if (median_filter_samples >= 1 && median_filter_samples <= median_filter_max_samples_)
+		{
+			median_filter_samples_ = median_filter_samples;
+			return true;
+		}
+		return false;
+	}
+
+	bool setMedianFilterRos(barrett_hand_controller_srvs::BHSetMedianFilter::Request  &req,
+	         barrett_hand_controller_srvs::BHSetMedianFilter::Response &res)
+	{
+		res.result = setMedianFilter(req.samples);
 		return true;
 	}
 

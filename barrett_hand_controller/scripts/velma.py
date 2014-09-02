@@ -81,12 +81,29 @@ Class for velma robot.
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
-    def calibrateTactileSensors(self):
+    def calibrate_tactile_sensors(self):
         service_name = '/' + self.prefix + '_hand/calibrate_tactile_sensors'
         rospy.wait_for_service(service_name)
         try:
             calibrate_tactile_sensors = rospy.ServiceProxy(service_name, Empty)
             resp = calibrate_tactile_sensors()
+        except rospy.ServiceException, e:
+            print "Service call failed: %s"%e
+
+    def reset_fingers(self):
+        service_name = '/' + self.prefix + '_hand/reset_fingers'
+        rospy.wait_for_service(service_name)
+        try:
+            reset_fingers = rospy.ServiceProxy(service_name, Empty)
+            resp = reset_fingers()
+        except rospy.ServiceException, e:
+            print "Service call failed: %s"%e
+
+    def set_median_filter(self, samples):
+        rospy.wait_for_service('/' + self.prefix + '_hand/set_median_filter')
+        try:
+            set_median_filter = rospy.ServiceProxy('/' + self.prefix + '_hand/set_median_filter', BHSetMedianFilter)
+            resp1 = set_median_filter(samples)
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 

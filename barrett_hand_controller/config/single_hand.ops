@@ -24,6 +24,7 @@ Hand.rosservice.connect( "get_pressure_info_ros", "get_pressure_info", "barrett_
 Hand.rosservice.connect( "calibrate_ros", "calibrate_tactile_sensors", "barrett_hand_controller_srvs/Empty")
 Hand.rosservice.connect( "reset_fingers_ros", "reset_fingers", "barrett_hand_controller_srvs/Empty")
 Hand.rosservice.connect( "move_hand_ros", "move_hand", "barrett_hand_controller_srvs/BHMoveHand")
+Hand.rosservice.connect( "set_median_filter_ros", "set_median_filter", "barrett_hand_controller_srvs/BHSetMedianFilter")
 
 ## Configure the HelloRobot component
 Hand.configure()
