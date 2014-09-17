@@ -109,6 +109,13 @@ Class for velma robot.
 
     def initIkSolver(self):
         self.robot = URDF.from_parameter_server()
+        print "len(self.robot.links) = %s"%(len(self.robot.links))
+#        for l in self.robot.links:
+#            print "name: %s"%(l.name)
+#            print "visual:"
+#            print l.visual
+#            print "collision:"
+#            print l.collision.geometry
         self.tree = kdl_tree_from_urdf_model(self.robot)
         self.chain = self.tree.getChain("torso_link2", "right_HandPalmLink")
 
@@ -668,15 +675,30 @@ Class for velma robot.
         [-0.819031119347,2.07619023323,0.932657182217,2.86872577667],
         ]
 
-
     def jointStatesCallback(self, data):
         if len(data.name) == 8:
             if data.name[0] == 'right_HandFingerOneKnuckleOneJoint':
-                self.q_f1 = data.position[1]
-                self.q_f2 = data.position[4]
-                self.q_f3 = data.position[6]
+                self.q_rf[0] = data.position[0]
+                self.q_rf[1] = data.position[1]
+                self.q_rf[2] = data.position[2]
+                self.q_rf[3] = data.position[3]
+                self.q_rf[4] = data.position[4]
+                self.q_rf[5] = data.position[5]
+                self.q_rf[6] = data.position[6]
+                self.q_rf[7] = data.position[7]
+            if data.name[0] == 'left_HandFingerOneKnuckleOneJoint':
+                self.q_lf[0] = data.position[0]
+                self.q_lf[1] = data.position[1]
+                self.q_lf[2] = data.position[2]
+                self.q_lf[3] = data.position[3]
+                self.q_lf[4] = data.position[4]
+                self.q_lf[5] = data.position[5]
+                self.q_lf[6] = data.position[6]
+                self.q_lf[7] = data.position[7]
         if len(data.name) == 16:
             if data.name[2] == 'right_arm_0_joint':
+                self.q_t[0] = data.position[0]
+                self.q_t[1] = data.position[1]
                 self.q_r[0] = data.position[2]
                 self.q_r[1] = data.position[3]
                 self.q_r[2] = data.position[4]
@@ -684,6 +706,13 @@ Class for velma robot.
                 self.q_r[4] = data.position[6]
                 self.q_r[5] = data.position[7]
                 self.q_r[6] = data.position[8]
+                self.q_l[0] = data.position[9]
+                self.q_l[1] = data.position[10]
+                self.q_l[2] = data.position[11]
+                self.q_l[3] = data.position[12]
+                self.q_l[4] = data.position[13]
+                self.q_l[5] = data.position[14]
+                self.q_l[6] = data.position[15]
 
                 if self.abort_on_q5_singularity and self.q_r[5] > -self.abort_on_q5_singularity_angle and self.q_r[5] < self.abort_on_q5_singularity_angle and not self.aborted_on_q5_singularity:
                     try:
@@ -763,6 +792,12 @@ Class for velma robot.
 #        self.pub_wrench.publish(ws)
 
     def __init__(self):
+
+        self.q_rf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.q_lf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.q_t = [0.0, 0.0]
+        self.q_r = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.q_l = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
         # barrett hand kinematics
         self.setSavedKinematics()
@@ -1009,7 +1044,7 @@ Class for velma robot.
     # ex.
     # q = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
     # robot.move_hand_client("right", q)
-    def move_hand_client(self, prefix, q, v=(1.2, 1.2, 1.2, 1.2), t=(2000.0, 2000.0, 2000.0, 2000.0)):
+    def move_hand_client(self, q, v=(1.2, 1.2, 1.2, 1.2), t=(2000.0, 2000.0, 2000.0, 2000.0)):
         rospy.wait_for_service('/' + self.prefix + '_hand/move_hand')
         try:
             move_hand = rospy.ServiceProxy('/' + self.prefix + '_hand/move_hand', BHMoveHand)
@@ -1084,7 +1119,8 @@ Class for velma robot.
         max_value = copy.copy(self.max_tactile_value)
         self.tactile_lock.release()
 
-        self.contacts = []
+        contacts = []
+        forces = []
         if f1:
             for i in range(0, self.tactile_data_len-2):
                 time = self.tactile_data[index][0]
@@ -1092,7 +1128,8 @@ Class for velma robot.
                     T_B_F = pm.fromTf(self.listener.lookupTransform('torso_base', '/'+self.prefix+'_HandFingerOneKnuckleThreeLink', time))
                     for i in range(0, len(self.pressure_frames)):
                         if self.tactile_data[index][1][i] > threshold:
-                            self.contacts.append( T_B_F * self.pressure_frames[i] * PyKDL.Vector() )
+                            contacts.append( T_B_F * self.pressure_frames[i] * PyKDL.Vector() )
+                            forces.append(self.tactile_data[index][4][i])
                     break
                 index -= 1
                 if index < 0:
@@ -1105,7 +1142,8 @@ Class for velma robot.
                     T_B_F = pm.fromTf(self.listener.lookupTransform('torso_base', '/'+self.prefix+'_HandFingerTwoKnuckleThreeLink', time))
                     for i in range(0, len(self.pressure_frames)):
                         if self.tactile_data[index][2][i] > threshold:
-                            self.contacts.append( T_B_F * self.pressure_frames[i] * PyKDL.Vector() )
+                            contacts.append( T_B_F * self.pressure_frames[i] * PyKDL.Vector() )
+                            forces.append(self.tactile_data[index][4][i])
                     break
                 index -= 1
                 if index < 0:
@@ -1118,7 +1156,8 @@ Class for velma robot.
                     T_B_F = pm.fromTf(self.listener.lookupTransform('torso_base', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', time))
                     for i in range(0, len(self.pressure_frames)):
                         if self.tactile_data[index][3][i] > threshold:
-                            self.contacts.append( T_B_F * self.pressure_frames[i] * PyKDL.Vector() )
+                            contacts.append( T_B_F * self.pressure_frames[i] * PyKDL.Vector() )
+                            forces.append(self.tactile_data[index][4][i])
                     break
                 index -= 1
                 if index < 0:
@@ -1131,13 +1170,14 @@ Class for velma robot.
                     T_B_F = pm.fromTf(self.listener.lookupTransform('torso_base', '/'+self.prefix+'_HandPalmLink', time))
                     for i in range(0, len(self.palm_pressure_frames)):
                         if self.tactile_data[index][4][i] > threshold:
-                            self.contacts.append( T_B_F * self.palm_pressure_frames[i] * PyKDL.Vector() )
+                            contacts.append( T_B_F * self.palm_pressure_frames[i] * PyKDL.Vector() )
+                            forces.append(self.tactile_data[index][4][i])
                     break
                 index -= 1
                 if index < 0:
                     index = copy.copy(self.tactile_data_len)-1
 
-        return self.contacts
+        return contacts, forces
 
     def calculateMoveGripperPointToPose(self, P_E_p, rot_B_E, pos_B_E_p):
         P_B_N = PyKDL.Frame( copy.deepcopy(rot_B_E) ) * P_E_p
@@ -1196,9 +1236,6 @@ Class for velma robot.
         return contacts
 
     def getFingersKinematics(self):
-        self.q_f1 = 0.0
-        self.q_f2 = 0.0
-        self.q_f3 = 0.0
         rospy.sleep(2.0)
         finger_angle = 0.0
         self.F1_kinematics = []
@@ -1214,12 +1251,10 @@ Class for velma robot.
             T_F1_N = pm.fromTf(f1)
             T_F2_N = pm.fromTf(f2)
             T_F3_N = pm.fromTf(f3)
-            self.F1_kinematics.append( (copy.copy(self.q_f1), T_F1_N) )
-            self.F2_kinematics.append( (copy.copy(self.q_f2), T_F2_N) )
-            self.F3_kinematics.append( (copy.copy(self.q_f3), T_F3_N) )
+            self.F1_kinematics.append( (copy.copy(self.q_rf[1]), T_F1_N) )
+            self.F2_kinematics.append( (copy.copy(self.q_rf[4]), T_F2_N) )
+            self.F3_kinematics.append( (copy.copy(self.q_rf[7]), T_F3_N) ) # there is possible error! Sholud be q_rf[6] ???
             finger_angle += 1.0
-#        joint_states_listener.unregister()
-
 
     def get_T_E_Fd(self, finger, angle, spread_angle):
         if finger == 0:
@@ -1235,10 +1270,15 @@ Class for velma robot.
         if angle >= kinematics_tab[-1][0]:
             return T_E_F * kinematics_tab[-1][1]
 
+        if angle <= kinematics_tab[0][0]:
+            return T_E_F * kinematics_tab[0][1]
+
         T_Fbase_F = None
-        for data in kinematics_tab:
-            if angle < data[0]:
-                return T_E_F * data[1]
+        for i in range(0,len(kinematics_tab)-1):
+            if angle >= kinematics_tab[i][0] and angle <= kinematics_tab[i+1][0]:
+                diff = PyKDL.diff(kinematics_tab[i][1], kinematics_tab[i+1][1], 1.0)
+                d = (angle - kinematics_tab[i][0])/(kinematics_tab[i+1][0]-kinematics_tab[i][0])
+                return T_E_F * PyKDL.addDelta(kinematics_tab[i][1], diff, d)
         return None
 
     def getClosestRotations(self, rot_set, rot):
@@ -1341,6 +1381,40 @@ Class for velma robot.
             for i in range(0, 7):
                 q_end[i] = q_out[i]
         return cost
+
+    def simulateTrajectory(self, T_B_Ed, progress, q_start_in=None, q_end_out=None, T_B_Einit=None):
+        if progress < 0.0 or progress > 1.0:
+            print "simulateTrajectory: bad progress value: %s"%(progress)
+            return None
+
+        self.updateTransformations()
+        q_init = PyKDL.JntArray(7)
+        if q_start_in == None:
+            for i in range(0,7):
+                q_init[i] = self.q_r[i]
+        else:
+            for i in range(0,7):
+                q_init[i] = q_start_in[i]
+
+        for i in range(0, 7):
+            if q_init[i] > self.q_max[i]-0.02:
+                q_init[i] = self.q_max[i]-0.02
+            if q_init[i] < self.q_min[i]+0.02:
+                q_init[i] = self.q_min[i]+0.02
+
+        if T_B_Einit == None:
+            T_B_Einit = self.T_B_W * self.T_W_E
+        q_out = PyKDL.JntArray(7)
+        T_B_E_diff = PyKDL.diff(T_B_Einit, T_B_Ed, 1.0)
+        T_B_Ei = PyKDL.addDelta(T_B_Einit, T_B_E_diff, progress)
+        T_T2_Ei = self.T_T2_B * T_B_Ei
+        status = self.ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
+        if status != 0:
+            return None
+        if q_end_out != None:
+            for i in range(0, 7):
+                q_end_out[i] = q_out[i]
+        return T_B_Ei
 
     def getMovementTime(self, T_B_Wd, max_v_l = 0.1, max_v_r = 0.2):
         self.updateTransformations()
