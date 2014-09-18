@@ -3,7 +3,7 @@
        name="standalone_barrett_hand">
 
   <xacro:include filename="$(find barrett_hand_defs)/defs/barret_hand.urdf.xacro"/>
-<!--  <include filename="$(find barrett_hand_defs)/defs/materials.xml"/>-->
+  <include filename="$(find barrett_hand_defs)/defs/materials.xml"/>
 
    <link name="world" />
 

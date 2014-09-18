@@ -1,0 +1,228 @@
+<!--
+ * COPYRIGHT (C) 2010
+ * RE2, INC.
+ *
+ * Author: RE2
+ *
+ * This file is a part of RobotModel, which was developed for the
+ * DARPA ARM ROBOT Track C project.
+ *
+ * RobotModel is free software:
+ * you can redistribute it and/or modify it under the terms of the GNU General
+ * Public License as published by the Free Software Foundation, either version
+ * 3 of the License, or (at your option) any later version.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this package.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ * RE2, INC. disclaims all warranties with regard to this software, including
+ * all implied warranties of merchantability and fitness, in no event shall
+ * RE2, INC. be liable for any special, indirect or consequential damages or
+ * any damages whatsoever resulting from loss of use, data or profits, whether
+ * in an action of contract, negligence or other tortious action, arising out
+ * of or in connection with the use or performance of this software.
+-->
+
+<robot xmlns:sensor="http://playerstage.sourceforge.net/gazebo/xmlschema/#sensor"
+       xmlns:controller="http://playerstage.sourceforge.net/gazebo/xmlschema/#controller"
+       xmlns:geom="http://playerstage.sourceforge.net/gazebo/xmlschema/#geom"
+       xmlns:interface="http://playerstage.sourceforge.net/gazebo/xmlschema/#interface"
+       xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <xacro:property name="homeDirectory" value="package://barrett_hand_defs" />
+    <xacro:property name="highResModelDirectory" value="${homeDirectory}/meshes/splitModels" />
+    <xacro:property name="PI" value="3.1415926535897931" />
+
+    <xacro:macro name="palm" params="prefix parent *origin">
+
+        <link name="${prefix}_HandPalmLink" >
+        <inertial>
+            <origin xyz="0.00035500 -0.00499005 0.04864979" />
+            <mass value="0.63352875" />
+            <inertia  ixx="0.00102103" ixy="0.00000775"  ixz="-0.00001230"
+                                       iyy="0.00080944"  iyz="-0.00014417"
+                                                         izz="0.00068788" />
+        </inertial>
+        <visual>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                    <mesh filename="${homeDirectory}/meshes/palm.stl"/>
+            </geometry>
+        </visual>
+            <collision>
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                    <mesh filename="${homeDirectory}/meshes/palm.stl"/>
+            </geometry>
+            </collision>
+        </link>
+
+        <gazebo reference="${prefix}_HandPalmLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
+
+        <joint name="${prefix}_HandPalmJoint" type="fixed">
+            <parent link="${parent}"/>
+            <child link="${prefix}_HandPalmLink"/>
+            <insert_block name="origin"/>
+            <provideFeedback value="true"/> 
+        </joint>
+    </xacro:macro>
+
+    <xacro:macro name="KnuckleOne" params="prefix number xyz rpy axis">
+
+        <link name="${prefix}_HandFinger${number}KnuckleOneLink">
+        <visual>
+            <origin xyz="0 0 0" rpy="${0.5 * PI} 0 -${0.5 * PI}" />
+            <geometry>
+                    <mesh filename="${homeDirectory}/meshes/firstFingerLink.stl"/>
+            </geometry>
+        </visual>
+        <inertial>
+            <origin xyz="0.03201666 -0.00086502 0.00890075" />
+            <mass value="0.16252678" />
+            <inertia  ixx="0.00002567" ixy="-0.00000146"  ixz="0.00001128"
+                    iyy="0.00008818"   iyz="-0.00000094"
+                    izz="0.00007827" />
+        </inertial>
+        <collision>
+            <origin xyz="0 0 0" rpy="${0.5 * PI} 0 -${0.5 * PI}" />
+            <geometry>
+                    <mesh filename="${homeDirectory}/meshes/firstFingerLink.stl"/>
+            </geometry>
+            <mu1 value="50000.0" />
+            <mu2 value="50000.0" />
+            <kp  value="1000000.0" />
+            <kd  value="1.0" />
+        </collision>
+        </link>
+
+        <gazebo reference="${prefix}_HandFinger${number}KnuckleOneLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
+
+        <joint name="${prefix}_HandFinger${number}KnuckleOneJoint" type="revolute">
+            <parent link="${prefix}_HandPalmLink"/>
+            <child link="${prefix}_HandFinger${number}KnuckleOneLink"/>
+            <origin xyz="${xyz}" rpy="${rpy}"/>
+            <axis xyz="${axis}"/>
+            <limit effort="1" lower="0" upper="${PI}" velocity="3.27"/>
+            <dynamics damping="0.05" friction="100.0"/>
+        </joint>
+    </xacro:macro>
+
+
+ <xacro:macro name="KnuckleTwo" params="parent prefix number xyz rpy">
+
+        <link name="${prefix}_HandFinger${number}KnuckleTwoLink">
+            <visual>
+                <origin xyz="0 0 0" rpy="${PI} ${0.5 * PI} 0" />
+                <geometry>
+                    <mesh filename="${homeDirectory}/meshes/secondFingerLink.stl"/>
+                </geometry>
+            </visual>
+            <inertial>
+                <origin xyz=".031720 .001070 -.000586" />
+                <mass value="0.057957" />
+                <inertia  ixx="0.00000461" ixy="0.00000003"  ixz="0.00000164"
+                                           iyy="0.00003590"  iyz="0.00000004"
+                                                             izz="0.00003682" />
+            </inertial>
+            <collision>
+                <origin xyz="0 0 0" rpy="${PI} ${0.5 * PI} 0" />
+                <geometry>
+                    <mesh filename="${homeDirectory}/meshes/secondFingerLink.stl"/>
+                </geometry>
+                <mu1 value="50000.0" />
+                <mu2 value="50000.0" />
+                <kp  value="1000000.0" />
+                <kd  value="1.0" />
+            </collision>
+        </link>
+
+        <gazebo reference="${prefix}_HandFinger${number}KnuckleTwoLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
+
+        <joint name="${prefix}_HandFinger${number}KnuckleTwoJoint" type="revolute">
+            <parent link="${parent}"/>
+            <child link="${prefix}_HandFinger${number}KnuckleTwoLink"/>
+            <origin xyz="${xyz}" rpy="${rpy}"/>
+            <axis xyz="0 0 -1"/>
+                            <!-- 122 degrees - start orientation of 0.4 degrees-->
+            <limit effort="1" lower="0" upper="${2.12930169 - 0.00698131701}" velocity="3.27"/>
+            <dynamics damping="0.005" friction="100.0"/>
+        </joint>
+    </xacro:macro>
+
+    <xacro:macro name="KnuckleThree" params="prefix number">
+
+        <link name="${prefix}_HandFinger${number}KnuckleThreeLink">
+          <visual>
+            <origin xyz="0 0 0" rpy="0 ${0.5 * PI} 0" />
+            <geometry>
+                <mesh filename="${homeDirectory}/meshes/thirdFingerLink.stl"/>
+            </geometry>
+          </visual>
+          <inertial>
+            <origin xyz="0.01970974 0.00182016 0.00020041" />
+            <mass value="0.03421781" />
+            <inertia  ixx="0.00000287" ixy="0.00000091"  ixz="-0.00000007"
+                                       iyy="0.00001329"  iyz="-0.00000002"
+                                                         izz="0.00001214" />
+          </inertial>
+        
+          <collision>
+            <origin xyz="0 0 0" rpy="0 ${0.5 * PI} 0" />
+            <geometry>
+                    <mesh filename="${homeDirectory}/meshes/thirdFingerLink.stl"/>
+            </geometry>
+            <mu1 value="50000.0" />
+            <mu2 value="50000.0" />
+            <kp  value="1000000.0" />
+            <kd  value="1.0" />
+          </collision>
+            
+        </link>
+
+        <gazebo reference="${prefix}_HandFinger${number}KnuckleThreeLink">
+          <turnGravityOff>true</turnGravityOff>
+        </gazebo>
+
+        <joint name="${prefix}_HandFinger${number}KnuckleThreeJoint" type="revolute">
+            <parent link="${prefix}_HandFinger${number}KnuckleTwoLink"/>
+            <child link="${prefix}_HandFinger${number}KnuckleThreeLink"/>
+                                        <!-- 42 degrees -->
+            <origin xyz="0.07 0 0" rpy="0 0 -0.733038286"/>
+            <axis xyz="0 0 -1"/>
+                                <!-- measured max angle is 94.  so upper limit is 94 - start orientation (42 degrees)-->
+            <limit effort="1" lower="0" upper="${1.6406095 - 0.733038286}" velocity="3.27"/>
+            <dynamics damping="0.005" friction="100.0"/>
+        </joint>
+    </xacro:macro>
+
+    <xacro:macro name="fingers" params="parent prefix number xyz rpy">
+
+        <xacro:KnuckleTwo parent="${parent}" prefix="${prefix}" number="${number}" xyz="${xyz}" rpy="${rpy}" />
+        <xacro:KnuckleThree prefix="${prefix}" number="${number}"/>
+
+    </xacro:macro>
+
+    <xacro:macro name="barret_hand" params="prefix parent *origin">
+
+        <xacro:palm prefix="${prefix}" parent="${parent}">
+            <insert_block name="origin"/>
+        </xacro:palm>
+    
+        <xacro:fingers prefix="${prefix}" parent="${prefix}_HandPalmLink" number="Three" xyz="0 -0.05 0.0801966" rpy="-${0.5 * PI} -0.0429350996 -${0.5 * PI}"/>
+
+        <xacro:KnuckleOne prefix="${prefix}" number="One" xyz=".02497 0 0.0587966" rpy="0 0 ${0.5 * PI}" axis="0 0 -1"/>
+        <xacro:fingers prefix="${prefix}" parent="${prefix}_HandFingerOneKnuckleOneLink" number="One" xyz=".05 0 0.02140" rpy="-${0.5 * PI} -0.0429350996 0"/>
+
+        <xacro:KnuckleOne prefix="${prefix}" number="Two" xyz="-.02497 0 0.0587966" rpy="0 0 ${0.5 * PI}" axis ="0 0 1"/>
+        <xacro:fingers prefix="${prefix}" parent="${prefix}_HandFingerTwoKnuckleOneLink" number="Two" xyz=".05 0 0.02140" rpy="-${0.5 * PI} -0.0429350996 0"/>
+
+</xacro:macro>
+
+
+</robot>

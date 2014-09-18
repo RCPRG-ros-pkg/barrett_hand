@@ -387,6 +387,13 @@ class OpenraveInstance:
         col = link.GetCollisionData()
         return col.vertices, col.indices
 
+class Grip:
+    def __init__(self):
+        pass
+
+    def addContact(self, T_O_C):
+        pass
+
 
 class GraspingTask:
     """
@@ -589,6 +596,51 @@ Class for grasp learning.
 
         return points_ret
 
+    def estPlane(self, points_in):
+        mean_pt = PyKDL.Vector()
+        for p in points_in:
+            mean_pt += p
+        mean_pt *= (1.0/len(points_in))
+
+        points = []
+        for p in points_in:
+            points.append(p-mean_pt)
+
+        def calc_R(xa, ya):
+            ret = []
+            """ calculate the minimum distance of each contact point from jar surface pt """
+            n = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Vector(0,0,1)
+            for p in points:
+                ret.append(PyKDL.dot(n,p))
+            return numpy.array(ret)
+        
+        def f_2(c):
+            """ calculate the algebraic distance between each contact point and jar surface pt """
+            Di = calc_R(*c)
+            return Di
+
+        angles_estimate = 0.0, 0.0
+        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
+        n = PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[0])) * PyKDL.Frame(PyKDL.Rotation.RotY(angles_2[1])) * PyKDL.Vector(0,0,1)
+
+        nz = n
+        if math.fabs(n.x()) < 0.9:
+            nx = PyKDL.Vector(1,0,0)
+        else:
+            nx = PyKDL.Vector(0,1,0)
+
+        ny = nz*nx
+        nx = ny*nz
+        nx.Normalize()
+        ny.Normalize()
+        nz.Normalize()
+
+        return PyKDL.Frame(PyKDL.Rotation(nx,ny,nz), mean_pt)
+
+#        d = -PyKDL.dot(n, mean_pt)
+#        return (n,d)
+
+
     def spin(self):
         # create the robot interface
         velma = Velma()
@@ -632,6 +684,10 @@ Class for grasp learning.
             print len(points)
             m_id = 0
             m_id = self.pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
+            rospy.sleep(1.0)
+            fr = self.estPlane(points)
+            m_id = self.pub_marker.publishFrameMarker(fr, m_id)
+            rospy.sleep(1.0)
             exit(0)
 
         if False:
@@ -816,7 +872,11 @@ Class for grasp learning.
                 points = self.sampleMesh(vertices, indices, 0.002, T_O_Br*c, 0.02, pt_list, 0.01)
                 print len(points)
                 m_id = self.pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.004, 0.004, 0.004), T=T_Br_O)
-                rospy.sleep(2.0)
+                rospy.sleep(1.0)
+                fr = self.estPlane(points)
+                m_id = self.pub_marker.publishFrameMarker(T_Br_O*fr, m_id)
+                rospy.sleep(1.0)
+
             finger += 1
 
         raw_input("Press Enter to open fingers...")
