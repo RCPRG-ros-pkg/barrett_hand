@@ -68,6 +68,7 @@ class OpenraveInstance:
         self.env = None
         self.T_World_Br = T_World_Br
         self.listener = tf.TransformListener();
+        self.kinBodies = []
 
     def KDLToOrocos(self, T):
         ret = numpy.array([
@@ -89,9 +90,13 @@ class OpenraveInstance:
         self.env.Add(body,True)
 
     def updatePose(self, name, T_Br_Bo):
-        body = self.env.GetKinBody(name)
-        if body != None:
-            body.SetTransform(self.KDLToOrocos(self.T_World_Br*T_Br_Bo))
+        with self.env:
+            body = self.env.GetKinBody(name)
+            if body != None:
+                body.SetTransform(self.KDLToOrocos(self.T_World_Br*T_Br_Bo))
+            else:
+                print "openrave: could not find body: %s"%(name)
+                self.env.UpdatePublishedBodies()
 
     def getPose(self, name):
         body = self.env.GetKinBody(name)
@@ -125,7 +130,7 @@ class OpenraveInstance:
                 print j
 
             # apply soft limits
-            q_soft_limit = 0.26
+            q_soft_limit = 0.26*0.5
             for name in arms_joint_names:
                 joint = self.robot_rave.GetJoint(name)
                 lower, upper = joint.GetLimits()
@@ -271,7 +276,7 @@ class OpenraveInstance:
     def getGraspStandoff(self, grasp):
         return grasp[self.gmodel.graspindices.get('igraspstandoff')]
 
-    def showTrajectory(self, T_B_Ed, time):
+    def showTrajectory(self, T_B_Ed, time, grasp):
         with RobotStateSaver(self.robot_rave):
             with self.env:
                 steps = time/0.1
@@ -297,4 +302,18 @@ class OpenraveInstance:
         link = body.GetLinks()[0]
         col = link.GetCollisionData()
         return col.vertices, col.indices
+
+    def getFinalConfig(self, grasp):
+        with RobotStateSaver(self.robot_rave):
+            with self.env:
+                contacts,finalconfig,mindist,volume = self.gmodel.runGraspFromTrans(grasp)
+                hand_config = [
+                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
+                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerTwoKnuckleTwoJoint")],
+                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerThreeKnuckleTwoJoint")],
+                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleOneJoint")],
+                ]
+        return hand_config
+
+
 

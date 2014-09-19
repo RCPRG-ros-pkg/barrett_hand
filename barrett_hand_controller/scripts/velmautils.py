@@ -239,6 +239,9 @@ def sampleMesh(vertices, indices, sample_dist, pt_list, radius):
             if min_dists[i] < sample_dist*2.0:
                 first_contact_index = i
                 break
+        if first_contact_index == None:
+            print "first_contact_index == None"
+            return points
         init_pt = points[min_dists_p_index[first_contact_index]]
         points_ret = []
         list_to_check = []
@@ -313,4 +316,28 @@ def estPlane(points_in):
     nz.Normalize()
 
     return PyKDL.Frame(PyKDL.Rotation(nx,ny,nz), mean_pt)
+
+def meanOrientation(T):
+    R = []
+    for t in T:
+        R.append( copy.deepcopy( PyKDL.Frame(t.M) ) )
+
+    def calc_R(rx, ry, rz):
+        R_mean = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz))
+        diff = []
+        for r in R:
+            diff.append(PyKDL.diff( R_mean, r ))
+        ret = [math.fabs(d.rot.x()) for d in diff] + [math.fabs(d.rot.y()) for d in diff] + [math.fabs(d.rot.z()) for d in diff]
+        return ret
+    def f_2(c):
+        """ calculate the algebraic distance between each contact point and jar surface pt """
+        Di = calc_R(*c)
+        return Di
+    angle_estimate = R[0].M.GetEulerZYX()
+    angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+    score = calc_R(angle_2[0],angle_2[1],angle_2[2])
+    score_v = 0.0
+    for s in score:
+        score_v += s*s
+    return [score_v, PyKDL.Frame(PyKDL.Rotation.EulerZYX(angle_2[0],angle_2[1],angle_2[2]))]
 
