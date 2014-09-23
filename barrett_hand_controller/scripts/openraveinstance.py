@@ -62,13 +62,16 @@ from openravepy.misc import OpenRAVEGlobalArguments
 
 class OpenraveInstance:
 
-    def __init__(self, robot, T_World_Br):
-        self.robot = robot
+    def __init__(self, T_World_Br):
+        self.robot = None
         self.rolling = False
         self.env = None
         self.T_World_Br = T_World_Br
         self.listener = tf.TransformListener();
         self.kinBodies = []
+
+    def addRobotInterface(self, robot):
+        self.robot = robot
 
     def KDLToOrocos(self, T):
         ret = numpy.array([
@@ -102,6 +105,34 @@ class OpenraveInstance:
         body = self.env.GetKinBody(name)
         if body != None:
             return self.T_World_Br.Inverse() * self.orocosToKDL(body.GetTransform())
+        return None
+
+    def getLinkPose(self, name, qt=None, qar=None, qal=None, qhr=None, qhl=None):
+        if qt != None or qar != None or qal != None or qhr != None or qhl != None:
+            with self.robot_rave.CreateRobotStateSaver():
+                with self.env:
+                    self.robot_rave.GetController().Reset(0)
+                    dof_values = self.robot_rave.GetDOFValues()
+                    if qt == None:
+                        qt = dof_values[0:2]
+                    if qal == None:
+                        qal = dof_values[2:9]
+                    if qhl == None:
+                        qhl = dof_values[9:13]
+                    if qar == None:
+                        qar = dof_values[13:20]
+                    if qhr == None:
+                        qhr = dof_values[20:24]
+                    dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
+                    self.robot_rave.SetDOFValues(dof_values)
+                    self.env.UpdatePublishedBodies()
+                    link = self.robot_rave.GetLink(name)
+                    if link != None:
+                        return self.T_World_Br.Inverse() * self.orocosToKDL(link.GetTransform())
+        else:
+            link = self.robot_rave.GetLink(name)
+            if link != None:
+                return self.T_World_Br.Inverse() * self.orocosToKDL(link.GetTransform())
         return None
 
     def main(self,env,options):
@@ -156,18 +187,18 @@ class OpenraveInstance:
             joint = self.robot_rave.GetJoint("right_arm_3_joint")
             lower, upper = joint.GetLimits()
             lower[0] = 10.0/180.0*math.pi
-            joint.SetLimits(lower, upper)
+#            joint.SetLimits(lower, upper)
             
             # apply limits for wrists
             joint = self.robot_rave.GetJoint("left_arm_5_joint")
             lower, upper = joint.GetLimits()
             lower[0] = 20.0/180.0*math.pi
-            joint.SetLimits(lower, upper)
+#            joint.SetLimits(lower, upper)
             joint = self.robot_rave.GetJoint("right_arm_5_joint")
             lower, upper = joint.GetLimits()
             print lower, upper
             upper[0] = -20.0/180.0*math.pi
-            joint.SetLimits(lower, upper)
+#            joint.SetLimits(lower, upper)
 
             env.Add(self.robot_rave)
 
@@ -211,10 +242,14 @@ class OpenraveInstance:
 
             while not rospy.is_shutdown():
                 self.rolling = True
-                q_lf = [self.robot.q_lf[0], self.robot.q_lf[1], self.robot.q_lf[4], self.robot.q_lf[6]]
-                q_rf = [self.robot.q_rf[0], self.robot.q_rf[1], self.robot.q_rf[4], self.robot.q_rf[6]]
-                dof_values = self.robot.q_t + self.robot.q_l + q_lf + self.robot.q_r + q_rf
-                self.robot_rave.SetDOFValues(dof_values)
+                if self.robot != None:
+#                    q_lf = [self.robot.q_lf[0], self.robot.q_lf[1], self.robot.q_lf[4], self.robot.q_lf[6]]
+#                    q_rf = [self.robot.q_rf[0], self.robot.q_rf[1], self.robot.q_rf[4], self.robot.q_rf[6]]
+#                    dof_values = self.robot.q_t + self.robot.q_l + q_lf + self.robot.q_r + q_rf
+
+                    dof_values = self.robot.qt + self.robot.qal + self.robot.qhl + self.robot.qar + self.robot.qhr
+
+                    self.robot_rave.SetDOFValues(dof_values)
 
                 rospy.sleep(0.1)
         finally:
@@ -252,17 +287,6 @@ class OpenraveInstance:
 
         validgrasps,validindices = self.gmodel.computeValidGrasps(checkcollision=True, checkik=True, checkgrasper=True)
         print "all valid grasps: %s"%(len(validgrasps))
-#        for validgrasp in validgrasps:
-#            print validgrasp
-#            self.gmodel.showgrasp(validgrasp, collisionfree=True, useik=True)
-#            with RobotStateSaver(self.robot_rave):
-#                with self.env:
-#                    # check if grasp can be reached by robot
-#                    Tglobalgrasp = self.gmodel.getGlobalGraspTransform(validgrasp,collisionfree=True)
-#                    # have to set the preshape since the current robot is at the final grasp!
-#                    self.gmodel.setPreshape(validgrasp)
-#                    sol = self.gmodel.manip.FindIKSolution(Tglobalgrasp,True)
-#                    print sol
 
         print "done."
         return validgrasps,validindices
@@ -276,24 +300,54 @@ class OpenraveInstance:
     def getGraspStandoff(self, grasp):
         return grasp[self.gmodel.graspindices.get('igraspstandoff')]
 
-    def showTrajectory(self, T_B_Ed, time, grasp):
-        with RobotStateSaver(self.robot_rave):
+    def showTrajectory(self, time_d, qt_list=None, qar_list=None, qal_list=None, qhr_list=None, qhl_list=None):
+        length = 0
+        if qt_list != None:
+            length = len(qt_list)
+        elif qar_list != None:
+            length = len(qar_list)
+        elif qal_list != None:
+            length = len(qal_list)
+        elif qhr_list != None:
+            length = len(qhr_list)
+        elif qhl_list != None:
+            length = len(qhl_list)
+        if length < 1:
+            return
+        with self.robot_rave.CreateRobotStateSaver():
             with self.env:
-                steps = time/0.1
-                if steps < 3:
-                    steps = 3
-                time_set = np.linspace(0.0, 1.0, steps)
-                for t in time_set:
-                    #(T_B_Ed, progress, q_start_in=None, q_end_out=None, T_B_Einit=None):
-                    q_end = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-                    self.robot.simulateTrajectory(T_B_Ed, t, q_end_out=q_end)
-                    q_lf = [self.robot.q_lf[0], self.robot.q_lf[1], self.robot.q_lf[4], self.robot.q_lf[6]]
-                    q_rf = [self.robot.q_rf[0], self.robot.q_rf[1], self.robot.q_rf[4], self.robot.q_rf[6]]
-                    dof_values = self.robot.q_t + self.robot.q_l + q_lf + q_end + q_rf
+                for i in range(0, length):
                     self.robot_rave.GetController().Reset(0)
+                    dof_values = self.robot_rave.GetDOFValues()
+                    if qt_list == None:
+                        qt = dof_values[0:2]
+                    else:
+                        qt = qt_list[i]
+                    if qal_list == None:
+                        qal = dof_values[2:9]
+                    else:
+                        qal = qal_list[i]
+                    if qhl_list == None:
+                        qhl = dof_values[9:13]
+                    else:
+                        qhl = qhl_list[i]
+                    if qar_list == None:
+                        qar = dof_values[13:20]
+                    else:
+                        qar = qar_list[i]
+                    if qhr_list == None:
+                        qhr = dof_values[20:24]
+                    else:
+                        qhr = qhr_list[i]
+                    print "qt: %s"%(qt)
+                    print "qal: %s"%(qal)
+                    print "qhl: %s"%(qhl)
+                    print "qar: %s"%(qar)
+                    print "qhr: %s"%(qhr)
+                    dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
                     self.robot_rave.SetDOFValues(dof_values)
                     self.env.UpdatePublishedBodies()
-                    rospy.sleep(0.1)
+                    rospy.sleep(time_d)
 
     def getMesh(self, name):
         body = self.env.GetKinBody(name)
@@ -304,7 +358,7 @@ class OpenraveInstance:
         return col.vertices, col.indices
 
     def getFinalConfig(self, grasp):
-        with RobotStateSaver(self.robot_rave):
+        with self.robot_rave.CreateRobotStateSaver():
             with self.env:
                 contacts,finalconfig,mindist,volume = self.gmodel.runGraspFromTrans(grasp)
                 hand_config = [
@@ -314,6 +368,4 @@ class OpenraveInstance:
                 finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleOneJoint")],
                 ]
         return hand_config
-
-
 

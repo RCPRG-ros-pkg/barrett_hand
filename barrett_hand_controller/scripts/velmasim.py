@@ -60,6 +60,8 @@ import pose_lookup_table as plut
 from urdf_parser_py.urdf import URDF
 from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
 
+import velmautils
+
 # reference frames:
 # B - robot's base
 # W - wrist
@@ -67,86 +69,19 @@ from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
 # F - finger distal link
 # T - tool
 
-class Velma:
+class VelmaSim:
     """
 Class for velma robot.
 """
-    def get_pressure_sensors_info_client(self):
-        service_name = '/' + self.prefix + '_hand/get_pressure_info'
-        rospy.wait_for_service(service_name)
-        try:
-            get_pressure_sensors_info = rospy.ServiceProxy(service_name, BHGetPressureInfo)
-            resp = get_pressure_sensors_info()
-            return resp.info
-        except rospy.ServiceException, e:
-            print "Service call failed: %s"%e
-
     def calibrate_tactile_sensors(self):
-        service_name = '/' + self.prefix + '_hand/calibrate_tactile_sensors'
-        rospy.wait_for_service(service_name)
-        try:
-            calibrate_tactile_sensors = rospy.ServiceProxy(service_name, Empty)
-            resp = calibrate_tactile_sensors()
-        except rospy.ServiceException, e:
-            print "Service call failed: %s"%e
+        pass
 
     def reset_fingers(self):
-        service_name = '/' + self.prefix + '_hand/reset_fingers'
-        rospy.wait_for_service(service_name)
-        try:
-            reset_fingers = rospy.ServiceProxy(service_name, Empty)
-            resp = reset_fingers()
-        except rospy.ServiceException, e:
-            print "Service call failed: %s"%e
+        # TODO
+        pass
 
     def set_median_filter(self, samples):
-        rospy.wait_for_service('/' + self.prefix + '_hand/set_median_filter')
-        try:
-            set_median_filter = rospy.ServiceProxy('/' + self.prefix + '_hand/set_median_filter', BHSetMedianFilter)
-            resp1 = set_median_filter(samples)
-        except rospy.ServiceException, e:
-            print "Service call failed: %s"%e
-
-    def initIkSolver(self):
-        self.robot = URDF.from_parameter_server()
-        print "len(self.robot.links) = %s"%(len(self.robot.links))
-#        for l in self.robot.links:
-#            print "name: %s"%(l.name)
-#            print "visual:"
-#            print l.visual
-#            print "collision:"
-#            print l.collision.geometry
-        self.tree = kdl_tree_from_urdf_model(self.robot)
-        self.chain = self.tree.getChain("torso_link2", "right_HandPalmLink")
-
-        self.q_min = PyKDL.JntArray(7)
-        self.q_max = PyKDL.JntArray(7)
-        self.q_limit = 0.26
-        self.q_min[0] = -2.96 + self.q_limit
-        self.q_min[1] = -2.09 + self.q_limit
-        self.q_min[2] = -2.96 + self.q_limit
-        self.q_min[3] = -2.09 + self.q_limit
-#        self.q_min[3] = 0.0    # constraint on elbow
-        self.q_min[4] = -2.96 + self.q_limit
-        self.q_min[5] = -2.09 + self.q_limit
-        self.q_min[6] = -2.96 + self.q_limit
-#        self.q_max[0] = 2.96 - self.q_limit
-        self.q_max[0] = 0.2    # constraint on first joint to avoid head hitting
-        self.q_max[1] = 2.09 - self.q_limit
-        self.q_max[2] = 2.96 - self.q_limit
-        self.q_max[3] = 2.09 - self.q_limit
-        self.q_max[4] = 2.96 - self.q_limit
-        self.q_max[5] = 2.09 - self.q_limit
-        self.q_max[6] = 2.96 - self.q_limit
-        self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
-        self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
-        self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
-#        self.singularity_angle = 15.0/180.0*math.pi
-
-#    def hasSingularity(self, q):
-#        if (math.fabs(q[1]) <= self.singularity_angle) or (math.fabs(q[3]) <= self.singularity_angle) or (math.fabs(q[5]) <= self.singularity_angle):
-#            return True
-#        return False
+        pass
 
     def setSavedKinematics(self):
         self.F1_kinematics=[
@@ -601,8 +536,6 @@ Class for velma robot.
                 d6 = q6 - r[3]
             dist.append( min( d5, d6 ) )
 
-#        print dist
-
         i = 0
         min_dist = 1000000.0
         min_index = -1
@@ -627,7 +560,6 @@ Class for velma robot.
 #0.932657182217
 #-0.819031119347
 #2.86872577667
-
 
     def initRightQ5Q6SelfCollisionDetection(self):
         self.right_q5_q6_collision_polygon = [
@@ -665,10 +597,6 @@ Class for velma robot.
                 self.q_rf[5] = data.position[5]
                 self.q_rf[6] = data.position[6]
                 self.q_rf[7] = data.position[7]
-                self.qhr[0] = self.q_rf[0]
-                self.qhr[1] = self.q_rf[1]
-                self.qhr[2] = self.q_rf[4]
-                self.qhr[3] = self.q_rf[6]
             if data.name[0] == 'left_HandFingerOneKnuckleOneJoint':
                 self.q_lf[0] = data.position[0]
                 self.q_lf[1] = data.position[1]
@@ -678,21 +606,17 @@ Class for velma robot.
                 self.q_lf[5] = data.position[5]
                 self.q_lf[6] = data.position[6]
                 self.q_lf[7] = data.position[7]
-                self.qhl[0] = self.q_lf[0]
-                self.qhl[1] = self.q_lf[1]
-                self.qhl[2] = self.q_lf[4]
-                self.qhl[3] = self.q_lf[6]
         if len(data.name) == 16:
             if data.name[2] == 'right_arm_0_joint':
                 self.q_t[0] = data.position[0]
                 self.q_t[1] = data.position[1]
-                self.qar[0] = data.position[2]
-                self.qar[1] = data.position[3]
-                self.qar[2] = data.position[4]
-                self.qar[3] = data.position[5]
-                self.qar[4] = data.position[6]
-                self.qar[5] = data.position[7]
-                self.qar[6] = data.position[8]
+                self.q_r[0] = data.position[2]
+                self.q_r[1] = data.position[3]
+                self.q_r[2] = data.position[4]
+                self.q_r[3] = data.position[5]
+                self.q_r[4] = data.position[6]
+                self.q_r[5] = data.position[7]
+                self.q_r[6] = data.position[8]
                 self.q_l[0] = data.position[9]
                 self.q_l[1] = data.position[10]
                 self.q_l[2] = data.position[11]
@@ -701,14 +625,14 @@ Class for velma robot.
                 self.q_l[5] = data.position[14]
                 self.q_l[6] = data.position[15]
 
-                if self.abort_on_q5_singularity and self.qar[5] > -self.abort_on_q5_singularity_angle and self.qar[5] < self.abort_on_q5_singularity_angle and not self.aborted_on_q5_singularity:
+                if self.abort_on_q5_singularity and self.q_r[5] > -self.abort_on_q5_singularity_angle and self.q_r[5] < self.abort_on_q5_singularity_angle and not self.aborted_on_q5_singularity:
                     try:
                         self.aborted_on_q5_singularity = True
                         self.action_right_trajectory_client.cancel_goal()
                     except:
                         pass
 
-                if self.abort_on_q5_q6_self_collision and self.getQ5Q6SpaceSector(self.qar[5], self.qar[6], margin=10.0/180.0*math.pi) < 0 and not self.aborted_on_q5_q6_self_collision:    # self-collision
+                if self.abort_on_q5_q6_self_collision and self.getQ5Q6SpaceSector(self.q_r[5], self.q_r[6], margin=10.0/180.0*math.pi) < 0 and not self.aborted_on_q5_q6_self_collision:    # self-collision
                     try:
                         self.aborted_on_q5_q6_self_collision = True
                         self.action_right_trajectory_client.cancel_goal()
@@ -778,15 +702,16 @@ Class for velma robot.
 #        ws.wrench = wrench
 #        self.pub_wrench.publish(ws)
 
-    def __init__(self):
+    def __init__(self, openraveinstance, velma_ikr):
 
-        self.q_rf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.q_lf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.q_t = [0.0, 0.0]
-        self.qar = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.qal = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.velma_ikr = velma_ikr
+        self.openrave = openraveinstance
+
+        self.qar = [-90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, 0, -90.0/180.0*math.pi, 0]
+        self.qal = [-90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 0, 90.0/180.0*math.pi, 0]
         self.qhr = [0.0, 0.0, 0.0, 0.0]
         self.qhl = [0.0, 0.0, 0.0, 0.0]
+        self.qt = [0.0, 0.0]
 
         # barrett hand kinematics
         self.setSavedKinematics()
@@ -798,20 +723,18 @@ Class for velma robot.
         self.aborted_on_q5_q6_self_collision = False
 
         self.T_B_L = [PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame(),PyKDL.Frame()]
-        self.initIkSolver()
 
-        self.initRightQ5Q6SelfCollisionDetection()
+#        self.initRightQ5Q6SelfCollisionDetection()
 
         # parameters
         self.prefix="right"
-        self.k_error = Wrench(Vector3(1.0, 1.0, 1.0), Vector3(0.5, 0.5, 0.5))
         self.T_B_W = None
         self.T_W_T = PyKDL.Frame(PyKDL.Vector(0.2,-0.05,0))    # tool transformation
         self.T_W_E = None
         self.T_E_W = None
-        self.current_max_wrench = Wrench(Vector3(20, 20, 20), Vector3(20, 20, 20))
         self.wrench_emergency_stop = False
         self.exit_on_emergency_stop = True
+        self.k_error = Wrench(Vector3(1.0, 1.0, 1.0), Vector3(0.5, 0.5, 0.5))
 
         self.last_contact_time = rospy.Time.now()
 
@@ -829,89 +752,27 @@ Class for velma robot.
 
         self.emergency_stop_active = False
 
-        self.action_right_trajectory_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_trajectory", CartesianTrajectoryAction)
-        self.action_right_trajectory_client.wait_for_server()
-
-        self.action_tool_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/tool_trajectory", CartesianTrajectoryAction)
-        self.action_tool_client.wait_for_server()
-
-        self.action_impedance_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
-        self.action_impedance_client.wait_for_server()
-
-        self.pub_wrench = rospy.Publisher("/"+self.prefix+"_arm/wrench_stamped", WrenchStamped)
-
-        self.pub_trajectory = rospy.Publisher("/"+self.prefix+"_arm/trajectory", CartesianTrajectory)
-        self.pub_impedance = rospy.Publisher("/"+self.prefix+"_arm/impedance", CartesianImpedanceTrajectory)
-        self.listener = tf.TransformListener();
-        self.br = tf.TransformBroadcaster()
-
-        rospy.sleep(1.0)
-        
         self.max_tactile_value = 0
 
-        self.pressure_info = self.get_pressure_sensors_info_client()
-        self.pressure_frames = []
-        for i in range(0, 24):
-            center = PyKDL.Vector(self.pressure_info.sensor[0].center[i].x, self.pressure_info.sensor[0].center[i].y, self.pressure_info.sensor[0].center[i].z)
-            halfside1 = PyKDL.Vector(self.pressure_info.sensor[0].halfside1[i].x, self.pressure_info.sensor[0].halfside1[i].y, self.pressure_info.sensor[0].halfside1[i].z)
-            halfside2 = PyKDL.Vector(self.pressure_info.sensor[0].halfside2[i].x, self.pressure_info.sensor[0].halfside2[i].y, self.pressure_info.sensor[0].halfside2[i].z)
-            halfside1.Normalize()
-            halfside2.Normalize()
-            norm = halfside1*halfside2
-            norm.Normalize()
-            self.pressure_frames.append( PyKDL.Frame(PyKDL.Rotation(halfside1, halfside2, norm), center) )
-
-        self.palm_pressure_frames = []
-        for i in range(0, 24):
-            center = PyKDL.Vector(self.pressure_info.sensor[3].center[i].x, self.pressure_info.sensor[3].center[i].y, self.pressure_info.sensor[3].center[i].z)
-            halfside1 = PyKDL.Vector(self.pressure_info.sensor[3].halfside1[i].x, self.pressure_info.sensor[3].halfside1[i].y, self.pressure_info.sensor[3].halfside1[i].z)
-            halfside2 = PyKDL.Vector(self.pressure_info.sensor[3].halfside2[i].x, self.pressure_info.sensor[3].halfside2[i].y, self.pressure_info.sensor[3].halfside2[i].z)
-            halfside1.Normalize()
-            halfside2.Normalize()
-            norm = halfside1*halfside2
-            norm.Normalize()
-            self.palm_pressure_frames.append( PyKDL.Frame(PyKDL.Rotation(halfside1, halfside2, norm), center) )
-
-        self.wrench_tab = []
-        self.wrench_tab_index = 0
-        self.wrench_tab_len = 4000
-        for i in range(0,self.wrench_tab_len):
-            self.wrench_tab.append( Wrench(Vector3(), Vector3()) )
-
-        self.qar = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        rospy.Subscriber('/'+self.prefix+'_hand/BHPressureState', BHPressureState, self.tactileCallback)
-        rospy.Subscriber('/'+self.prefix+'_arm/wrench', Wrench, self.wrenchCallback)
-        joint_states_listener = rospy.Subscriber('/joint_states', JointState, self.jointStatesCallback)
-
     def moveWrist2(self, wrist_frame):
-        wrist_pose = pm.toMsg(wrist_frame)
-        self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
+        pass
 
     def moveWrist(self, wrist_frame, t, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
-        self.abort_on_q5_singularity = abort_on_q5_singularity
-        self.aborted_on_q5_singularity = False
-        self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
-        self.aborted_on_q5_q6_self_collision = False
+        self.T_B_W_current = self.openrave.getLinkPose("right_arm_7_link", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_B_T2_current = self.openrave.getLinkPose("torso_link2", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_T2_B_current = self.T_B_T2_current.Inverse()
+#        q_traj = []
+        for f in np.linspace(0.0, 1.0, 50):
+            q_out, T_B_Ei = self.velma_ikr.simulateTrajectory(self.T_B_W_current * self.T_W_E, wrist_frame * self.T_W_E, f, self.qar, self.T_T2_B_current)
+            self.qar = q_out
+            rospy.sleep(t/50.0)
+#            q_traj.append(q_out)
 
-        # we are moving the tool, so: T_B_Wd*T_W_T
-        wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
-        self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
-        wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
-
-        action_trajectory_goal = CartesianTrajectoryGoal()
-        if stamp != None:
-            action_trajectory_goal.trajectory.header.stamp = stamp
-        else:
-            action_trajectory_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(start_time)
-        action_trajectory_goal.trajectory.points.append(CartesianTrajectoryPoint(
-        rospy.Duration(t),
-        wrist_pose,
-        Twist()))
-        action_trajectory_goal.wrench_constraint = max_wrench
-        self.current_max_wrench = max_wrench
-        self.action_right_trajectory_client.send_goal(action_trajectory_goal)
+#        self.openrave.showTrajectory(0.1, qar_list=q_traj)
 
     def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        # TODO
+        return
         self.abort_on_q5_singularity = abort_on_q5_singularity
         self.aborted_on_q5_singularity = False
         self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
@@ -938,55 +799,16 @@ Class for velma robot.
         self.action_right_trajectory_client.send_goal(action_trajectory_goal)
 
     def moveTool(self, wrist_frame, t):
-        wrist_pose = pm.toMsg(wrist_frame)
-
-        action_tool_goal = CartesianTrajectoryGoal()
-        action_tool_goal.trajectory.header.stamp = rospy.Time.now()
-        action_tool_goal.trajectory.points.append(CartesianTrajectoryPoint(
-        rospy.Duration(t),
-        wrist_pose,
-        Twist()))
-        self.action_tool_client.send_goal(action_tool_goal)
+        pass
 
     def moveImpedance(self, k, t, stamp=None, damping=Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7))):
-        self.action_impedance_goal = CartesianImpedanceGoal()
-        if stamp != None:
-            self.action_impedance_goal.trajectory.header.stamp = stamp
-        else:
-            self.action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
-        self.action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
-        rospy.Duration(t),
-        CartesianImpedance(k,damping)))
-        self.action_impedance_client.send_goal(self.action_impedance_goal)
+        pass
 
     def moveImpedanceTraj(self, k_n, t_n, stamp=None, damping=Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7))):
-        self.action_impedance_goal = CartesianImpedanceGoal()
-        if stamp != None:
-            self.action_impedance_goal.trajectory.header.stamp = stamp
-        else:
-            self.action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
-        i = 0
-        for k in k_n:
-            self.action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
-            rospy.Duration(t_n[i]),
-            CartesianImpedance(k,damping)))
-
-        self.action_impedance_client.send_goal(self.action_impedance_goal)
+        pass
 
     def stopArm(self):
-#        if self.action_right_trajectory_client.gh:
-#            self.action_right_trajectory_client.cancel_all_goals()
-#        if self.action_tool_client.gh:
-#            self.action_tool_client.cancel_all_goals()
-
-        try:
-            self.action_right_trajectory_client.cancel_goal()
-        except:
-            pass
-        try:
-            self.action_tool_client.cancel_goal()
-        except:
-            pass
+        pass
 
     def emergencyStop(self):
         self.moveImpedance(self.k_error, 0.5)
@@ -995,7 +817,8 @@ Class for velma robot.
         print "emergency stop"
 
     def checkStopCondition(self, t=0.0):
-
+        # TODO
+        return
         end_t = rospy.Time.now()+rospy.Duration(t+0.0001)
         while rospy.Time.now()<end_t:
             if rospy.is_shutdown():
@@ -1034,6 +857,8 @@ Class for velma robot.
     # q = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
     # robot.move_hand_client("right", q)
     def move_hand_client(self, q, v=(1.2, 1.2, 1.2, 1.2), t=(2000.0, 2000.0, 2000.0, 2000.0)):
+        # TODO
+        return
         rospy.wait_for_service('/' + self.prefix + '_hand/move_hand')
         try:
             move_hand = rospy.ServiceProxy('/' + self.prefix + '_hand/move_hand', BHMoveHand)
@@ -1047,62 +872,46 @@ Class for velma robot.
         return False
 
     def updateTransformations(self):
-        pose = self.listener.lookupTransform('torso_base', 'torso_link2', rospy.Time(0))
-        self.T_B_T2 = pm.fromTf(pose)
+        self.T_B_T2 = self.openrave.getLinkPose('torso_link2', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
         self.T_T2_B = self.T_B_T2.Inverse()
 
-        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
-        self.T_B_W = pm.fromTf(pose)
+        self.T_B_W = self.openrave.getLinkPose(self.prefix+'_arm_7_link', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_B_E = self.openrave.getLinkPose(self.prefix+'_HandPalmLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_W_E = self.T_B_W.Inverse() * self.T_B_E
+        self.T_E_W = self.T_W_E.Inverse()
 
         for i in range(0,7):
-            pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_' + str(i+1) + '_link', rospy.Time(0))
-            self.T_B_L[i] = pm.fromTf(pose)
+            self.T_B_L[i] = self.openrave.getLinkPose(self.prefix+'_arm_' + str(i+1) + '_link', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
 
-#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_2_link', rospy.Time(0))
-#        self.T_B_L2 = pm.fromTf(pose)
-
-#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_5_link', rospy.Time(0))
-#        self.T_B_L5 = pm.fromTf(pose)
-
-#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_6_link', rospy.Time(0))
-#        self.T_B_L6 = pm.fromTf(pose)
-
-#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_7_link', rospy.Time(0))
-#        self.T_B_L7 = pm.fromTf(pose)
-
-        pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', rospy.Time(0))
-        self.T_E_F = pm.fromTf(pose)
+        self.T_B_F = self.openrave.getLinkPose(self.prefix+'_HandFingerThreeKnuckleThreeLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_E_F = self.T_B_E.Inverse() * self.T_B_F
         self.T_F_E = self.T_E_F.Inverse()
 
-        pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerOneKnuckleThreeLink', rospy.Time(0))
-        self.T_E_F13 = pm.fromTf(pose)
+        self.T_B_F13 = self.openrave.getLinkPose(self.prefix+'_HandFingerOneKnuckleThreeLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_E_F13 = self.T_B_E.Inverse() * self.T_B_F13
         self.T_F13_E = self.T_E_F13.Inverse()
 
-        pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerTwoKnuckleThreeLink', rospy.Time(0))
-        self.T_E_F23 = pm.fromTf(pose)
+        self.T_B_F23 = self.openrave.getLinkPose(self.prefix+'_HandFingerTwoKnuckleThreeLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_E_F23 = self.T_B_E.Inverse() * self.T_B_F23
         self.T_F23_E = self.T_E_F23.Inverse()
 
-        pose = self.listener.lookupTransform('/'+self.prefix+'_HandPalmLink', '/'+self.prefix+'_HandFingerThreeKnuckleThreeLink', rospy.Time(0))
-        self.T_E_F33 = pm.fromTf(pose)
+        self.T_B_F33 = self.openrave.getLinkPose(self.prefix+'_HandFingerThreeKnuckleThreeLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_E_F33 = self.T_B_E.Inverse() * self.T_B_F33
         self.T_F33_E = self.T_E_F33.Inverse()
 
-        if self.T_W_E == None:
-            pose = self.listener.lookupTransform(self.prefix+'_arm_7_link', self.prefix+'_HandPalmLink', rospy.Time(0))
-            self.T_W_E = pm.fromTf(pose)
-            self.T_E_W = self.T_W_E.Inverse()
+#        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_cmd', rospy.Time(0))
+#        self.T_B_T_cmd = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_cmd', rospy.Time(0))
-        self.T_B_T_cmd = pm.fromTf(pose)
+#        pose = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerOneKnuckleOneLink', rospy.Time(0))
+#        self.T_E_F11 = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerOneKnuckleOneLink', rospy.Time(0))
-        self.T_E_F11 = pm.fromTf(pose)
+#        pose = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerTwoKnuckleOneLink', rospy.Time(0))
+#        self.T_E_F21 = pm.fromTf(pose)
 
-        pose = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerTwoKnuckleOneLink', rospy.Time(0))
-        self.T_E_F21 = pm.fromTf(pose)
-
-        self.T_E_F31 = PyKDL.Frame()
+#        self.T_E_F31 = PyKDL.Frame()
 
     def getContactPoints(self, threshold, f1=True, f2=True, f3=True, palm=True):
+        return [], []
         self.tactile_lock.acquire()
         index = copy.copy(self.tactile_data_index)
         max_value = copy.copy(self.max_tactile_value)
@@ -1198,14 +1007,6 @@ Class for velma robot.
         self.T_W_T = copy.deepcopy(tool)    # tool transformation
         self.updateTransformations()
 
-        print "setting the tool to %s relative to wrist frame"%(self.T_W_T)
-        # move both tool position and wrist position - the gripper holds its position
-        print "moving wrist"
-        # we assume that during the initialization there are no contact forces, so we limit the wrench
-        self.moveWrist( self.T_B_W, duration, Wrench(Vector3(10, 10, 10), Vector3(2, 2, 2)) )
-        print "moving tool"
-        self.moveTool( self.T_W_T, duration )
-
     def waitForFirstContact(self, threshold, duration, emergency_stop=True, f1=True, f2=True, f3=True, palm=True):
         contacts = []
         contact_found = False
@@ -1225,25 +1026,7 @@ Class for velma robot.
         return contacts
 
     def getFingersKinematics(self):
-        rospy.sleep(2.0)
-        finger_angle = 0.0
-        self.F1_kinematics = []
-        self.F2_kinematics = []
-        self.F3_kinematics = []
-        while finger_angle < 170.0:
-            self.move_hand_client("right", (finger_angle/180.0*numpy.pi, finger_angle/180.0*numpy.pi, finger_angle/180.0*numpy.pi, 0.0/180.0*numpy.pi), t=(4000.0, 4000.0, 4000.0, 4000.0) )
-            if self.checkStopCondition(0.5):
-                break
-            f1 = self.listener.lookupTransform('right_HandFingerOneKnuckleOneLink', 'right_HandFingerOneKnuckleThreeLink', rospy.Time(0))
-            f2 = self.listener.lookupTransform('right_HandFingerTwoKnuckleOneLink', 'right_HandFingerTwoKnuckleThreeLink', rospy.Time(0))
-            f3 = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerThreeKnuckleThreeLink', rospy.Time(0))
-            T_F1_N = pm.fromTf(f1)
-            T_F2_N = pm.fromTf(f2)
-            T_F3_N = pm.fromTf(f3)
-            self.F1_kinematics.append( (copy.copy(self.q_rf[1]), T_F1_N) )
-            self.F2_kinematics.append( (copy.copy(self.q_rf[4]), T_F2_N) )
-            self.F3_kinematics.append( (copy.copy(self.q_rf[7]), T_F3_N) ) # there is possible error! Sholud be q_rf[6] ???
-            finger_angle += 1.0
+        return
 
     def get_T_E_Fd(self, finger, angle, spread_angle):
         if finger == 0:
@@ -1368,18 +1151,18 @@ Class for velma robot.
 
     def moveAwayQ5Singularity(self, omega, T_B_Wd=None):
         self.updateTransformations()
-        sector0 = self.getQ5Q6SpaceSector(self.qar[5], self.qar[6])
-        sector0 = self.getQ5Q6SpaceSector(self.qar[5], self.qar[6])
+        sector0 = self.getQ5Q6SpaceSector(self.q_r[5], self.q_r[6])
+        sector0 = self.getQ5Q6SpaceSector(self.q_r[5], self.q_r[6])
         angle = 25.0/180.0*math.pi
         if T_B_Wd == None:
-            if self.qar[5] > 0.0:
+            if self.q_r[5] > 0.0:
                 angle = 25.0/180.0*math.pi
             else:
                 angle = -25.0/180.0*math.pi
-            traj, times = self.generateTrajectoryInJoint(5, -self.qar[5]+angle, omega)
+            traj, times = self.generateTrajectoryInJoint(5, -self.q_r[5]+angle, omega)
         else:
-            traj1, times1 = self.generateTrajectoryInJoint(5, -self.qar[5]+angle, omega)
-            traj2, times2 = self.generateTrajectoryInJoint(5, -self.qar[5]-angle, omega)
+            traj1, times1 = self.generateTrajectoryInJoint(5, -self.q_r[5]+angle, omega)
+            traj2, times2 = self.generateTrajectoryInJoint(5, -self.q_r[5]-angle, omega)
             diff1 = PyKDL.diff(T_B_Wd,traj1[-1])
             diff2 = PyKDL.diff(T_B_Wd,traj2[-1])
             if diff1.rot.Norm() < diff2.rot.Norm():
@@ -1397,8 +1180,8 @@ Class for velma robot.
         self.checkStopCondition(times[-1]+0.5)
 
     def generateTrajectoryInQ5Q6(self, q5, q6, omega):
-        actual_q5 = copy.copy(self.qar[5])
-        actual_q6 = copy.copy(self.qar[6])
+        actual_q5 = copy.copy(self.q_r[5])
+        actual_q6 = copy.copy(self.q_r[6])
 
         rel_q5 = q5 - actual_q5
         rel_q6 = q6 - actual_q6

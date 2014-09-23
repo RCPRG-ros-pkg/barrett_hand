@@ -51,6 +51,9 @@ import numpy as np
 import copy
 from scipy import optimize
 
+from urdf_parser_py.urdf import URDF
+from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
+
 class MarkerPublisher:
     def __init__(self):
         self.pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
@@ -340,4 +343,155 @@ def meanOrientation(T):
     for s in score:
         score_v += s*s
     return [score_v, PyKDL.Frame(PyKDL.Rotation.EulerZYX(angle_2[0],angle_2[1],angle_2[2]))]
+
+# determine if a point is inside a given polygon or not
+# Polygon is a list of (x,y) pairs.
+def point_inside_polygon(x,y,poly):
+    n = len(poly)
+    inside =False
+    p1x,p1y = poly[0]
+    for i in range(n+1):
+        p2x,p2y = poly[i % n]
+        if y > min(p1y,p2y):
+            if y <= max(p1y,p2y):
+                if x <= max(p1x,p2x):
+                    if p1y != p2y:
+                        xinters = (y-p1y)*(p2x-p1x)/(p2y-p1y)+p1x
+                    if p1x == p2x or x <= xinters:
+                        inside = not inside
+        p1x,p1y = p2x,p2y
+    return inside
+
+class VelmaIkSolver:
+    def __init__(self):
+        pass
+
+    def initIkSolver(self):
+        self.robot = None
+        try:
+            self.robot = URDF.from_parameter_server()
+        except:
+            pass
+
+        if self.robot == None:
+            print "Could not load the robot description!"
+            print "Please run <roscore> and then <roslaunch velma_description upload_robot.launch>"
+            return
+
+        print "len(self.robot.links) = %s"%(len(self.robot.links))
+#        for l in self.robot.links:
+#            print "name: %s"%(l.name)
+#            print "visual:"
+#            print l.visual
+#            print "collision:"
+#            print l.collision.geometry
+        self.tree = kdl_tree_from_urdf_model(self.robot)
+        self.chain = self.tree.getChain("torso_link2", "right_HandPalmLink")
+
+        self.q_min = PyKDL.JntArray(7)
+        self.q_max = PyKDL.JntArray(7)
+        self.q_limit = 0.26
+        self.q_min[0] = -2.96 + self.q_limit
+        self.q_min[1] = -2.09 + self.q_limit
+        self.q_min[2] = -2.96 + self.q_limit
+#        self.q_min[3] = -2.09 + self.q_limit
+        self.q_min[3] = 0.1    # constraint on elbow
+        self.q_min[4] = -2.96 + self.q_limit
+        self.q_min[5] = -2.09 + self.q_limit
+        self.q_min[6] = -2.96 + self.q_limit
+#        self.q_max[0] = 2.96 - self.q_limit
+        self.q_max[0] = 0.2    # constraint on first joint to avoid head hitting
+        self.q_max[1] = 2.09 - self.q_limit
+        self.q_max[2] = 2.96 - self.q_limit
+        self.q_max[3] = 2.09 - self.q_limit
+        self.q_max[4] = 2.96 - self.q_limit
+        self.q_max[5] = 2.09 - self.q_limit
+        self.q_max[6] = 2.96 - self.q_limit
+        self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
+        self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
+        self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
+#        self.singularity_angle = 15.0/180.0*math.pi
+
+    def simulateTrajectory(self, T_B_Einit, T_B_Ed, progress, q_start, T_T2_B):
+        if progress < 0.0 or progress > 1.0:
+            print "simulateTrajectory: bad progress value: %s"%(progress)
+            return None
+
+        q_end = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        q_init = PyKDL.JntArray(7)
+        for i in range(0,7):
+            q_init[i] = q_start[i]
+
+        for i in range(0, 7):
+            if q_init[i] > self.q_max[i]-0.02:
+                q_init[i] = self.q_max[i]-0.02
+            if q_init[i] < self.q_min[i]+0.02:
+                q_init[i] = self.q_min[i]+0.02
+
+        q_out = PyKDL.JntArray(7)
+        T_B_E_diff = PyKDL.diff(T_B_Einit, T_B_Ed, 1.0)
+        T_B_Ei = PyKDL.addDelta(T_B_Einit, T_B_E_diff, progress)
+        T_T2_Ei = T_T2_B * T_B_Ei
+        status = self.ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
+        if status != 0:
+            return None, None
+        for i in range(0, 7):
+            q_end[i] = q_out[i]
+        return q_end, T_B_Ei
+
+    def getTrajCost(self, traj_T_B_Ed, q_start, T_T2_B, allow_q5_singularity_before_end, allow_q5_singularity_on_end):
+        if len(traj_T_B_Ed) < 2:
+            print "getTrajCost: wrong argument"
+            return 1000000.0
+
+#simulateTrajectory(T_B_Einit, T_B_Ed, progress, q_start, T_T2_B)
+
+        q_init = copy.copy(q_start)
+        for i in range(0, 7):
+            if q_init[i] > self.q_max[i]-0.02:
+                q_init[i] = self.q_max[i]-0.02
+            if q_init[i] < self.q_min[i]+0.02:
+                q_init[i] = self.q_min[i]+0.02
+
+        q_out = PyKDL.JntArray(7)
+        steps = 10
+        time_set = np.linspace(1.0/steps, 1.0, steps)
+        cost = 0.0
+#        for T_B_Ed in traj_T_B_Ed:
+        for i in range(0, len(traj_T_B_Ed)-1):
+
+            for f in time_set:
+                q_end, T_B_Ei = self.simulateTrajectory(traj_T_B_Ed[i], traj_T_B_Ed[i+1], f, q_init, T_T2_B)
+                if q_end == None:
+                    cost += 10000.0
+                    return cost
+#                T_B_Ei = PyKDL.addDelta(T_B_Eprev, T_B_E_diff, d)
+#                T_T2_Ei = self.T_T2_B * T_B_Ei
+#                status = self.ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
+#                if status != 0:
+#                    print "c"
+#                    cost += 10000.0
+#                    return cost
+#                q5abs = math.fabs(q_out[5])
+#                singularity = q5abs < self.abort_on_q5_singularity_angle + 5.0/180.0*math.pi
+#                if allow_q5_singularity_before_end:
+#                    pass
+#                else:
+#                    # punish for singularity
+#                    if singularity:
+#                        print "b"
+#                        cost += 10000.0
+#                        return cost
+                for j in range(0, 7):
+                    cost += (q_end[j] - q_init[j])*(q_end[j] - q_init[j])
+                    q_init[j] = q_end[j]
+#        if not allow_q5_singularity_on_end and singularity:
+#            print "a"
+#            cost += 10000.0
+#            return cost
+
+#        if q_end != None:
+#            for i in range(0, 7):
+#                q_end[i] = q_out[i]
+        return cost
 

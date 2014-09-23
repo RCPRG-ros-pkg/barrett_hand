@@ -59,6 +59,7 @@ import matplotlib.pyplot as plt
 import thread
 from scipy import optimize
 from velma import Velma
+from velmasim import VelmaSim
 import random
 from openravepy import *
 from optparse import OptionParser
@@ -103,24 +104,33 @@ Class for grasp learning.
             return None
         return pm.fromTf(jar_marker)
 
+    def getMarkerPoseFake(self, marker_id, wait = True, timeBack = None):
+        T_B_Tm = PyKDL.Frame( PyKDL.Vector(1.0,-0.3,0.4) )
+        T_Tm_Bm = PyKDL.Frame( PyKDL.Vector(-0.06, 0.3, 0.135) )
+        T_Bm_Gm = PyKDL.Frame( PyKDL.Rotation.RotZ(-30.0/180.*math.pi), PyKDL.Vector(0.1,-0.1,0.06) )
+        if marker_id == 6:
+            return T_B_Tm
+        elif marker_id == 7:
+            return T_B_Tm * T_Tm_Bm
+        elif marker_id == 19:
+            return T_B_Tm * T_Tm_Bm * T_Bm_Gm
+        return None
+
     def poseUpdaterThread(self, args, *args2):
         index = 0
         while not rospy.is_shutdown():
             rospy.sleep(0.1)
             if self.allow_update_objects_pose == None or not self.allow_update_objects_pose:
                 continue
-#            visible_markers = []
             for obj in self.objects:
                 for marker in obj.markers:
                     T_Br_M = self.getMarkerPose(marker[0], wait = False, timeBack = 0.3)
                     if T_Br_M != None:
-#                        visible_markers.append(marker[0])
                         T_Co_M = marker[1]
                         T_Br_Co = T_Br_M * T_Co_M.Inverse()
                         obj.updatePose(T_Br_Co)
                         self.openrave.updatePose(obj.name, T_Br_Co)
                         break
-#            print "%s   visible_markers: %s"%(index, visible_markers)
 
             index += 1
             if index >= 100:
@@ -131,6 +141,12 @@ Class for grasp learning.
 
     def disallowUpdateObjects(self):
         self.allow_update_objects_pose = False
+
+    def waitForOpenraveInit(self):
+        while not rospy.is_shutdown():
+            if self.openrave.rolling:
+                break
+            rospy.sleep(0.5)
 
     def spin(self):
         m_id = 0
@@ -173,21 +189,28 @@ Class for grasp learning.
             grip.gripUnitTest(obj_grasp)
             exit(0)
 
-        # create the robot interface
-        velma = Velma()
+        # load and init ik solver for right hand
+        velma_ikr = velmautils.VelmaIkSolver()
+        velma_ikr.initIkSolver()
+
+        simulation_only = True
+        # simulation
+        if simulation_only:
+            self.getMarkerPose = self.getMarkerPoseFake
 
         # create Openrave interface
-        self.openrave = openraveinstance.OpenraveInstance(velma, PyKDL.Frame(PyKDL.Vector(0,0,0.1)))
+        self.openrave = openraveinstance.OpenraveInstance(PyKDL.Frame(PyKDL.Vector(0,0,0.1)))
         self.openrave.startNewThread()
 
-        while not rospy.is_shutdown():
-            if self.openrave.rolling:
-                break
-            rospy.sleep(0.5)
+        self.waitForOpenraveInit()
+
+        print "openrave initialised"
 
         for obj in self.objects:
             if obj.isBox():
                 self.openrave.addBox(obj.name, obj.size[0], obj.size[1], obj.size[2])
+
+        print "added objects"
 
         if False:
             index = 18
@@ -227,30 +250,17 @@ Class for grasp learning.
             rospy.sleep(1.0)
             exit(0)
 
-        # unit test for hand kinematics
-        if False:
-            m_id = 0
-            velma.updateTransformations()
-            finger = 0
-            center = PyKDL.Vector(0.05,-0.01,0)
-            T_E_Fi3 = [velma.T_E_F13, velma.T_E_F23, velma.T_E_F33]
-            T_Fi3_E = [velma.T_F13_E, velma.T_F23_E, velma.T_F33_E]
-            centers = [velma.T_B_W * velma.T_W_E * velma.T_E_F13 * center, velma.T_B_W * velma.T_W_E * velma.T_E_F23 * center, velma.T_B_W * velma.T_W_E * velma.T_E_F33 * center]
-            for c in centers:
-                if c != None:
-                    c_Fi3 = T_Fi3_E[finger] * velma.T_E_W * velma.T_B_W.Inverse() * c
-                    pt_list = []
-                    for angle in np.linspace(velma.q_rf[finger*3 + 1]-0.0/180.0*math.pi, velma.q_rf[finger*3 + 1]+10.0/180.0*math.pi, 20):
-                        T_E_F = velma.get_T_E_Fd(finger, angle, 0)
-                        cn_B = velma.T_B_W * velma.T_W_E * T_E_F * c_Fi3
-                        pt_list.append(cn_B)
-                    m_id = self.pub_marker.publishMultiPointsMarker(pt_list, m_id, r=1, g=1, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.004, 0.004, 0.004))#, T=T_Br_O)
-                finger += 1
-            exit(0)
-
         self.allowUpdateObjects()
         # start thread for updating objects' positions in openrave
         thread.start_new_thread(self.poseUpdaterThread, (None,1))
+
+        if simulation_only:
+            velma = VelmaSim(self.openrave, velma_ikr)
+        else:
+            # create the robot interface
+            velma = Velma()
+
+        self.openrave.addRobotInterface(velma)
 
         velma.updateTransformations()
 
@@ -286,6 +296,7 @@ Class for grasp learning.
 
         velma.updateTransformations()
         velma_init_T_B_W = copy.deepcopy(velma.T_B_W)
+
         grips_db = []
         while True:
             self.disallowUpdateObjects()
@@ -297,8 +308,8 @@ Class for grasp learning.
             for i in range(0, len(grasps)):
                 T_Br_E = self.openrave.getGraspTransform(grasps[i], collisionfree=True)
                 velma.updateTransformations()
-                traj_T_B_Ed = [T_Br_E]
-                cost = velma.getTrajCost(traj_T_B_Ed, False, False)
+                traj_T_B_Ed = [velma.T_B_W * velma.T_W_E, T_Br_E]
+                cost = velma_ikr.getTrajCost(traj_T_B_Ed, velma.qar, velma.T_B_T2.Inverse(), False, False)
                 print "%s   cost: %s"%(i,cost)
                 if cost < min_cost:
                     min_cost = cost
@@ -317,7 +328,12 @@ Class for grasp learning.
             T_B_Wd = T_Br_E * velma.T_E_W
             duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
             velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            self.openrave.showTrajectory(T_Br_E, 3.0, grasp)
+
+            qar_list = []
+            for f in np.linspace(0.0, 1.0, 50):
+                q_out, T_B_E = velma_ikr.simulateTrajectory(velma.T_B_W * velma.T_W_E, T_B_Wd * velma.T_W_E, f, velma.qar, velma.T_B_T2.Inverse())
+                qar_list.append(q_out)
+            self.openrave.showTrajectory(0.1, qar_list=qar_list)
 
             final_config = self.openrave.getFinalConfig(grasp)
             print "final_config:"
@@ -340,6 +356,12 @@ Class for grasp learning.
             velma.moveImpedance(k_grasp, 3.0)
             if velma.checkStopCondition(3.0):
                 break
+
+#            print "ok"
+#            while not rospy.is_shutdown():
+#                rospy.sleep(0.5)
+#            exit(0)
+
 
             raw_input("Press Enter to close fingers for grasp...")
 
