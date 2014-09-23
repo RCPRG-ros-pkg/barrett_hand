@@ -67,6 +67,7 @@ import velmautils
 import openraveinstance
 import itertools
 import dijkstra
+import grip
 
 # reference frames:
 # B - robot's base
@@ -78,112 +79,6 @@ import dijkstra
 # C - current contact point
 # N - the end point of finger's nail
 # J - jar marker frame (jar cap)
-
-class GraspableObject:
-    def __init__(self, name, obj_type, size):
-        self.name = name
-        self.obj_type = obj_type
-        self.size = size
-        self.com = PyKDL.Vector()
-        self.markers = []
-        self.T_Br_Co = PyKDL.Frame()
-        self.pose_update_time = rospy.Time.now()
-
-    def addMarker(self, marker_id, T_Co_M):
-        self.markers.append( (marker_id, T_Co_M) )
-
-    def isBox(self):
-        if self.obj_type == "box":
-            return True
-        return False
-
-    def updatePose(self, T_Br_Co):
-        self.T_Br_Co = T_Br_Co
-        self.pose_update_time = rospy.Time.now()
-
-class Grip:
-    def __init__(self, grasped_object):
-        self.grasped_object = grasped_object
-        self.contacts = []
-        self.successful = False
-
-    def addContact(self, T_O_Co):
-        self.contacts.append(copy.deepcopy(T_O_Co))
-
-    def success(self):
-        self.successful = True
-
-    def serializePrint(self):
-        print "grips_db.append( Grip(obj_grasp) )"
-        for c in self.contacts:
-            q = c.M.GetQuaternion()
-            print "grips_db[-1].addContact( PyKDL.Frame(PyKDL.Rotation.Quaternion(%s,%s,%s,%s),PyKDL.Vector(%s,%s,%s)) )"%(q[0], q[1], q[2], q[3], c.p.x(), c.p.y(), c.p.z())
-        if self.successful:
-            print "grips_db[-1].success()"
-
-def gripDist(a, b):
-    def estTransform(l1, l2):
-        pos1 = []
-        n1 = []
-        for f in l1:
-            pos1.append( f * PyKDL.Vector() )
-            n1.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
-        def calc_R(xa, ya, za):
-            ret = []
-            """ calculate the minimum distance of each contact point from jar surface pt """
-            t = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Frame(PyKDL.Rotation.RotZ(za))
-            index1 = 0
-            for f in l2:
-                dest_f = t * f
-                pos2 = dest_f * PyKDL.Vector()
-                n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
-                ret.append((pos1[index1]-pos2).Norm()*5.0 + math.fabs(velmautils.getAngle(n1[index1],n2))/math.pi)
-                index1 += 1
-            return numpy.array(ret)
-        def f_2(c):
-            """ calculate the algebraic distance between each contact point and jar surface pt """
-            Di = calc_R(*c)
-            return Di
-        angles_estimate = 0.0, 0.0, 0.0
-        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
-        t = PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[0])) * PyKDL.Frame(PyKDL.Rotation.RotY(angles_2[1])) * PyKDL.Frame(PyKDL.Rotation.RotZ(angles_2[2]))
-        index1 = 0
-        score = 0.0
-        for f in l2:
-            dest_f = t * f
-            pos2 = dest_f * PyKDL.Vector()
-            n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
-            score += ((pos1[index1]-pos2).Norm()*5.0 + math.fabs(velmautils.getAngle(n1[index1],n2))/math.pi)
-            index1 += 1
-        return score, angles_2
-
-    fr_a = []
-    for fr in a.contacts:
-        fr_a.append( PyKDL.Frame(-a.grasped_object.com) * fr )
-
-    fr_b = []
-    for fr in b.contacts:
-        fr_b.append( PyKDL.Frame(-b.grasped_object.com) * fr )
-
-    if len(fr_a) > len(fr_b):
-        fr_0 = fr_a
-        fr_1 = fr_b
-    else:
-        fr_0 = fr_b
-        fr_1 = fr_a
-
-    min_score = 10000.0
-    min_angles = None
-#    print "scores:"
-    # estimate for each permutation of the smaller set
-    for it in itertools.permutations(fr_1):
-        score, angles = estTransform(fr_0, it)
-        if score < min_score:
-            min_score = score
-            min_angles = angles
-#        print score
-    return min_score, min_angles
-
 
 class GraspingTask:
     """
@@ -240,25 +135,14 @@ Class for grasp learning.
     def spin(self):
         m_id = 0
 
-        # create the robot interface
-        velma = Velma()
-
-        self.openrave = openraveinstance.OpenraveInstance(velma, PyKDL.Frame(PyKDL.Vector(0,0,0.1)))
-        self.openrave.startNewThread()
-
-        while not rospy.is_shutdown():
-            if self.openrave.rolling:
-                break
-            rospy.sleep(0.5)
-
-        obj_table = GraspableObject("table", "box", [0.60,0.85,0.07])
+        # create objects definitions
+        obj_table = grip.GraspableObject("table", "box", [0.60,0.85,0.07])
         obj_table.addMarker( 6, PyKDL.Frame(PyKDL.Vector(0, -0.225, 0.035)) )
 
-        obj_box = GraspableObject("box", "box", [0.22,0.24,0.135])
+        obj_box = grip.GraspableObject("box", "box", [0.22,0.24,0.135])
         obj_box.addMarker( 7, PyKDL.Frame(PyKDL.Vector(-0.07, 0.085, 0.065)) )
 
-#        obj_grasp = GraspableObject("object", "box", [0.060,0.354,0.060])
-        obj_grasp = GraspableObject("object", "box", [0.354, 0.060, 0.060])
+        obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
         obj_grasp_frames = [
         [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
         [19, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00785118489648,-0.00136981350282,-0.000184602454162,0.999968223709),PyKDL.Vector(0.14748831582,-0.00390004064458,0.00494675382036))],
@@ -285,6 +169,22 @@ Class for grasp learning.
 
         self.objects = [obj_table, obj_box, obj_grasp]
 
+        if False:
+            grip.gripUnitTest(obj_grasp)
+            exit(0)
+
+        # create the robot interface
+        velma = Velma()
+
+        # create Openrave interface
+        self.openrave = openraveinstance.OpenraveInstance(velma, PyKDL.Frame(PyKDL.Vector(0,0,0.1)))
+        self.openrave.startNewThread()
+
+        while not rospy.is_shutdown():
+            if self.openrave.rolling:
+                break
+            rospy.sleep(0.5)
+
         for obj in self.objects:
             if obj.isBox():
                 self.openrave.addBox(obj.name, obj.size[0], obj.size[1], obj.size[2])
@@ -298,63 +198,6 @@ Class for grasp learning.
                 rospy.sleep(0.1)
                 index += 1
             rospy.sleep(2.0)
-
-            exit(0)
-
-        # unit test for distance measurement between grips
-        if False:
-            # distance between identical grips
-            print "distance between identical grips"
-            grip1 = Grip(obj_grasp)
-            grip1.addContact(PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi), PyKDL.Vector(-0.1,-0.03,0)))
-            grip1.addContact(PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi), PyKDL.Vector(-0.05,-0.03,0)))
-            grip1.addContact(PyKDL.Frame(PyKDL.Rotation.RotX(-90.0/180.0*math.pi), PyKDL.Vector(-0.075,0.03,0)))
-            grip2 = copy.deepcopy(grip1)
-            print gripDist(grip1, grip2)
-
-            # distance between identical grips rotated in com
-            print "distance between identical grips rotated in com"
-            grip2 = copy.deepcopy(grip1)
-            for i in range(0, len(grip2.contacts)):
-                grip2.contacts[i] = PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi)) * grip2.contacts[i]
-            print gripDist(grip1, grip2)
-
-            # distance between identical grips rotated in com in 2 directions
-            print "distance between identical grips rotated in com in 2 directions"
-            grip2 = copy.deepcopy(grip1)
-            for i in range(0, len(grip2.contacts)):
-                grip2.contacts[i] = PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Rotation.RotZ(20.0/180.0*math.pi)) * grip2.contacts[i]
-            print gripDist(grip1, grip2)
-
-            # distance between identical grips rotated in com in 2 directions, one grip has additional contact
-            print "distance between identical grips rotated in com in 2 directions, one grip has additional contact"
-            grip2 = copy.deepcopy(grip1)
-            for i in range(0, len(grip2.contacts)):
-                grip2.contacts[i] = PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Rotation.RotZ(20.0/180.0*math.pi)) * grip2.contacts[i]
-            grip2.addContact(PyKDL.Frame(PyKDL.Rotation.RotX(-90.0/180.0*math.pi), PyKDL.Vector(-0.01,0.03,0)))
-            print gripDist(grip1, grip2)
-
-            # distance between identical grips rotated in com in 2 directions, one grip has a bit diffrent one contact pos
-            print "distance between identical grips rotated in com in 2 directions, one grip has a bit diffrent one contact pos"
-            grip2 = copy.deepcopy(grip1)
-            grip2.contacts[0] = PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi), PyKDL.Vector(-0.11,-0.03,0))
-            print gripDist(grip1, grip2)
-
-            # distance between identical grips rotated in com in 2 directions, one grip has a bit diffrent one contact rot
-            print "distance between identical grips rotated in com in 2 directions, one grip has a bit diffrent one contact rot"
-            grip2 = copy.deepcopy(grip1)
-            grip2.contacts[0] = PyKDL.Frame(PyKDL.Rotation.RotX(70.0/180.0*math.pi), PyKDL.Vector(-0.1,-0.03,0))
-            print gripDist(grip1, grip2)
-
-            # distance between identical grips rotated in conter of the object, with different com
-            print "distance between identical grips rotated in conter of the object, with different com"
-            obj_grasp.com = PyKDL.Vector(0,-0.01,0)
-            grip1.grasped_object = obj_grasp
-            grip2 = copy.deepcopy(grip1)
-            for i in range(0, len(grip2.contacts)):
-                grip2.contacts[i] = PyKDL.Frame(PyKDL.Rotation.RotX(-90.0/180.0*math.pi)) * grip2.contacts[i]
-            print gripDist(grip1, grip2)
-            obj_grasp.com = PyKDL.Vector(0,0,0)
 
             exit(0)
 
@@ -568,7 +411,7 @@ Class for grasp learning.
                 print "could not grasp the object with more than 1 finger"
                 break
 
-            grip = Grip(obj_grasp)
+            gr = grip.Grip(obj_grasp)
 
             for c in centers:
                 if c != None:
@@ -604,7 +447,7 @@ Class for grasp learning.
                     if PyKDL.dot( T_Br_O * fr * PyKDL.Vector(0,0,1), velma.T_B_W * velma.T_W_E * T_E_Fi3[finger] * PyKDL.Vector(1,-1,0) ) > 0:
                         fr = fr * PyKDL.Frame(PyKDL.Rotation.RotX(180.0/180.0*math.pi))
                     # add the contact to the grip description
-                    grip.addContact(fr)
+                    gr.addContact(fr)
                     m_id = self.pub_marker.publishFrameMarker(T_Br_O*fr, m_id)
                     rospy.sleep(1.0)
                 finger += 1
@@ -650,9 +493,9 @@ Class for grasp learning.
             else:
                 print "we can't see the object!"
 
-            grip.success()
+            gr.success()
 
-            grips_db.append( grip )
+            grips_db.append( gr )
 
             raw_input("Press Enter to open fingers...")
 
@@ -671,8 +514,8 @@ Class for grasp learning.
 
         # grasping loop end
 
-        for grip in grips_db:
-            grip.serializePrint()
+        for g in grips_db:
+            g.serializePrint()
 
         print "setting stiffness to very low value"
         velma.moveImpedance(velma.k_error, 0.5)
