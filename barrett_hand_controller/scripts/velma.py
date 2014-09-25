@@ -684,8 +684,8 @@ Class for velma robot.
                 self.qhl[3] = self.q_lf[6]
         if len(data.name) == 16:
             if data.name[2] == 'right_arm_0_joint':
-                self.q_t[0] = data.position[0]
-                self.q_t[1] = data.position[1]
+                self.qt[0] = data.position[0]
+                self.qt[1] = data.position[1]
                 self.qar[0] = data.position[2]
                 self.qar[1] = data.position[3]
                 self.qar[2] = data.position[4]
@@ -693,13 +693,13 @@ Class for velma robot.
                 self.qar[4] = data.position[6]
                 self.qar[5] = data.position[7]
                 self.qar[6] = data.position[8]
-                self.q_l[0] = data.position[9]
-                self.q_l[1] = data.position[10]
-                self.q_l[2] = data.position[11]
-                self.q_l[3] = data.position[12]
-                self.q_l[4] = data.position[13]
-                self.q_l[5] = data.position[14]
-                self.q_l[6] = data.position[15]
+                self.qal[0] = data.position[9]
+                self.qal[1] = data.position[10]
+                self.qal[2] = data.position[11]
+                self.qal[3] = data.position[12]
+                self.qal[4] = data.position[13]
+                self.qal[5] = data.position[14]
+                self.qal[6] = data.position[15]
 
                 if self.abort_on_q5_singularity and self.qar[5] > -self.abort_on_q5_singularity_angle and self.qar[5] < self.abort_on_q5_singularity_angle and not self.aborted_on_q5_singularity:
                     try:
@@ -782,7 +782,7 @@ Class for velma robot.
 
         self.q_rf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.q_lf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-        self.q_t = [0.0, 0.0]
+        self.qt = [0.0, 0.0]
         self.qar = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.qal = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.qhr = [0.0, 0.0, 0.0, 0.0]

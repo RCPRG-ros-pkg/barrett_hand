@@ -31,8 +31,8 @@ roslib.load_manifest('barrett_hand_controller')
 import rospy
 import tf
 
-import ar_track_alvar.msg
-from ar_track_alvar.msg import *
+import ar_track_alvar_msgs.msg
+from ar_track_alvar_msgs.msg import *
 from std_msgs.msg import *
 from sensor_msgs.msg import *
 from geometry_msgs.msg import *
@@ -339,11 +339,6 @@ class OpenraveInstance:
                         qhr = dof_values[20:24]
                     else:
                         qhr = qhr_list[i]
-                    print "qt: %s"%(qt)
-                    print "qal: %s"%(qal)
-                    print "qhl: %s"%(qhl)
-                    print "qar: %s"%(qar)
-                    print "qhr: %s"%(qhr)
                     dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
                     self.robot_rave.SetDOFValues(dof_values)
                     self.env.UpdatePublishedBodies()

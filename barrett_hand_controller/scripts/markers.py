@@ -404,8 +404,8 @@ def run_mark():
 
             tactile_tmx[sens].append( PyKDL.Frame( PyKDL.Rotation(halfside1, halfside2_prim, norm), PyKDL.Vector(pressure_info.sensor[sens].center[i].x, pressure_info.sensor[sens].center[i].y, pressure_info.sensor[sens].center[i].z) ) )
 
-    pub = rospy.Publisher('/' + prefix + '_hand/tactile_markers', MarkerArray)
-    tactileImagepub = rospy.Publisher('/' + prefix + '_hand/tactile_image', Image)
+    pub = rospy.Publisher('/' + prefix + '_hand/tactile_markers', MarkerArray, queue_size=100)
+    tactileImagepub = rospy.Publisher('/' + prefix + '_hand/tactile_image', Image, queue_size=100)
 
     tf_listener = tf.TransformListener()
     rospy.Subscriber('/' + prefix + '_hand/BHPressureState', BHPressureState, callback)

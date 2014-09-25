@@ -31,8 +31,8 @@ roslib.load_manifest('barrett_hand_controller')
 import rospy
 import tf
 
-import ar_track_alvar.msg
-from ar_track_alvar.msg import *
+import ar_track_alvar_msgs.msg
+from ar_track_alvar_msgs.msg import *
 from std_msgs.msg import *
 from sensor_msgs.msg import *
 from geometry_msgs.msg import *
@@ -443,8 +443,6 @@ class VelmaIkSolver:
         if len(traj_T_B_Ed) < 2:
             print "getTrajCost: wrong argument"
             return 1000000.0
-
-#simulateTrajectory(T_B_Einit, T_B_Ed, progress, q_start, T_T2_B)
 
         q_init = copy.copy(q_start)
         for i in range(0, 7):

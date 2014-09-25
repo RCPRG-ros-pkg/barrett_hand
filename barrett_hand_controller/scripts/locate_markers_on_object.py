@@ -31,8 +31,8 @@ roslib.load_manifest('barrett_hand_controller')
 import rospy
 import tf
 
-import ar_track_alvar.msg
-from ar_track_alvar.msg import *
+import ar_track_alvar_msgs.msg
+from ar_track_alvar_msgs.msg import *
 from std_msgs.msg import *
 from sensor_msgs.msg import *
 from geometry_msgs.msg import *
@@ -67,7 +67,7 @@ Class for marker localization.
 """
     def spin(self):
         # locate all markers on the object
-        if True:
+        if False:
             max_angle = 60.0/180.0*math.pi
             min_z = math.cos(max_angle)
             print "min_z: %s"%(min_z)

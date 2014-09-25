@@ -31,8 +31,8 @@ roslib.load_manifest('barrett_hand_controller')
 import rospy
 import tf
 
-import ar_track_alvar.msg
-from ar_track_alvar.msg import *
+import ar_track_alvar_msgs.msg
+from ar_track_alvar_msgs.msg import *
 from std_msgs.msg import *
 from sensor_msgs.msg import *
 from geometry_msgs.msg import *
@@ -159,7 +159,7 @@ Class for grasp learning.
         obj_box.addMarker( 7, PyKDL.Frame(PyKDL.Vector(-0.07, 0.085, 0.065)) )
 
         obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
-        obj_grasp_frames = [
+        obj_grasp_frames_old = [
         [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
         [19, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00785118489648,-0.00136981350282,-0.000184602454162,0.999968223709),PyKDL.Vector(0.14748831582,-0.00390004064458,0.00494675382036))],
         [20, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0108391070454,-0.00679278400361,-0.0154191552083,0.999799290606),PyKDL.Vector(0.289969171073,-0.00729932931459,0.00759828464719))],
@@ -174,6 +174,23 @@ Class for grasp learning.
         [29, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.730592084981,-0.0115053876764,-0.00159217841913,0.682715384612),PyKDL.Vector(0.296627722109,0.0526564873934,-0.0157362559562))],
         [30, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0107101025933,-0.707578018883,-0.00676540180519,0.706521670039),PyKDL.Vector(-0.0316984701649,0.00141765295049,-0.0308603633287))],
         [31, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00385143207656,0.706841586598,0.00284731518612,0.707355660699),PyKDL.Vector(0.319944660728,-0.00029327409029,-0.0292236368986))],
+        ]
+
+        obj_grasp_frames = [
+        [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
+        [19, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00165433105633,-0.00223969436551,0.00783500583865,0.999965429223),PyKDL.Vector(0.150364188592,0.00540315928786,0.00332539142516))],
+        [20, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00288819470565,0.000787875354111,-0.00584291384849,0.999978448739),PyKDL.Vector(0.283704103524,0.00072398461679,-0.00573581222652))],
+        [21, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.700515458788,0.00669571919817,-0.000414650985238,0.71360569463),PyKDL.Vector(0.00448758480338,-0.0246391219393,-0.0318239341873))],
+        [22, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.703637094621,0.0128037540093,-0.00696099928093,0.710410055845),PyKDL.Vector(0.147645037233,-0.0270235353887,-0.0319539994022))],
+        [23, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.705573146762,-0.0108101497697,0.0078757141097,0.708510866789),PyKDL.Vector(0.2869132353,-0.0311870916024,-0.0364408741191))],
+        [24, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999936222986,-0.00719147497613,-0.00856953614561,0.00154780136503),PyKDL.Vector(0.000967154696901,-0.000658291054497,-0.059361255947))],
+        [25, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999925422492,0.00698873688352,-0.00978855330626,0.00211925234593),PyKDL.Vector(0.139811416338,-0.00107135691589,-0.0658641046354))],
+        [26, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999573485418,0.0127628877053,-0.0151291896644,0.0214723907838),PyKDL.Vector(0.294537733385,0.0266765305375,-0.0716188295568))],
+        [27, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.715893512402,-0.00285901607723,0.00295541105269,0.698197372148),PyKDL.Vector(0.00499777040554,0.0411443197242,-0.0229397580848))],
+        [28, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.720365484604,-0.00848358345308,-0.00122745492272,0.693541700807),PyKDL.Vector(0.153434321293,0.0483251803469,-0.017733228985))],
+        [29, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.730806278242,-0.012226144189,-0.000233600920018,0.682475384546),PyKDL.Vector(0.299578008092,0.0554137486219,-0.0115267264344))],
+        [30, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00153631145759,-0.704471851921,-0.0141334264319,0.709589526314),PyKDL.Vector(-0.0328832398393,-0.000711552687509,-0.0280278186323))],
+        [31, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00648923236188,0.70344139916,-0.0037097168268,0.710713954987),PyKDL.Vector(0.320515478778,-0.000808849733968,-0.0336656231855))],
         ]
         T_M18_M19 = obj_grasp_frames[1][1]
         T_M19_Co = PyKDL.Frame(PyKDL.Vector(0,0,-0.03))
@@ -193,7 +210,7 @@ Class for grasp learning.
         velma_ikr = velmautils.VelmaIkSolver()
         velma_ikr.initIkSolver()
 
-        simulation_only = True
+        simulation_only = False
         # simulation
         if simulation_only:
             self.getMarkerPose = self.getMarkerPoseFake
@@ -255,9 +272,10 @@ Class for grasp learning.
         thread.start_new_thread(self.poseUpdaterThread, (None,1))
 
         if simulation_only:
+            # create the robot interface for simulation
             velma = VelmaSim(self.openrave, velma_ikr)
         else:
-            # create the robot interface
+            # create the robot interface for real hardware
             velma = Velma()
 
         self.openrave.addRobotInterface(velma)
