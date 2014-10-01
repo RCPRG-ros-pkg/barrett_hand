@@ -45,6 +45,7 @@ from tf.transformations import *
 import tf_conversions.posemath as pm
 from tf2_msgs.msg import *
 
+import random
 import PyKDL
 import math
 import numpy as np
@@ -53,6 +54,8 @@ from scipy import optimize
 
 from urdf_parser_py.urdf import URDF
 from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
+
+import dijkstra
 
 class MarkerPublisher:
     def __init__(self):
@@ -113,6 +116,7 @@ class MarkerPublisher:
         marker.color = ColorRGBA(r,g,b,0.5)
         m.markers.append(marker)
         self.pub_marker.publish(m)
+        return i+1
 
     def publishFrameMarker(self, T, base_id, scale=0.1, frame='torso_base', namespace='default'):
         self.publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(scale,0,0), base_id, 1, 0, 0, frame, namespace)
@@ -320,6 +324,25 @@ def estPlane(points_in):
 
     return PyKDL.Frame(PyKDL.Rotation(nx,ny,nz), mean_pt)
 
+def sampleMeshUnitTest(vertices, indices, pub_marker):
+    points = sampleMesh(vertices, indices, 0.002, [PyKDL.Vector(0.00,0,0.00)], 0.04)
+    print len(points)
+    m_id = 0
+    m_id = pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
+    raw_input("Press Enter to continue...")
+    rospy.sleep(5.0)
+    pt_list = []
+    for i in range(0, 20):
+        pt_list.append(PyKDL.Vector((1.0*i/20.0)*0.1-0.05, 0, 0))
+    points = sampleMesh(vertices, indices, 0.002, pt_list, 0.01)
+    print len(points)
+    m_id = 0
+    m_id = pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
+    rospy.sleep(1.0)
+    fr = estPlane(points)
+    m_id = pub_marker.publishFrameMarker(fr, m_id)
+    rospy.sleep(1.0)
+
 def meanOrientation(T):
     R = []
     for t in T:
@@ -362,6 +385,213 @@ def point_inside_polygon(x,y,poly):
         p1x,p1y = p2x,p2y
     return inside
 
+class WristCollisionAvoidance:
+
+    def getSectorWithMargin(self, sector):
+        return [self.q5_q6_restricted_area[sector][0]+self.margin, self.q5_q6_restricted_area[sector][1]-self.margin, self.q5_q6_restricted_area[sector][2]+self.margin, self.q5_q6_restricted_area[sector][3]-self.margin]
+
+    def __init__(self, prefix, q5_positive, margin):
+        self.margin = margin
+        if prefix == "right":
+            if q5_positive:
+                self.q5_q6_restricted_area = [
+                [0.0,1.92521262169,-2.89507389069,-1.38213706017],
+                [0.0,0.435783565044,-1.52231526375,2.22040915489],
+                [0.0,2.07619023323,0.932657182217,2.86872577667],
+                [0.0, 0.494, -1.885, -1.157],
+                [0.0, 0.750, 0.457, 2.564],
+                ]
+            else:
+                self.q5_q6_restricted_area = [
+                [-0.428265035152,0.0,-2.89507389069,-1.38213706017],
+                [-2.11473441124,0.0,-1.52231526375,2.22040915489],
+                [-0.819031119347,0.0,0.932657182217,2.86872577667],
+                [-0.609, 0.0, -1.885, -1.157],
+                [-1.061, 0.0, 0.457, 2.564],
+                ]
+            self.sectors_count = len(self.q5_q6_restricted_area)
+
+            self.gateways = []
+            for i in range(0, self.sectors_count):
+                r1 = self.getSectorWithMargin(i)
+                self.gateways.append({})
+                for j in range(0, self.sectors_count):
+                    if i == j:
+                        continue
+                    r2 = self.getSectorWithMargin(j)
+                    r_int = [max(r1[0], r2[0]), min(r1[1], r2[1]), max(r1[2], r2[2]), min(r1[3], r2[3])]
+                    # the two rectangles are intersecting
+                    if r_int[1] - r_int[0] > 0 and r_int[3] - r_int[2] > 0:
+                        self.gateways[-1][j] = [(r_int[0] + r_int[1]/2.0), (r_int[2] + r_int[3])/2.0]
+
+            # create the graph based on gateways
+            self.G = {}
+            for i in range(0, self.sectors_count):
+                for j in self.gateways[i].keys():
+                    neighbours = self.G.get(i, {})
+                    neighbours[j] = 1
+                    self.G[i] = neighbours
+                    neighbours = self.G.get(j, {})
+                    neighbours[i] = 1
+                    self.G[j] = neighbours
+
+        if self.q5_q6_restricted_area == None:
+            print "WristCollisionAvoidance ERROR: wrong prefix: %s"%(prefix)
+
+    def getQ5Q6SpaceSectors(self, q5, q6):
+        sectors = []
+        # x1,x2,y1,y2
+        for idx in range(0, self.sectors_count):
+            rect = self.getSectorWithMargin(idx)
+            if q5 >= rect[0] and q5 <= rect[1] and q6 >= rect[2] and q6 <= rect[3]:
+                sectors.append(idx)
+        return sectors
+
+    def getClosestQ5Q6SpaceSector(self, q5, q6):
+        sect = self.getQ5Q6SpaceSectors(q5, q6)
+        if len(sect) > 0:
+            return sect[0]
+        min_dist = 1000000.0
+        min_index = -1
+        # x1,x2,y1,y2
+        for idx in range(0, self.sectors_count):
+            rect = self.getSectorWithMargin(idx)
+            d5 = 1000000.0
+            d6 = 1000000.0
+            if q5 < rect[0]:
+                d5 = rect[0] - q5
+            elif q5 > rect[1]:
+                d5 = q5 - rect[1]
+            if q6 < rect[2]:
+                d6 = rect[2] - q6
+            elif q6 > rect[3]:
+                d6 = q6 - rect[3]
+            dist = min( d5, d6 )
+            if dist < min_dist:
+                min_dist = dist
+                min_index = idx
+        return min_index
+
+    def forceMoveQ5Q6ToSector(self, q5, q6, sector):
+        rect = self.getSectorWithMargin(sector)
+        r = PyKDL.Vector((rect[1]-rect[0])/2.0, (rect[3]-rect[2])/2.0, 0.0)
+        center = PyKDL.Vector((rect[0]+rect[1])/2.0, (rect[2]+rect[3])/2.0, 0.0)
+        q = PyKDL.Vector(q5, q6, 0.0)
+        v = q - center
+        if v.x() > r.x() or v.x() < -r.x():
+            f = math.fabs(r.x()/v.x())
+            v.Normalize()
+            v *= f
+        if v.y() > r.y() or v.y() < -r.y():
+            f = math.fabs(r.y()/v.y())
+            v.Normalize()
+            v *= f
+        return [v.x() + center.x(), v.y() + center.y()]
+
+    # returns [q5_diff q6_diff] with proper vector direction and with length of the whole path through sectors
+    def moveQ5Q6ToDest(self, q5, q6, q5_d, q6_d):
+        sect_d = self.getQ5Q6SpaceSectors(q5_d, q6_d)
+        # if destination is outside, force it to the nearest sector
+        if len(sect_d) == 0:
+            closest_sect_d = self.getClosestQ5Q6SpaceSector(q5_d, q6_d)
+            q5_d, q6_d = self.forceMoveQ5Q6ToSector(q5_d, q6_d, closest_sect_d)
+            sect_d = self.getQ5Q6SpaceSectors(q5_d, q6_d)
+
+        sect = self.getQ5Q6SpaceSectors(q5, q6)
+        if len(sect) == 0:
+            closest_sect = self.getClosestQ5Q6SpaceSector(q5, q6)
+            q5, q6 = self.forceMoveQ5Q6ToSector(q5, q6, closest_sect)
+            sect = self.getQ5Q6SpaceSectors(q5, q6)
+
+        same_sector = False
+        for s in sect:
+            if s in sect_d:
+                same_sector = True
+                break
+        if same_sector:
+            print "same_sect"
+            return [q5_d - q5, q6_d - q6]
+
+        path_len = 1000000
+        best_path = None
+        for s in sect:
+            for s_d in sect_d:
+                path = dijkstra.shortestPath(self.G, s, s_d)
+                if len(path) < path_len:
+                    path_len = len(path)
+                    best_path = path
+        print best_path
+        gateways_d = []
+        for idx in range(0, len(best_path)-1):
+            gateways_d.append( [self.gateways[best_path[idx]][best_path[idx+1]][0], self.gateways[best_path[idx]][best_path[idx+1]][1]] )
+
+        length = math.sqrt((gateways_d[0][0]-q5)*(gateways_d[0][0]-q5) + (gateways_d[0][1]-q6)*(gateways_d[0][1]-q6))
+        first_move_len = copy.copy(length)
+        for idx in range(0, len(gateways_d)-1):
+            length += math.sqrt((gateways_d[idx][0]-gateways_d[idx+1][0])*(gateways_d[idx][0]-gateways_d[idx+1][0]) + (gateways_d[idx][1]-gateways_d[idx+1][1])*(gateways_d[idx][1]-gateways_d[idx+1][1]))
+        length += math.sqrt((gateways_d[-1][0]-q5_d)*(gateways_d[-1][0]-q5_d) + (gateways_d[-1][1]-q6_d)*(gateways_d[-1][1]-q6_d))
+
+        return [length * (gateways_d[0][0] - q5) / first_move_len, length * (gateways_d[0][1] - q6) / first_move_len]
+
+    # returns trajectory for q5 and q6 and its length
+    def moveQ5Q6ToDestTraj(self, q5_i, q6_i, q5_d, q6_d, diff_max):
+        sect_d = self.getQ5Q6SpaceSectors(q5_d, q6_d)
+        # if destination is outside, force it to the nearest sector
+        if len(sect_d) == 0:
+            print "moveQ5Q6ToDestTraj: q_dest is outside space: %s"%([q5_d, q6_d])
+            return None
+        sect = self.getQ5Q6SpaceSectors(q5_i, q6_i)
+        if len(sect) == 0:
+            print "moveQ5Q6ToDestTraj: q_init is outside space: %s"%([q5_i, q6_i])
+            return None
+
+        same_sector = False
+        for s in sect:
+            if s in sect_d:
+                same_sector = True
+                break
+        if same_sector:
+            length = math.sqrt((q5_d - q5_i)*(q5_d - q5_i) + (q6_d - q6_i)*(q6_d - q6_i))
+            steps = int(length/diff_max)
+            if steps < 2:
+                steps = 2
+            q5_traj = np.linspace(q5_i, q5_d, steps)
+            q6_traj = np.linspace(q6_i, q6_d, steps)
+            traj = []
+            for i in range(0, steps):
+                traj.append( [q5_traj[i], q6_traj[i]] )
+            return traj, length
+
+        path_len = 1000000
+        best_path = None
+        for s in sect:
+            for s_d in sect_d:
+                path = dijkstra.shortestPath(self.G, s, s_d)
+                if len(path) < path_len:
+                    path_len = len(path)
+                    best_path = path
+
+        gateways_d = [[q5_i,q6_i]]
+        for idx in range(0, len(best_path)-1):
+            gateways_d.append( [self.gateways[best_path[idx]][best_path[idx+1]][0], self.gateways[best_path[idx]][best_path[idx+1]][1]] )
+        gateways_d.append([q5_d,q6_d])
+
+        traj = []
+
+        total_length = 0.0
+        for idx in range(0, len(gateways_d)-1):
+            length = math.sqrt((gateways_d[idx][0]-gateways_d[idx+1][0])*(gateways_d[idx][0]-gateways_d[idx+1][0]) + (gateways_d[idx][1]-gateways_d[idx+1][1])*(gateways_d[idx][1]-gateways_d[idx+1][1]))
+            total_length += length
+            steps = int(length/diff_max)
+            if steps < 2:
+                steps = 2
+            q5_traj = np.linspace(gateways_d[idx][0], gateways_d[idx+1][0], steps)
+            q6_traj = np.linspace(gateways_d[idx][1], gateways_d[idx+1][1], steps)
+            for i in range(0, steps):
+                traj.append( [q5_traj[i], q6_traj[i]] )
+            
+        return traj, total_length
+
 class VelmaIkSolver:
     def __init__(self):
         pass
@@ -392,10 +622,11 @@ class VelmaIkSolver:
         self.q_max = PyKDL.JntArray(7)
         self.q_limit = 0.26
         self.q_min[0] = -2.96 + self.q_limit
-        self.q_min[1] = -2.09 + self.q_limit
+#        self.q_min[1] = -2.09 + self.q_limit
+        self.q_min[1] = 0.1
         self.q_min[2] = -2.96 + self.q_limit
-#        self.q_min[3] = -2.09 + self.q_limit
-        self.q_min[3] = 0.1    # constraint on elbow
+        self.q_min[3] = -2.09 + self.q_limit
+#        self.q_min[3] = 0.1    # constraint on elbow
         self.q_min[4] = -2.96 + self.q_limit
         self.q_min[5] = -2.09 + self.q_limit
         self.q_min[6] = -2.96 + self.q_limit
@@ -403,6 +634,7 @@ class VelmaIkSolver:
         self.q_max[0] = 0.2    # constraint on first joint to avoid head hitting
         self.q_max[1] = 2.09 - self.q_limit
         self.q_max[2] = 2.96 - self.q_limit
+#        self.q_max[2] = 0.0
         self.q_max[3] = 2.09 - self.q_limit
         self.q_max[4] = 2.96 - self.q_limit
         self.q_max[5] = 2.09 - self.q_limit
@@ -410,12 +642,38 @@ class VelmaIkSolver:
         self.fk_solver = PyKDL.ChainFkSolverPos_recursive(self.chain)
         self.vel_ik_solver = PyKDL.ChainIkSolverVel_pinv(self.chain)
         self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
-#        self.singularity_angle = 15.0/180.0*math.pi
 
-    def simulateTrajectory(self, T_B_Einit, T_B_Ed, progress, q_start, T_T2_B):
+        self.q_min_no_sing = []
+        self.q_max_no_sing = []
+        self.ik_solver_no_sing = []
+        self.wrist_collision_avoidance = []
+#        for q1_lim in [(self.q_min[1],0.0),(0.0, self.q_max[1])]:
+        if True:
+            for q3_lim in [(self.q_min[3],-10.0/180.0*math.pi),(10.0/180.0*math.pi, self.q_max[3])]:
+                for q5_lim in [(self.q_min[5],0.0),(0.0, self.q_max[5])]:
+                    self.q_min_no_sing.append(PyKDL.JntArray(7))
+                    self.q_max_no_sing.append(PyKDL.JntArray(7))
+                    for i in range(0, 7):
+                        self.q_min_no_sing[-1][i] = copy.copy(self.q_min[i])
+                        self.q_max_no_sing[-1][i] = copy.copy(self.q_max[i])
+#                    self.q_min_no_sing[-1][1] = q1_lim[0]
+#                    self.q_max_no_sing[-1][1] = q1_lim[1]
+                    self.q_min_no_sing[-1][3] = q3_lim[0]
+                    self.q_max_no_sing[-1][3] = q3_lim[1]
+                    self.q_min_no_sing[-1][5] = q5_lim[0]
+                    self.q_max_no_sing[-1][5] = q5_lim[1]
+                    self.ik_solver_no_sing.append(PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min_no_sing[-1], self.q_max_no_sing[-1], self.fk_solver, self.vel_ik_solver, 100))
+                    self.wrist_collision_avoidance.append(WristCollisionAvoidance("right", q5_lim[0]+q5_lim[1] > 0, 5.0/180.0*math.pi))
+
+        self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
+
+    def simulateTrajectory(self, T_B_Einit, T_B_Ed, progress, q_start, T_T2_B, ik_solver=None):
         if progress < 0.0 or progress > 1.0:
             print "simulateTrajectory: bad progress value: %s"%(progress)
             return None
+
+        if ik_solver == None:
+            ik_solver = self.ik_solver
 
         q_end = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         q_init = PyKDL.JntArray(7)
@@ -432,7 +690,7 @@ class VelmaIkSolver:
         T_B_E_diff = PyKDL.diff(T_B_Einit, T_B_Ed, 1.0)
         T_B_Ei = PyKDL.addDelta(T_B_Einit, T_B_E_diff, progress)
         T_T2_Ei = T_T2_B * T_B_Ei
-        status = self.ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
+        status = ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
         if status != 0:
             return None, None
         for i in range(0, 7):
@@ -492,4 +750,344 @@ class VelmaIkSolver:
 #            for i in range(0, 7):
 #                q_end[i] = q_out[i]
         return cost
+
+    def getAllDistinctConfigurations(self, T_B_Ed, T_T2_B):
+        T_T2_Ed = T_T2_B * T_B_Ed
+        ret = []
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            for tries in range(0, 10):
+                q_init = PyKDL.JntArray(7)
+                q_out = PyKDL.JntArray(7)
+                for i in range(0,7):
+                    q_init[i] = random.uniform(self.q_min_no_sing[ik_solver_idx][i], self.q_max_no_sing[ik_solver_idx][i])
+                status = self.ik_solver_no_sing[ik_solver_idx].CartToJnt(q_init, T_T2_Ed, q_out)
+                if status == 0:
+                    ret.append( [q_out[0], q_out[1], q_out[2], q_out[3], q_out[4], q_out[5], q_out[6]] )
+                    break
+        return ret
+
+    def planTrajectoryInOneSubspace(self, T_B_Einit, T_B_Ed, T_W_E, q_start, T_T2_B):
+        # get the ik solver for giver subspace
+        ik_solver = None
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            ik_solver_ok = True
+            for i in range(0,7):
+                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    ik_solver_ok = False
+                    break
+            if ik_solver_ok:
+                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
+                break
+        if ik_solver == None:
+            print "could not find proper ik solver for q_start: %s"%(q_start)
+            return None, None
+
+        T_T2_Ed = T_T2_B * T_B_Ed
+        min_cost = 1000000.0
+        best_q_out = None
+        for tries in range(0, 20):
+            q_init = PyKDL.JntArray(7)
+            q_out = PyKDL.JntArray(7)
+            for i in range(0,7):
+                q_init[i] = random.uniform(self.q_min_no_sing[ik_solver_idx][i], self.q_max_no_sing[ik_solver_idx][i])
+            status = ik_solver.CartToJnt(q_init, T_T2_Ed, q_out)
+            if len(self.wrist_collision_avoidance[ik_solver_idx].getQ5Q6SpaceSectors(q_out[5], q_out[6])) == 0:
+                status = 10
+
+            if status == 0:
+                cost = 0.0
+                for i in range(0,7):
+                    low_joint_penalty = (6.0-i)/6.0
+                    distance_penalty = (q_out[i]-q_start[i])*(q_out[i]-q_start[i])
+                    dist_to_limit = min( math.fabs(q_out[i]-self.q_min_no_sing[ik_solver_idx][i]), math.fabs(q_out[i]-self.q_max_no_sing[ik_solver_idx][i]) )
+                    close_limit_penalty = dist_to_limit
+                    cost += low_joint_penalty * distance_penalty * close_limit_penalty
+#                print "cost: %s"%(cost)
+                if cost < min_cost:
+                    min_cost = cost
+                    best_q_out = q_out
+
+        if min_cost > 1000.0:
+            print "could not find ik solution for end pose"
+            return None, None
+
+        q_diff = []
+        # get max diff
+        max_diff = -10.0
+        max_idx = -1
+        for i in range(0,7):
+            diff = best_q_out[i]-q_start[i]
+            q_diff.append(diff)
+            if math.fabs(diff) > max_diff:
+                max_diff = math.fabs(diff)
+                max_idx = i
+
+        print "q_start: %s"%(q_start)
+        print "q_out: %s"%(best_q_out)
+
+        print "q_diff: %s"%(q_diff)
+
+        return max_idx, best_q_out[max_idx]-q_start[max_idx]
+
+    def isLinearTrajectoryPossibleInOneSubspace(self, T_B_Einit, T_B_Ed, q_start, T_T2_B):
+        # get the ik solver for giver subspace
+        ik_solver = None
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            ik_solver_ok = True
+            for i in range(0,7):
+                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    ik_solver_ok = False
+                    break
+            if ik_solver_ok:
+                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
+                break
+        if ik_solver == None:
+            print "could not find proper ik solver for q_start: %s"%(q_start)
+            return None, None
+
+        diff = PyKDL.diff(T_B_Einit, T_B_Ed, 1.0)
+
+        if diff.rot.Norm() > 30.0/180.0*math.pi or diff.vel.Norm() > 0.1:
+            return None, None
+
+        success = True
+        T_T2_Ed = T_T2_B * T_B_Ed
+        for progress in np.linspace(0.0, 1.0, 25):
+            q_end, T_B_Ei = self.simulateTrajectory(T_B_Einit, T_B_Ed, progress, q_start, T_T2_B, ik_solver=ik_solver)
+            if q_end == None:
+                success = False
+                break
+            if len(self.wrist_collision_avoidance[ik_solver_idx].getQ5Q6SpaceSectors(q_end[5], q_end[6])) == 0:
+                success = False
+                break
+        return success, q_end
+
+    def isTrajectoryPossibleInOneSubspace(self, T_B_Ed, q_start, T_T2_B):
+        # get the ik solver for giver subspace
+        ik_solver = None
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            ik_solver_ok = True
+            for i in range(0,7):
+                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    ik_solver_ok = False
+                    break
+            if ik_solver_ok:
+                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
+                break
+        if ik_solver == None:
+            print "could not find proper ik solver for q_start: %s"%(q_start)
+            return None
+
+        q5q6_problem = 0
+        ik_problem = 0
+        T_T2_Ed = T_T2_B * T_B_Ed
+        for tries in range(0, 10):
+            q_init = PyKDL.JntArray(7)
+            q_out = PyKDL.JntArray(7)
+            for i in range(0,7):
+                q_init[i] = random.uniform(self.q_min_no_sing[ik_solver_idx][i]+0.1, self.q_max_no_sing[ik_solver_idx][i]-0.1)
+            status = ik_solver.CartToJnt(q_init, T_T2_Ed, q_out)
+            if status != 0:
+                ik_problem += 1
+            if len(self.wrist_collision_avoidance[ik_solver_idx].getQ5Q6SpaceSectors(q_out[5], q_out[6])) == 0:
+                status = 10
+                q5q6_problem += 1
+            for i in range(0,7):
+                if q_out[i] < self.q_min_no_sing[ik_solver_idx][i]+0.1 or q_out[i] > self.q_max_no_sing[ik_solver_idx][i]-0.1:
+                    status = 20
+                    break
+
+            if status == 0:
+                return [q_out[0], q_out[1], q_out[2], q_out[3], q_out[4], q_out[5], q_out[6]]
+                break
+#        print "isTrajectoryPossibleInOneSubspace: ik_problem: %s   q5q6_problem: %s"%(ik_problem, q5q6_problem)
+        return None
+
+    def incrementTrajectoryInOneSubspace(self, T_B_Einit, T_B_Ed, T_W_E, q_start, T_T2_B, q_end=None):
+        # get the ik solver for giver subspace
+        ik_solver = None
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            ik_solver_ok = True
+            for i in range(0,7):
+                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    ik_solver_ok = False
+                    break
+            if ik_solver_ok:
+                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
+                break
+        if ik_solver == None:
+            print "could not find proper ik solver for q_start: %s"%(q_start)
+            return None
+
+        if q_end != None:
+            q_end_ok = True
+            for i in range(0,7):
+                if q_end[i] < self.q_min_no_sing[ik_solver_idx][i] or q_end[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    q_end_ok = False
+                    break
+            if not q_end_ok:
+                print "q_start and q_end are in diffrent subspaces"
+                return None
+            best_q_out = q_end
+        else:
+            q5q6_problem = 0
+            ik_problem = 0
+            T_T2_Ed = T_T2_B * T_B_Ed
+            min_cost = 1000000.0
+            best_q_out = None
+            for tries in range(0, 20):
+                q_init = PyKDL.JntArray(7)
+                q_out = PyKDL.JntArray(7)
+                for i in range(0,7):
+                    q_init[i] = random.uniform(self.q_min_no_sing[ik_solver_idx][i], self.q_max_no_sing[ik_solver_idx][i])
+                status = ik_solver.CartToJnt(q_init, T_T2_Ed, q_out)
+                if status != 0:
+                    ik_problem += 1
+                elif len(self.wrist_collision_avoidance[ik_solver_idx].getQ5Q6SpaceSectors(q_out[5], q_out[6])) == 0:
+                    q5q6_problem += 1
+                    status = 10
+
+                if status == 0:
+                    cost = 0.0
+                    for i in range(0,7):
+                        low_joint_penalty = (6.0-i)/6.0
+                        distance_penalty = (q_out[i]-q_start[i])*(q_out[i]-q_start[i])
+                        dist_to_limit = min( math.fabs(q_out[i]-self.q_min_no_sing[ik_solver_idx][i]), math.fabs(q_out[i]-self.q_max_no_sing[ik_solver_idx][i]) )
+                        close_limit_penalty = dist_to_limit
+                        cost += low_joint_penalty * distance_penalty * close_limit_penalty
+                    if cost < min_cost:
+                        min_cost = cost
+                        best_q_out = q_out
+
+            if min_cost > 1000.0:
+                print "incrementTrajectoryInOneSubspace: could not find ik solution for end pose: ik_problem: %s, q5q6_problem: %s"%(ik_problem, q5q6_problem)
+                print "   q_start: %s"%(q_start)
+                print "   q_limit: %s"%(q_start)
+                return None
+
+        q_diff = []
+        for i in range(0,7):
+            diff = best_q_out[i]-q_start[i]
+            q_diff.append(diff)
+        q_diff[5], q_diff[6] = self.wrist_collision_avoidance[ik_solver_idx].moveQ5Q6ToDest(q_start[5], q_start[6], best_q_out[5], best_q_out[6])
+
+        # get max diff
+        max_diff = -10.0
+        for diff in q_diff:
+            if math.fabs(diff) > max_diff:
+                max_diff = math.fabs(diff)
+
+        # limit the maximum speed
+        q_vel_limit = 30.0/180.0*math.pi
+        time_d = 0.1
+        vel_factor = q_vel_limit/max_diff
+
+        # calculate the next end effector pose
+        q_dest = PyKDL.JntArray(7)
+        for i in range(0,7):
+            q_dest[i] = q_start[i] + q_diff[i] * vel_factor * time_d
+
+#        print "q_start"
+#        print q_start
+
+        q_dest_norm = []
+        for i in range(0, 7):
+            q_dest_norm.append((q_dest[i]-self.q_min_no_sing[ik_solver_idx][i])/(self.q_max_no_sing[ik_solver_idx][i]-self.q_min_no_sing[ik_solver_idx][i]))
+
+        q_end_norm = []
+        for i in range(0, 7):
+            q_end_norm.append((q_end[i]-self.q_min_no_sing[ik_solver_idx][i])/(self.q_max_no_sing[ik_solver_idx][i]-self.q_min_no_sing[ik_solver_idx][i]))
+
+#        print "q_dest_norm: %s"%(q_dest_norm)
+#        print "q_end_norm: %s"%(q_end_norm)
+#        print "q_dest"
+#        print [q_dest[0], q_dest[1], q_dest[2], q_dest[3], q_dest[4], q_dest[5], q_dest[6]]
+
+        print "q_diff"
+        print q_diff
+
+#        if getQ5Q6SpaceSector(q_start[5], q_start[6], margin=10.0/180.0*math.pi) < 0:
+#            print "q5q6 collision for q_start"
+
+#        if getQ5Q6SpaceSector(q_dest[5], q_dest[6], margin=10.0/180.0*math.pi) < 0:
+#            closest_sector = getClosestQ5Q6SpaceSector(q_dest[5], q_dest[6], margin=10.0/180.0*math.pi)
+#            print [q_dest[5], q_dest[6]]
+#            q_dest[5], q_dest[6] = forceMoveQ5Q6ToSector(q_dest[5], q_dest[6], closest_sector, margin=10.0/180.0*math.pi)
+#            print [q_dest[0], q_dest[1], q_dest[2], q_dest[3], q_dest[4], q_dest[5], q_dest[6]]
+#            print [q_dest[5], q_dest[6]]
+#            print "q5q6 collision for q_dest"
+
+
+        T_T2_Ed = PyKDL.Frame()
+        self.fk_solver.JntToCart(q_dest, T_T2_Ed)
+        T_B_Ed = T_T2_B.Inverse() * T_T2_Ed
+
+        return T_B_Ed
+
+    def generateJointTrajectoryInOneSubspace(self, q_start, q_end, q_vel_limit):
+        # get the ik solver for giver subspace
+        ik_solver = None
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            ik_solver_ok = True
+            for i in range(0,7):
+                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    ik_solver_ok = False
+                    break
+            if ik_solver_ok:
+                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
+                break
+        if ik_solver == None:
+            print "could not find proper ik solver for q_start: %s"%(q_start)
+            return None
+
+        q_end_ok = True
+        for i in range(0,7):
+            if q_end[i] < self.q_min_no_sing[ik_solver_idx][i] or q_end[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                q_end_ok = False
+                break
+        if not q_end_ok:
+            print "q_start and q_end are in diffrent subspaces"
+            return None
+
+        traj_q5q6, len_q5q6 = self.wrist_collision_avoidance[ik_solver_idx].moveQ5Q6ToDestTraj(q_start[5], q_start[6], q_end[5], q_end[6], 0.1)
+ 
+        q_diff = []
+        # get max diff
+        for i in range(0,7):
+            diff = q_end[i]-q_start[i]
+            q_diff.append(diff)
+        q_diff[5] = len_q5q6
+        q_diff[6] = len_q5q6
+        max_diff = -10.0
+        for diff in q_diff:
+            if math.fabs(diff) > max_diff:
+                max_diff = math.fabs(diff)
+
+        # limit the maximum speed
+#        q_vel_limit = 30.0/180.0*math.pi
+        time_d = 0.01
+        time = max_diff/q_vel_limit
+
+        steps = int(time/time_d)
+        if steps < 2:
+            steps = 2
+
+        q_traj = []
+        for i in range(0,5):
+            q_traj.append(np.linspace(q_start[i], q_end[i], steps))
+
+        traj_q5q6, len_q5q6 = self.wrist_collision_avoidance[ik_solver_idx].moveQ5Q6ToDestTraj(q_start[5], q_start[6], q_end[5], q_end[6], len_q5q6/steps)
+
+        traj = []
+        for idx in range(0, max(steps, len(traj_q5q6))):
+            if idx < steps and idx < len(traj_q5q6):
+                traj.append( [q_traj[0][idx], q_traj[1][idx], q_traj[2][idx], q_traj[3][idx], q_traj[4][idx], traj_q5q6[idx][0], traj_q5q6[idx][1] ] )
+            elif idx < steps:
+                traj.append( [q_traj[0][idx], q_traj[1][idx], q_traj[2][idx], q_traj[3][idx], q_traj[4][idx], traj_q5q6[-1][0], traj_q5q6[-1][1] ] )
+            else:
+                traj.append( [q_traj[0][-1], q_traj[1][-1], q_traj[2][-1], q_traj[3][-1], q_traj[4][-1], traj_q5q6[idx][0], traj_q5q6[idx][1] ] )
+
+        times = np.linspace(0.0, time, steps)
+
+        return traj, times
 

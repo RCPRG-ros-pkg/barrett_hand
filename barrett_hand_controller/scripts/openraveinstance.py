@@ -59,6 +59,7 @@ from scipy import optimize
 from openravepy import *
 from optparse import OptionParser
 from openravepy.misc import OpenRAVEGlobalArguments
+import velmautils
 
 class OpenraveInstance:
 
@@ -69,11 +70,13 @@ class OpenraveInstance:
         self.T_World_Br = T_World_Br
         self.listener = tf.TransformListener();
         self.kinBodies = []
+        self.visibility_surface_samples_dict = {}
+        self.robot_rave_update_lock = Lock()
 
     def addRobotInterface(self, robot):
         self.robot = robot
 
-    def KDLToOrocos(self, T):
+    def KDLToOpenrave(self, T):
         ret = numpy.array([
         [T.M[0,0], T.M[0,1], T.M[0,2], T.p.x()],
         [T.M[1,0], T.M[1,1], T.M[1,2], T.p.y()],
@@ -81,7 +84,7 @@ class OpenraveInstance:
         [0, 0, 0, 1]])
         return ret
 
-    def orocosToKDL(self, T):
+    def OpenraveToKDL(self, T):
         rot = PyKDL.Rotation(T[0][0],T[0][1],T[0][2],T[1][0],T[1][1],T[1][2],T[2][0],T[2][1],T[2][2])
         pos = PyKDL.Vector(T[0][3], T[1][3], T[2][3])
         return PyKDL.Frame(rot, pos)
@@ -91,12 +94,28 @@ class OpenraveInstance:
         body.SetName(name)
         body.InitFromBoxes(numpy.array([[0,0,0,0.5*x_size,0.5*y_size,0.5*z_size]]),True)
         self.env.Add(body,True)
+#        self.env.CheckCollision(self.robot_rave,body)
+#        self.env.GetCollisionChecker().InitKinBody(body)
+
+    def addCamera(self, name, fov_x, fov_y, dist):
+        body = RaveCreateKinBody(self.env,'')
+        body.SetName(name)
+        boxes = [
+        [0,0,0,0.02,0.02,0.02],
+        [dist*math.tan(fov_x/2.0),dist*math.tan(fov_y/2.0),dist,0.01,0.01,0.01],
+        [-dist*math.tan(fov_x/2.0),dist*math.tan(fov_y/2.0),dist,0.01,0.01,0.01],
+        [-dist*math.tan(fov_x/2.0),-dist*math.tan(fov_y/2.0),dist,0.01,0.01,0.01],
+        [dist*math.tan(fov_x/2.0),-dist*math.tan(fov_y/2.0),dist,0.01,0.01,0.01],
+        ]
+        body.InitFromBoxes(numpy.array(boxes),True)
+        self.env.Add(body,True)
+#        self.env.CheckCollision(self.robot_rave,body)
 
     def updatePose(self, name, T_Br_Bo):
         with self.env:
             body = self.env.GetKinBody(name)
             if body != None:
-                body.SetTransform(self.KDLToOrocos(self.T_World_Br*T_Br_Bo))
+                body.SetTransform(self.KDLToOpenrave(self.T_World_Br*T_Br_Bo))
             else:
                 print "openrave: could not find body: %s"%(name)
                 self.env.UpdatePublishedBodies()
@@ -104,11 +123,12 @@ class OpenraveInstance:
     def getPose(self, name):
         body = self.env.GetKinBody(name)
         if body != None:
-            return self.T_World_Br.Inverse() * self.orocosToKDL(body.GetTransform())
+            return self.T_World_Br.Inverse() * self.OpenraveToKDL(body.GetTransform())
         return None
 
     def getLinkPose(self, name, qt=None, qar=None, qal=None, qhr=None, qhl=None):
         if qt != None or qar != None or qal != None or qhr != None or qhl != None:
+            self.robot_rave_update_lock.acquire()
             with self.robot_rave.CreateRobotStateSaver():
                 with self.env:
                     self.robot_rave.GetController().Reset(0)
@@ -128,17 +148,30 @@ class OpenraveInstance:
                     self.env.UpdatePublishedBodies()
                     link = self.robot_rave.GetLink(name)
                     if link != None:
-                        return self.T_World_Br.Inverse() * self.orocosToKDL(link.GetTransform())
+                        T_World_L = self.OpenraveToKDL(link.GetTransform())
+                        self.robot_rave_update_lock.release()
+                        return self.T_World_Br.Inverse() * T_World_L
+                    else:
+                        self.robot_rave_update_lock.release()
+                        return None
         else:
             link = self.robot_rave.GetLink(name)
             if link != None:
-                return self.T_World_Br.Inverse() * self.orocosToKDL(link.GetTransform())
+                return self.T_World_Br.Inverse() * self.OpenraveToKDL(link.GetTransform())
         return None
+
+    def setCamera(self, T_Br_C):
+        T_World_C = self.T_World_Br * T_Br_C
+        self.env.GetViewer().SetCamera(self.KDLToOpenrave(T_World_C), 1.0)
 
     def main(self,env,options):
         try:
             self.env = env
             self.robot_rave = env.ReadRobotXMLFile('robots/velma_col.robot.xml')
+
+            # ODE does not support distance measure
+            #self.env.GetCollisionChecker().SetCollisionOptions(CollisionOptions.Distance|CollisionOptions.Contacts)
+            self.env.GetCollisionChecker().SetCollisionOptions(CollisionOptions.Contacts)
 
             arms_joint_names = [
             "left_arm_0_joint",
@@ -161,7 +194,7 @@ class OpenraveInstance:
                 print j
 
             # apply soft limits
-            q_soft_limit = 0.26*0.5
+            q_soft_limit = 0.26*0.2
             for name in arms_joint_names:
                 joint = self.robot_rave.GetJoint(name)
                 lower, upper = joint.GetLimits()
@@ -183,7 +216,7 @@ class OpenraveInstance:
             joint = self.robot_rave.GetJoint("left_arm_3_joint")
             lower, upper = joint.GetLimits()
             upper[0] = -10.0/180.0*math.pi
-            joint.SetLimits(lower, upper)
+#            joint.SetLimits(lower, upper)
             joint = self.robot_rave.GetJoint("right_arm_3_joint")
             lower, upper = joint.GetLimits()
             lower[0] = 10.0/180.0*math.pi
@@ -206,17 +239,11 @@ class OpenraveInstance:
             lower, upper = joint.GetLimits()
             print lower, upper
 
-#            print "reading gripper..."
-#            self.gripper_rave = env.ReadRobotXMLFile('robots/barretthand_col.robot.xml')
-#            print "adding gripper..."
-#            env.Add(self.gripper_rave)
-#            print "gripper ok"
-
             self.robot_rave.SetActiveManipulator('right_arm')
 
-            ikmodel = databases.inversekinematics.InverseKinematicsModel(self.robot_rave,iktype=IkParameterizationType.Transform6D)
-            if not ikmodel.load():
-                ikmodel.autogenerate()
+            self.ikmodel = databases.inversekinematics.InverseKinematicsModel(self.robot_rave,iktype=IkParameterizationType.Transform6D)
+            if not self.ikmodel.load():
+                self.ikmodel.autogenerate()
 
             links = self.robot_rave.GetLinks()
             # 31   <link:right_HandPalmLink (31), parent=Velma>
@@ -238,19 +265,18 @@ class OpenraveInstance:
             cam_z.Normalize()
             cam_T = PyKDL.Frame(PyKDL.Rotation(cam_x,cam_y,cam_z), cam_pos)
             
-            env.GetViewer().SetCamera(self.KDLToOrocos(cam_T), focalDistance)
+            env.GetViewer().SetCamera(self.KDLToOpenrave(cam_T), focalDistance)
+
+#            self.robot_rave_update_lock.acquire()
+#            self.robot_rave_update_lock.release()
 
             while not rospy.is_shutdown():
                 self.rolling = True
                 if self.robot != None:
-#                    q_lf = [self.robot.q_lf[0], self.robot.q_lf[1], self.robot.q_lf[4], self.robot.q_lf[6]]
-#                    q_rf = [self.robot.q_rf[0], self.robot.q_rf[1], self.robot.q_rf[4], self.robot.q_rf[6]]
-#                    dof_values = self.robot.q_t + self.robot.q_l + q_lf + self.robot.q_r + q_rf
-
+                    self.robot_rave_update_lock.acquire()
                     dof_values = self.robot.qt + self.robot.qal + self.robot.qhl + self.robot.qar + self.robot.qhr
-
                     self.robot_rave.SetDOFValues(dof_values)
-
+                    self.robot_rave_update_lock.release()
                 rospy.sleep(0.1)
         finally:
             self.rolling = False
@@ -292,7 +318,7 @@ class OpenraveInstance:
         return validgrasps,validindices
 
     def getGraspTransform(self, grasp, collisionfree=False):
-        return self.T_World_Br.Inverse()*self.orocosToKDL( self.gmodel.getGlobalGraspTransform(grasp,collisionfree=collisionfree) )
+        return self.T_World_Br.Inverse()*self.OpenraveToKDL( self.gmodel.getGlobalGraspTransform(grasp,collisionfree=collisionfree) )
 
     def showGrasp(self, grasp):
         self.gmodel.showgrasp(grasp, collisionfree=True, useik=True)
@@ -313,7 +339,10 @@ class OpenraveInstance:
         elif qhl_list != None:
             length = len(qhl_list)
         if length < 1:
-            return
+            return None
+        report = CollisionReport()
+        first_collision = None
+        self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
             with self.env:
                 for i in range(0, length):
@@ -342,7 +371,14 @@ class OpenraveInstance:
                     dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
                     self.robot_rave.SetDOFValues(dof_values)
                     self.env.UpdatePublishedBodies()
+                    check = self.env.CheckCollision(self.robot_rave, report)
+                    if first_collision == None and report.numCols > 0:
+                        first_collision = i
+                        print "first collision at step %s"%(i)
+#                    print "contacts: %s  %s"%(len(report.contacts), report.numCols)
                     rospy.sleep(time_d)
+        self.robot_rave_update_lock.release()
+        return first_collision
 
     def getMesh(self, name):
         body = self.env.GetKinBody(name)
@@ -353,6 +389,7 @@ class OpenraveInstance:
         return col.vertices, col.indices
 
     def getFinalConfig(self, grasp):
+        self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
             with self.env:
                 contacts,finalconfig,mindist,volume = self.gmodel.runGraspFromTrans(grasp)
@@ -362,5 +399,108 @@ class OpenraveInstance:
                 finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerThreeKnuckleTwoJoint")],
                 finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleOneJoint")],
                 ]
+        self.robot_rave_update_lock.release()
         return hand_config
+
+    def grab(self, name):
+        self.robot_rave.Grab( self.env.GetKinBody(name) )
+
+    def getVisibility(self, name, T_Br_C, qt=None, qar=None, qal=None, qhr=None, qhl=None, pub_marker=None, fov_x=None, fov_y=None, min_dist=0.01):
+        if name in self.visibility_surface_samples_dict:
+            points = self.visibility_surface_samples_dict[name]
+        else:
+            vertices, indices = self.getMesh(name)
+            points = velmautils.sampleMesh(vertices, indices, 0.025, [PyKDL.Vector()], 1.0)
+            print "points for visibility test: %s"%(len(points))
+            self.visibility_surface_samples_dict[name] = points
+        T_World_C = self.T_World_Br * T_Br_C
+        T_C_World = T_World_C.Inverse()
+        R_C_World = PyKDL.Frame(T_C_World.M)
+        cam_pt_in_World = T_World_C * PyKDL.Vector()
+        if fov_x != None and fov_y != None:
+            tg_fov_x = math.tan(fov_x/2.0)
+            tg_fov_y = math.tan(fov_y/2.0)
+        m_id = 0
+        if qt != None or qar != None or qal != None or qhr != None or qhl != None:
+            self.robot_rave_update_lock.acquire()
+            with self.env:
+                with self.robot_rave.CreateRobotStateSaver():
+                    self.robot_rave.GetController().Reset(0)
+                    dof_values = self.robot_rave.GetDOFValues()
+                    if qt == None:
+                        qt = dof_values[0:2]
+                    if qal == None:
+                        qal = dof_values[2:9]
+                    if qhl == None:
+                        qhl = dof_values[9:13]
+                    if qar == None:
+                        qar = dof_values[13:20]
+                    if qhr == None:
+                        qhr = dof_values[20:24]
+                    dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
+                    self.robot_rave.SetDOFValues(dof_values)
+#                    self.env.UpdatePublishedBodies()
+                    body = self.env.GetKinBody(name)
+                    T_World_O = self.OpenraveToKDL(body.GetTransform())
+                    hits = 0
+                    all_hits = 0
+                    for p in points:
+                        p_in_World = T_World_O * p
+                        d = p_in_World - cam_pt_in_World
+                        d_len = d.Norm()
+                        # elongate the ray by 1 cm
+                        d = d * (d_len + 0.01)/d_len
+                        check_collision = True
+                        if fov_x != None and fov_y != None:
+                            # check the ray in camera frame
+                            d_cam = R_C_World * d
+                            if d_cam.z() < min_dist or math.fabs(d_cam.x()/d_cam.z()) > tg_fov_x or math.fabs(d_cam.y()/d_cam.z()) > tg_fov_y:
+                                check_collision = False
+                        if check_collision:
+                            report = CollisionReport()
+                            ret = self.env.CheckCollision(Ray([cam_pt_in_World.x(),cam_pt_in_World.y(),cam_pt_in_World.z()],[d.x(),d.y(),d.z()]), report)
+                            if pub_marker != None:
+                                m_id = pub_marker.publishVectorMarker(cam_pt_in_World, cam_pt_in_World+d, m_id, 1, 1, 1, frame='world', namespace='default', scale=0.001)
+                            if report.numCols > 0:
+                                all_hits += 1
+                                parent = report.plink1.GetParent()
+                                if parent.GetName() == name:
+                                    hits += 1
+#                    print "all_rays: %s   all_hits: %s   hits: %s"%(len(points), all_hits, hits)
+            self.robot_rave_update_lock.release()
+        else:
+            body = self.env.GetKinBody(name)
+
+            T_World_O = self.OpenraveToKDL(body.GetTransform())
+            hits = 0
+            all_hits = 0
+            for p in points:
+                p_in_World = T_World_O * p
+                d = p_in_World - cam_pt_in_World
+                d_len = d.Norm()
+                d = d * (d_len + 0.01)/d_len
+                check_collision = True
+                if fov_x != None and fov_y != None:
+                    # check the ray in camera frame
+                    d_cam = R_C_World * d
+                    if d_cam.z() < min_dist or math.fabs(d_cam.x()/d_cam.z()) > tg_fov_x or math.fabs(d_cam.y()/d_cam.z()) > tg_fov_y:
+                        check_collision = False
+                if check_collision:
+                    report = CollisionReport()
+                    ret = self.env.CheckCollision(Ray([cam_pt_in_World.x(),cam_pt_in_World.y(),cam_pt_in_World.z()],[d.x(),d.y(),d.z()]), report)
+                    if pub_marker != None:
+                        m_id = pub_marker.publishVectorMarker(cam_pt_in_World, cam_pt_in_World+d, m_id, 1, 1, 1, frame='world', namespace='default', scale=0.001)
+                    if report.numCols > 0:
+                        all_hits += 1
+                        parent = report.plink1.GetParent()
+                        if parent.GetName() == name:
+                            hits += 1
+
+#            print "all_rays: %s   all_hits: %s   hits: %s"%(len(points), all_hits, hits)
+
+        return float(hits)/float(len(points))
+
+    def findIkSolutions(self, T_Br_E):
+        return self.ikmodel.manip.FindIKSolution(IkParameterization(self.KDLToOpenrave(T_Br_E),IkParameterizationType.Transform6D), None)#IkFilterOptions.CheckEnvCollisions)
+
 

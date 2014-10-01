@@ -761,42 +761,43 @@ Class for velma robot.
         self.T_B_W_current = self.openrave.getLinkPose("right_arm_7_link", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
         self.T_B_T2_current = self.openrave.getLinkPose("torso_link2", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
         self.T_T2_B_current = self.T_B_T2_current.Inverse()
-#        q_traj = []
         for f in np.linspace(0.0, 1.0, 50):
             q_out, T_B_Ei = self.velma_ikr.simulateTrajectory(self.T_B_W_current * self.T_W_E, wrist_frame * self.T_W_E, f, self.qar, self.T_T2_B_current)
+            if q_out == None :
+                print "moveWrist: could not reach the desired pose"
+                break
             self.qar = q_out
             rospy.sleep(t/50.0)
-#            q_traj.append(q_out)
-
-#        self.openrave.showTrajectory(0.1, qar_list=q_traj)
 
     def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
-        # TODO
-        return
-        self.abort_on_q5_singularity = abort_on_q5_singularity
-        self.aborted_on_q5_singularity = False
-        self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
-        self.aborted_on_q5_q6_self_collision = False
-
-        # we are moving the tool, so: T_B_Wd*T_W_T
-        action_trajectory_goal = CartesianTrajectoryGoal()
-        if stamp != None:
-            action_trajectory_goal.trajectory.header.stamp = stamp
-        else:
-            action_trajectory_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(start_time)
-
         i = 0
         for wrist_frame in wrist_frames:
-            wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
-            action_trajectory_goal.trajectory.points.append(CartesianTrajectoryPoint(
-            rospy.Duration(times[i]),
-            wrist_pose,
-            Twist()))
+            self.T_B_W_current = self.openrave.getLinkPose("right_arm_7_link", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+            self.T_B_T2_current = self.openrave.getLinkPose("torso_link2", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+            self.T_T2_B_current = self.T_B_T2_current.Inverse()
+            if i > 0:
+                time_diff = times[i] - times[i-1]
+            else:
+                time_diff = times[i]
+            for f in np.linspace(0.0, 1.0, 10):
+                q_out, T_B_Ei = self.velma_ikr.simulateTrajectory(self.T_B_W_current * self.T_W_E, wrist_frame * self.T_W_E, f, self.qar, self.T_T2_B_current)
+                if q_out == None :
+                    print "moveWristTraj: could not reach the desired pose"
+                    return
+                self.qar = q_out
+                rospy.sleep(time_diff/10.0)
             i += 1
 
-        action_trajectory_goal.wrench_constraint = max_wrench
-        self.current_max_wrench = max_wrench
-        self.action_right_trajectory_client.send_goal(action_trajectory_goal)
+    def moveWristTrajJoint(self, q_dest, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        i = 0
+        for q in q_dest:
+            if i > 0:
+                time_diff = times[i] - times[i-1]
+            else:
+                time_diff = times[i]
+            self.qar = q
+            rospy.sleep(time_diff/10.0)
+            i += 1
 
     def moveTool(self, wrist_frame, t):
         pass
@@ -817,6 +818,11 @@ Class for velma robot.
         print "emergency stop"
 
     def checkStopCondition(self, t=0.0):
+        if rospy.is_shutdown():
+            self.emergencyStop()
+            print "emergency stop: interrupted  %s  %s"%(self.getMaxWrench(), self.wrench_tab_index)
+            self.failure_reason = "user_interrupt"
+            rospy.sleep(1.0)
         # TODO
         return
         end_t = rospy.Time.now()+rospy.Duration(t+0.0001)
@@ -898,6 +904,9 @@ Class for velma robot.
         self.T_B_F33 = self.openrave.getLinkPose(self.prefix+'_HandFingerThreeKnuckleThreeLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
         self.T_E_F33 = self.T_B_E.Inverse() * self.T_B_F33
         self.T_F33_E = self.T_E_F33.Inverse()
+
+        # camera pose
+        self.T_B_C = PyKDL.Frame(PyKDL.Rotation.RotY(135.0/180.0*math.pi), PyKDL.Vector(0.4, 0, 1.4)) * PyKDL.Frame(PyKDL.Rotation.RotZ(-90.0/180.0*math.pi))
 
 #        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_cmd', rospy.Time(0))
 #        self.T_B_T_cmd = pm.fromTf(pose)
@@ -1093,15 +1102,15 @@ Class for velma robot.
         twist = PyKDL.diff(self.T_B_W, T_B_Wd, 1.0)
         v_l = twist.vel.Norm()
         v_r = twist.rot.Norm()
-        print "v_l: %s   v_r: %s"%(v_l, v_r)
+#        print "v_l: %s   v_r: %s"%(v_l, v_r)
         f_v_l = v_l/max_v_l
         f_v_r = v_r/max_v_r
         if f_v_l > f_v_r:
             duration = f_v_l
         else:
             duration = f_v_r
-        if duration < 0.5:
-            duration = 0.5
+        if duration < 0.02:
+            duration = 0.02
         return duration
 
     def generateTrajectoryInJoint(self, i, rel_angle, om):

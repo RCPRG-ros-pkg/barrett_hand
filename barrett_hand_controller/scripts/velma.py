@@ -573,46 +573,6 @@ Class for velma robot.
         [2.39116925216,PyKDL.Frame(PyKDL.Rotation.Quaternion(0.205160954369,0.676689724172,0.205160954374,0.676689724174),PyKDL.Vector(-4.94266086393e-13,0.00319976842925,0.125691485856))]
         ]
 
-    def getQ5Q6SpaceSector(self, q5, q6, margin=0.0):
-        i = 0
-        # x1,x2,y1,y2
-        for r in self.q5_q6_restricted_area:
-            if q5 > r[0]+margin and q5 < r[1]-margin and q6 > r[2]+margin and q6 < r[3]-margin:
-                return i
-            i += 1
-        return -1
-
-    def getClosestQ5Q6SpaceSector(self, q5, q6):
-        dist = []
-        sect = self.getQ5Q6SpaceSector(q5, q6)
-        if sect >= 0:
-            return sect
-        # x1,x2,y1,y2
-        for r in self.q5_q6_restricted_area:
-            d5 = 1000000.0
-            d6 = 1000000.0
-            if q5 < r[0]:
-                d5 = r[0] - q5
-            elif q5 > r[1]:
-                d5 = q5 - r[1]
-            if q6 < r[2]:
-                d6 = r[2] - q6
-            elif q6 > r[3]:
-                d6 = q6 - r[3]
-            dist.append( min( d5, d6 ) )
-
-#        print dist
-
-        i = 0
-        min_dist = 1000000.0
-        min_index = -1
-        for d in dist:
-            if d < min_dist:
-                min_dist = d
-                min_index = i
-            i += 1
-        return min_index
-
 #1.92521262169
 #-1.44746339321
 #-0.428265035152
@@ -648,11 +608,6 @@ Class for velma robot.
 
         self.r1_r2_point = [0.00486671971157, -1.43977892399]
         self.r2_r3_point = [-0.202122956514, 1.60210323334]
-        self.q5_q6_restricted_area = [
-        [-0.428265035152,1.92521262169,-2.89507389069,-1.38213706017],
-        [-2.11473441124,0.435783565044,-1.52231526375,2.22040915489],
-        [-0.819031119347,2.07619023323,0.932657182217,2.86872577667],
-        ]
 
     def jointStatesCallback(self, data):
         if len(data.name) == 8:
@@ -1101,6 +1056,9 @@ Class for velma robot.
         self.T_E_F21 = pm.fromTf(pose)
 
         self.T_E_F31 = PyKDL.Frame()
+
+        pose = self.listener.lookupTransform('torso_base', 'camera', rospy.Time(0))
+        self.T_B_C = pm.fromTf(pose)
 
     def getContactPoints(self, threshold, f1=True, f2=True, f3=True, palm=True):
         self.tactile_lock.acquire()
