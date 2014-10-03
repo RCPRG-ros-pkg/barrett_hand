@@ -61,7 +61,7 @@ class MarkerPublisher:
     def __init__(self):
         self.pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
 
-    def publishSinglePointMarker(self, pt, i, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005)):
+    def publishSinglePointMarker(self, pt, i, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=None):
         m = MarkerArray()
         marker = Marker()
         marker.header.frame_id = frame_id
@@ -70,7 +70,12 @@ class MarkerPublisher:
         marker.id = i
         marker.type = m_type
         marker.action = 0
-        marker.pose = Pose( Point(pt.x(),pt.y(),pt.z()), Quaternion(0,0,0,1) )
+        if T != None:
+            point = T*pt
+            q = T.M.GetQuaternion()
+            marker.pose = Pose( Point(point.x(),point.y(),point.z()), Quaternion(q[0],q[1],q[2],q[3]) )
+        else:
+            marker.pose = Pose( Point(pt.x(),pt.y(),pt.z()), Quaternion(0,0,0,1) )
         marker.scale = scale
         marker.color = ColorRGBA(r,g,b,0.5)
         m.markers.append(marker)

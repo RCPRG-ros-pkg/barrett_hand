@@ -478,6 +478,114 @@ Class for grasp learning.
             if velma.checkStopCondition(3.0):
                 exit(0)
 
+
+        # TEST: grasp comparaision
+        if True:
+            self.openrave.removeObject("table")
+            self.openrave.removeObject("box")
+            self.openrave.removeObject("big_box")
+
+            T_B_O = self.openrave.getPose("object")
+            # get the possible grasps for the current scene
+            grasps,indices = self.openrave.generateGrasps("object", checkcollision=False, checkik=False, checkgrasper=True)
+            print "generated %s grasps"%(len(grasps))
+
+            m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
+
+            for grasp_idx in range(0, len(grasps)):
+                grasp = grasps[grasp_idx]
+                q, contacts = self.openrave.getFinalConfig(grasp)
+                if contacts == None:
+                    contacts = []
+                print "i: %s   contacts: %s"%(grasp_idx, len(contacts))
+                if len(contacts) == 0:
+                    continue
+#                self.openrave.showGrasp(grasp)
+
+                gr = grip.Grip(obj_grasp)
+                m_id = 0
+                # publish contacts
+                for c in contacts:
+                    c_B = c
+                    m_id = self.pub_marker.publishSinglePointMarker(c_B, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
+
+                checked_contacts = []
+                contacts_groups = []
+                while len(checked_contacts) < len(contacts):
+                    pos = None
+                    # group the contacts
+                    for c_idx in range(0, len(contacts)):
+                        if c_idx in checked_contacts:
+                            continue
+                        c_O = T_B_O.Inverse() * contacts[c_idx]
+                        if pos == None:
+                            pos = c_O
+                            checked_contacts.append(c_idx)
+                            contacts_groups.append([])
+                            contacts_groups[-1].append(c_idx)
+                        else:
+                            dist = (pos - c_O).Norm()
+                            if dist < 0.02:
+                                checked_contacts.append(c_idx)
+                                contacts_groups[-1].append(c_idx)
+
+                centers = []
+                for g in contacts_groups:
+                    center = PyKDL.Vector()
+                    for c in g:
+                        center += T_B_O.Inverse() * contacts[c]
+                    center *= 1.0/len(g)
+                    centers.append(center)
+                    print g
+
+                print "contact centers: %s"%(centers)
+                for c in centers:
+                    c_B = T_B_O * c
+                    m_id = self.pub_marker.publishSinglePointMarker(c_B, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
+
+                T_O_B = T_B_O.Inverse()
+                vertices, indices = self.openrave.getMesh("object")
+                for c in centers:
+                        points = velmautils.sampleMesh(vertices, indices, 0.002, [c], 0.01)
+                        print len(points)
+                        m_id = self.pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.004, 0.004, 0.004), T=T_B_O)
+                        # get the contact surface normal
+                        fr = velmautils.estPlane(points)
+                        # set the proper direction of the contact surface normal (fr.z axis)
+                        # add the contact to the grip description
+                        gr.addContact(fr)
+                        m_id = self.pub_marker.publishFrameMarker(T_B_O*fr, m_id)
+                        rospy.sleep(1.0)
+
+
+#                break
+            
+
+            rospy.sleep(2.0)
+            exit(0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         # TEST: joint impedance control
         if False:
             # end pose

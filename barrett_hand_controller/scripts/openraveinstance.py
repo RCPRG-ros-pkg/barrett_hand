@@ -95,6 +95,11 @@ class OpenraveInstance:
         body.InitFromBoxes(numpy.array([[0,0,0,0.5*x_size,0.5*y_size,0.5*z_size]]),True)
         self.env.Add(body,True)
 
+    def removeObject(self, name):
+        with self.env:
+            body = self.env.GetKinBody(name)
+            self.env.Remove(body)
+
     def addSphere(self, name, size):
         body = RaveCreateKinBody(self.env,'')
         body.SetName(name)
@@ -121,8 +126,9 @@ class OpenraveInstance:
             if body != None:
                 body.SetTransform(self.KDLToOpenrave(self.T_World_Br*T_Br_Bo))
             else:
-                print "openrave: could not find body: %s"%(name)
-                self.env.UpdatePublishedBodies()
+#                print "openrave: could not find body: %s"%(name)
+                pass
+            self.env.UpdatePublishedBodies()
 
     def getPose(self, name):
         body = self.env.GetKinBody(name)
@@ -328,7 +334,7 @@ class OpenraveInstance:
         # start thread for jar tf publishing and for visualization
         thread.start_new_thread(self.run, (None,1))
 
-    def generateGrasps(self, target_name, show=False):
+    def generateGrasps(self, target_name, show=False, checkcollision=True, checkik=True, checkgrasper=True):
         target = self.env.GetKinBody(target_name)
         if target == None:
             print "target body <%s> not found"%(target_name)
@@ -346,7 +352,7 @@ class OpenraveInstance:
             self.gmodel.generate(approachrays=approachrays, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
             self.gmodel.save()
 
-        validgrasps,validindices = self.gmodel.computeValidGrasps(checkcollision=True, checkik=True, checkgrasper=True)
+        validgrasps,validindices = self.gmodel.computeValidGrasps(checkcollision=checkcollision, checkik=checkik, checkgrasper=checkgrasper)
         print "all valid grasps: %s"%(len(validgrasps))
 
         print "done."
@@ -429,18 +435,29 @@ class OpenraveInstance:
         return col.vertices, col.indices
 
     def getFinalConfig(self, grasp):
+        hand_config = None
+        contacts = None
         self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
             with self.env:
-                contacts,finalconfig,mindist,volume = self.gmodel.runGraspFromTrans(grasp)
-                hand_config = [
-                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
-                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerTwoKnuckleTwoJoint")],
-                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerThreeKnuckleTwoJoint")],
-                finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleOneJoint")],
-                ]
+                try:
+                    contacts,finalconfig,mindist,volume = self.gmodel.runGraspFromTrans(grasp)
+                    hand_config = [
+                    finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
+                    finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerTwoKnuckleTwoJoint")],
+                    finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerThreeKnuckleTwoJoint")],
+                    finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleOneJoint")],
+                    ]
+                except planning_error,e:
+                    print "getFinalConfig: planning error"
         self.robot_rave_update_lock.release()
-        return hand_config, contacts
+        if contacts == None:
+            contacts_ret = None
+        else:
+            contacts_ret = []
+            for c in contacts:
+                contacts_ret.append(self.T_World_Br.Inverse() * PyKDL.Vector(c[0], c[1], c[2]))
+        return hand_config, contacts_ret
 
     def grab(self, name):
 #        body = self.env.GetKinBody(name)
