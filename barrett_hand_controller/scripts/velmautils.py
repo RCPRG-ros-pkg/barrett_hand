@@ -144,7 +144,6 @@ def generateNormalsSphere(angle):
         for beta in np.arange(0.0, 360.0/180.0*math.pi, beta_d):
             pt = PyKDL.Vector(math.cos(alpha)*math.cos(beta), math.cos(alpha)*math.sin(beta), math.sin(alpha))
             v_approach.append(pt)
-            rospy.sleep(0.01)
     return v_approach
 
 def generateFramesForNormals(angle, normals):
@@ -188,6 +187,120 @@ def pointInTriangle(A, B, C, P):
     return (u >= 0) and (v >= 0) and (u + v < 1)
 
 def sampleMesh(vertices, indices, sample_dist, pt_list, radius):
+        points = []
+        for s2 in pt_list:
+            for face in indices:
+                A = vertices[face[0]]
+                B = vertices[face[1]]
+                C = vertices[face[2]]
+                pt_a = PyKDL.Vector(A[0],A[1],A[2])
+                pt_b = PyKDL.Vector(B[0],B[1],B[2])
+                pt_c = PyKDL.Vector(C[0],C[1],C[2])
+                v0 = pt_b - pt_a
+                v1 = pt_c - pt_a
+                # calculate face normal
+                normal = v0 * v1
+                normal.Normalize()
+                # calculate distance between the sphere center and the face
+                s_dist = PyKDL.dot(normal, s2) - PyKDL.dot(normal, pt_a)
+                # if the distance is greater than radius, ignore the face
+                if abs(s_dist) > radius:
+                    continue
+                # calculate the projection of the sphere center to the face
+                s_on = s2 - s_dist * normal
+                # calculate the radius of circle being common part of sphere and face
+                radius2_square = radius * radius - s_dist * s_dist
+                if radius2_square < 0.0:   # in case of numerical error
+                    radius2_square = 0.0
+                radius2 = math.sqrt(radius2_square)
+                # TODO: check only the face's area of interest
+                n0 = v0.Norm()
+                steps0 = int(n0/sample_dist)
+                if steps0 < 1:
+                    steps0 = 1
+                step_len0 = n0/steps0
+                n1 = v1.Norm()
+                angle = getAngle(v0,v1)
+                h = n1*math.sin(angle)
+                steps1 = int(h/sample_dist)
+                if steps1 < 1:
+                    steps1 = 1
+                step_len1 = h/steps1
+                x0 = step_len0/2.0
+                while x0 < n0:
+                    x1 = step_len1/2.0
+                    while x1 < h*(1.0-x0/n0):
+                        point = pt_a + v0*(x0/n0) + v1*(x1/h)
+                        in_range = False
+                        for s2 in pt_list:
+                            if (point-s2).Norm() < radius:
+                                in_range = True
+                                break
+                        if in_range:
+                            points.append(point)
+                        x1 += step_len1
+                    x0 += step_len0
+        if len(pt_list) == 1:
+            return points
+        min_dists = []
+        min_dists_p_index = []
+        for s in pt_list:
+            min_dists.append(1000000.0)
+            min_dists_p_index.append(None)
+        i = 0
+        for s in pt_list:
+            p_index = 0
+            for p in points:
+                d = (s-p).Norm()
+                if d < min_dists[i]:
+                    min_dists[i] = d
+                    min_dists_p_index[i] = p_index
+                p_index += 1
+            i += 1
+        first_contact_index = None
+        for i in range(0, len(pt_list)):
+            if min_dists[i] < sample_dist*2.0:
+                first_contact_index = i
+                break
+        if first_contact_index == None:
+            print "first_contact_index == None"
+            return points
+        init_pt = points[min_dists_p_index[first_contact_index]]
+        points_ret = []
+        list_to_check = []
+        list_check_from = []
+        for i in range(0, len(points)):
+            if (init_pt-points[i]).Norm() > radius:
+                continue
+            if i == min_dists_p_index[first_contact_index]:
+                list_check_from.append(points[i])
+            else:
+                list_to_check.append(points[i])
+        points_ret = []
+        added_point = True
+        iteration = 0
+        while added_point:
+            added_point = False
+            list_close = []
+            list_far = []
+            for p in list_to_check:
+                added_p = False
+                for check_from in list_check_from:
+                    if (check_from-p).Norm() < sample_dist*2.0:
+                        added_point = True
+                        added_p = True
+                        list_close.append(p)
+                        break
+                if not added_p:
+                    list_far.append(p)
+            points_ret += list_check_from
+            list_to_check = copy.deepcopy(list_far)
+            list_check_from = copy.deepcopy(list_close)
+            iteration += 1
+        return points_ret
+
+
+def sampleMesh_old(vertices, indices, sample_dist, pt_list, radius):
         points = []
         for face in indices:
             A = vertices[face[0]]
@@ -393,21 +506,30 @@ class WristCollisionAvoidance:
     def __init__(self, prefix, q5_positive, margin):
         self.margin = margin
         if prefix == "right":
-            if q5_positive:
-                self.q5_q6_restricted_area = [
-                [0.0,1.92521262169,-2.89507389069,-1.38213706017],
-                [0.0,0.435783565044,-1.52231526375,2.22040915489],
-                [0.0,2.07619023323,0.932657182217,2.86872577667],
-                [0.0, 0.494, -1.885, -1.157],
-                [0.0, 0.750, 0.457, 2.564],
-                ]
+            if q5_positive != None:
+                if q5_positive:
+                    self.q5_q6_restricted_area = [
+                    [0.0,1.92521262169,-2.89507389069,-1.38213706017],
+                    [0.0,0.435783565044,-1.52231526375,2.22040915489],
+                    [0.0,2.07619023323,0.932657182217,2.86872577667],
+                    [0.0, 0.494, -1.885, -1.157],
+                    [0.0, 0.750, 0.457, 2.564],
+                    ]
+                else:
+                    self.q5_q6_restricted_area = [
+                    [-0.428265035152,0.0,-2.89507389069,-1.38213706017],
+                    [-2.11473441124,0.0,-1.52231526375,2.22040915489],
+                    [-0.819031119347,0.0,0.932657182217,2.86872577667],
+                    [-0.609, 0.0, -1.885, -1.157],
+                    [-1.061, 0.0, 0.457, 2.564],
+                    ]
             else:
                 self.q5_q6_restricted_area = [
-                [-0.428265035152,0.0,-2.89507389069,-1.38213706017],
-                [-2.11473441124,0.0,-1.52231526375,2.22040915489],
-                [-0.819031119347,0.0,0.932657182217,2.86872577667],
-                [-0.609, 0.0, -1.885, -1.157],
-                [-1.061, 0.0, 0.457, 2.564],
+                [-0.428265035152,1.92521262169,-2.89507389069,-1.38213706017],
+                [-2.11473441124,0.435783565044,-1.52231526375,2.22040915489],
+                [-0.819031119347,2.07619023323,0.932657182217,2.86872577667],
+                [-0.609, 0.494, -1.885, -1.157],
+                [-1.061, 0.750, 0.457, 2.564],
                 ]
             self.sectors_count = len(self.q5_q6_restricted_area)
 
@@ -767,20 +889,11 @@ class VelmaIkSolver:
         return ret
 
     def planTrajectoryInOneSubspace(self, T_B_Einit, T_B_Ed, T_W_E, q_start, T_T2_B):
-        # get the ik solver for giver subspace
-        ik_solver = None
-        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
-            ik_solver_ok = True
-            for i in range(0,7):
-                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
-                    ik_solver_ok = False
-                    break
-            if ik_solver_ok:
-                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
-                break
-        if ik_solver == None:
-            print "could not find proper ik solver for q_start: %s"%(q_start)
-            return None, None
+        ik_solver_idx = self.getJointSubspaceIndex(q_start)
+        if ik_solver_idx == None:
+            print "ERROR: could not find joint subspace for q_start: %s"%(q_start)
+            return None
+        ik_solver = self.ik_solver_no_sing[ik_solver_idx]
 
         T_T2_Ed = T_T2_B * T_B_Ed
         min_cost = 1000000.0
@@ -830,20 +943,11 @@ class VelmaIkSolver:
         return max_idx, best_q_out[max_idx]-q_start[max_idx]
 
     def isLinearTrajectoryPossibleInOneSubspace(self, T_B_Einit, T_B_Ed, q_start, T_T2_B):
-        # get the ik solver for giver subspace
-        ik_solver = None
-        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
-            ik_solver_ok = True
-            for i in range(0,7):
-                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
-                    ik_solver_ok = False
-                    break
-            if ik_solver_ok:
-                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
-                break
-        if ik_solver == None:
-            print "could not find proper ik solver for q_start: %s"%(q_start)
-            return None, None
+        ik_solver_idx = self.getJointSubspaceIndex(q_start)
+        if ik_solver_idx == None:
+            print "ERROR: could not find joint subspace for q_start: %s"%(q_start)
+            return None
+        ik_solver = self.ik_solver_no_sing[ik_solver_idx]
 
         diff = PyKDL.diff(T_B_Einit, T_B_Ed, 1.0)
 
@@ -863,20 +967,11 @@ class VelmaIkSolver:
         return success, q_end
 
     def isTrajectoryPossibleInOneSubspace(self, T_B_Ed, q_start, T_T2_B):
-        # get the ik solver for giver subspace
-        ik_solver = None
-        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
-            ik_solver_ok = True
-            for i in range(0,7):
-                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
-                    ik_solver_ok = False
-                    break
-            if ik_solver_ok:
-                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
-                break
-        if ik_solver == None:
-            print "could not find proper ik solver for q_start: %s"%(q_start)
+        ik_solver_idx = self.getJointSubspaceIndex(q_start)
+        if ik_solver_idx == None:
+            print "ERROR: could not find joint subspace for q_start: %s"%(q_start)
             return None
+        ik_solver = self.ik_solver_no_sing[ik_solver_idx]
 
         q5q6_problem = 0
         ik_problem = 0
@@ -904,20 +999,11 @@ class VelmaIkSolver:
         return None
 
     def incrementTrajectoryInOneSubspace(self, T_B_Einit, T_B_Ed, T_W_E, q_start, T_T2_B, q_end=None):
-        # get the ik solver for giver subspace
-        ik_solver = None
-        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
-            ik_solver_ok = True
-            for i in range(0,7):
-                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
-                    ik_solver_ok = False
-                    break
-            if ik_solver_ok:
-                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
-                break
-        if ik_solver == None:
-            print "could not find proper ik solver for q_start: %s"%(q_start)
+        ik_solver_idx = self.getJointSubspaceIndex(q_start)
+        if ik_solver_idx == None:
+            print "ERROR: could not find joint subspace for q_start: %s"%(q_start)
             return None
+        ik_solver = self.ik_solver_no_sing[ik_solver_idx]
 
         if q_end != None:
             q_end_ok = True
@@ -987,9 +1073,6 @@ class VelmaIkSolver:
         for i in range(0,7):
             q_dest[i] = q_start[i] + q_diff[i] * vel_factor * time_d
 
-#        print "q_start"
-#        print q_start
-
         q_dest_norm = []
         for i in range(0, 7):
             q_dest_norm.append((q_dest[i]-self.q_min_no_sing[ik_solver_idx][i])/(self.q_max_no_sing[ik_solver_idx][i]-self.q_min_no_sing[ik_solver_idx][i]))
@@ -998,25 +1081,8 @@ class VelmaIkSolver:
         for i in range(0, 7):
             q_end_norm.append((q_end[i]-self.q_min_no_sing[ik_solver_idx][i])/(self.q_max_no_sing[ik_solver_idx][i]-self.q_min_no_sing[ik_solver_idx][i]))
 
-#        print "q_dest_norm: %s"%(q_dest_norm)
-#        print "q_end_norm: %s"%(q_end_norm)
-#        print "q_dest"
-#        print [q_dest[0], q_dest[1], q_dest[2], q_dest[3], q_dest[4], q_dest[5], q_dest[6]]
-
         print "q_diff"
         print q_diff
-
-#        if getQ5Q6SpaceSector(q_start[5], q_start[6], margin=10.0/180.0*math.pi) < 0:
-#            print "q5q6 collision for q_start"
-
-#        if getQ5Q6SpaceSector(q_dest[5], q_dest[6], margin=10.0/180.0*math.pi) < 0:
-#            closest_sector = getClosestQ5Q6SpaceSector(q_dest[5], q_dest[6], margin=10.0/180.0*math.pi)
-#            print [q_dest[5], q_dest[6]]
-#            q_dest[5], q_dest[6] = forceMoveQ5Q6ToSector(q_dest[5], q_dest[6], closest_sector, margin=10.0/180.0*math.pi)
-#            print [q_dest[0], q_dest[1], q_dest[2], q_dest[3], q_dest[4], q_dest[5], q_dest[6]]
-#            print [q_dest[5], q_dest[6]]
-#            print "q5q6 collision for q_dest"
-
 
         T_T2_Ed = PyKDL.Frame()
         self.fk_solver.JntToCart(q_dest, T_T2_Ed)
@@ -1025,28 +1091,14 @@ class VelmaIkSolver:
         return T_B_Ed
 
     def generateJointTrajectoryInOneSubspace(self, q_start, q_end, q_vel_limit):
-        # get the ik solver for giver subspace
-        ik_solver = None
-        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
-            ik_solver_ok = True
-            for i in range(0,7):
-                if q_start[i] < self.q_min_no_sing[ik_solver_idx][i] or q_start[i] > self.q_max_no_sing[ik_solver_idx][i]:
-                    ik_solver_ok = False
-                    break
-            if ik_solver_ok:
-                ik_solver = self.ik_solver_no_sing[ik_solver_idx]
-                break
-        if ik_solver == None:
-            print "could not find proper ik solver for q_start: %s"%(q_start)
+        ik_solver_idx = self.getJointSubspaceIndex(q_start)
+        if ik_solver_idx == None:
+            print "ERROR: could not find joint subspace for q_start: %s"%(q_start)
             return None
+        ik_solver = self.q_min_no_sing[ik_solver_idx]
 
-        q_end_ok = True
-        for i in range(0,7):
-            if q_end[i] < self.q_min_no_sing[ik_solver_idx][i] or q_end[i] > self.q_max_no_sing[ik_solver_idx][i]:
-                q_end_ok = False
-                break
-        if not q_end_ok:
-            print "q_start and q_end are in diffrent subspaces"
+        if ik_solver_idx != self.getJointSubspaceIndex(q_end):
+            print "ERROR: q_start and q_end are in diffrent subspaces"
             return None
 
         traj_q5q6, len_q5q6 = self.wrist_collision_avoidance[ik_solver_idx].moveQ5Q6ToDestTraj(q_start[5], q_start[6], q_end[5], q_end[6], 0.1)
@@ -1064,7 +1116,6 @@ class VelmaIkSolver:
                 max_diff = math.fabs(diff)
 
         # limit the maximum speed
-#        q_vel_limit = 30.0/180.0*math.pi
         time_d = 0.01
         time = max_diff/q_vel_limit
 
@@ -1090,4 +1141,16 @@ class VelmaIkSolver:
         times = np.linspace(0.0, time, steps)
 
         return traj, times
+
+    # get the ik solver index for given q
+    def getJointSubspaceIndex(self, q):
+        for ik_solver_idx in range(0, len(self.ik_solver_no_sing)):
+            ik_solver_ok = True
+            for i in range(0,7):
+                if q[i] < self.q_min_no_sing[ik_solver_idx][i] or q[i] > self.q_max_no_sing[ik_solver_idx][i]:
+                    ik_solver_ok = False
+                    break
+            if ik_solver_ok:
+                return ik_solver_idx
+        return None
 

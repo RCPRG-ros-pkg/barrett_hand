@@ -754,6 +754,8 @@ Class for velma robot.
 
         self.max_tactile_value = 0
 
+#        self.dofs_lock = Lock()
+
     def moveWrist2(self, wrist_frame):
         pass
 
@@ -766,7 +768,9 @@ Class for velma robot.
             if q_out == None :
                 print "moveWrist: could not reach the desired pose"
                 break
+#            self.dofs_lock.acquire()
             self.qar = q_out
+#            self.dofs_lock.release()
             rospy.sleep(t/50.0)
 
     def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
@@ -784,19 +788,24 @@ Class for velma robot.
                 if q_out == None :
                     print "moveWristTraj: could not reach the desired pose"
                     return
+#                self.dofs_lock.acquire()
                 self.qar = q_out
+#                self.dofs_lock.release()
                 rospy.sleep(time_diff/10.0)
             i += 1
 
     def moveWristTrajJoint(self, q_dest, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
         i = 0
         for q in q_dest:
+#            print "moveWristTrajJoint: %s:   %s"%(i, q)
             if i > 0:
                 time_diff = times[i] - times[i-1]
             else:
                 time_diff = times[i]
+#            self.dofs_lock.acquire()
             self.qar = q
-            rospy.sleep(time_diff/10.0)
+#            self.dofs_lock.release()
+            rospy.sleep(time_diff)#/5.0)
             i += 1
 
     def moveTool(self, wrist_frame, t):
@@ -863,6 +872,14 @@ Class for velma robot.
     # q = (120.0/180.0*numpy.pi, 120.0/180.0*numpy.pi, 40.0/180.0*numpy.pi, 180.0/180.0*numpy.pi)
     # robot.move_hand_client("right", q)
     def move_hand_client(self, q, v=(1.2, 1.2, 1.2, 1.2), t=(2000.0, 2000.0, 2000.0, 2000.0)):
+        steps = 100
+        q_traj = [np.linspace(self.qhr[0], q[3], steps), np.linspace(self.qhr[1], q[0], steps), np.linspace(self.qhr[2], q[2], steps), np.linspace(self.qhr[3], q[1], steps)]
+        for i in range(0, steps):
+            self.qhr[0] = q_traj[0][i]
+            self.qhr[1] = q_traj[1][i]
+            self.qhr[2] = q_traj[2][i]
+            self.qhr[3] = q_traj[3][i]
+            rospy.sleep(0.02)
         # TODO
         return
         rospy.wait_for_service('/' + self.prefix + '_hand/move_hand')
@@ -1240,4 +1257,11 @@ Class for velma robot.
             tab_T_B_Wd.append(T_B_Wd)
             times.append(time)
         return [tab_T_B_Wd, times]
+
+    def getAllDOFs(self):
+#        self.dofs_lock.acquire()
+        dofs = self.qt + self.qal + self.qhl + self.qar + self.qhr
+#        self.dofs_lock.release()
+        return dofs
+
 

@@ -105,13 +105,16 @@ Class for grasp learning.
         return pm.fromTf(jar_marker)
 
     def getMarkerPoseFake(self, marker_id, wait = True, timeBack = None):
-        T_B_Tm = PyKDL.Frame( PyKDL.Vector(1.0,-0.3,0.4) )
+        T_B_Tm = PyKDL.Frame( PyKDL.Vector(0.8,-0.3,0.4) )
+        T_B_Tbb = PyKDL.Frame( PyKDL.Vector(0.5,-0.8,2.0) )
         T_Tm_Bm = PyKDL.Frame( PyKDL.Vector(-0.06, 0.3, 0.135) )
         T_Bm_Gm = PyKDL.Frame( PyKDL.Rotation.RotZ(-30.0/180.*math.pi), PyKDL.Vector(0.1,-0.1,0.06) )
         if marker_id == 6:
             return T_B_Tm
         elif marker_id == 7:
             return T_B_Tm * T_Tm_Bm
+        elif marker_id == 8:
+            return T_B_Tbb
         elif marker_id == 19:
             return T_B_Tm * T_Tm_Bm * T_Bm_Gm
         return None
@@ -203,7 +206,7 @@ Class for grasp learning.
 #                if velma.checkStopCondition(times[-1]):
 #                    exit(0)
 
-    def getBestGrasp(self, grasps, velma, velma_ikr):
+    def getBestGrasp(self, grasps, velma, velma_ikr, checked_grasps_idx):
             # get manipulator configuration without singularity in q[5]
             velma.updateTransformations()
             min_cost = 1000000.0
@@ -211,12 +214,23 @@ Class for grasp learning.
             min_grasp_idx = None
             singularity_angle = 30.0/180.0*math.pi
             for i in range(0, len(grasps)):
+#                if i in checked_grasps_idx:
+#                    continue
                 T_Br_E = self.openrave.getGraspTransform(grasps[i], collisionfree=True)
+#                print "i: %s"%(i)
+#                print "grasp:"
+#                print grasps[i]
+#                self.openrave.showGrasp(grasps[i])
+                final_config, contacts = self.openrave.getFinalConfig(grasps[i])
+                if len(contacts) == 0:
+                    continue
                 q_out = velma_ikr.getAllDistinctConfigurations(T_Br_E, velma.T_B_T2.Inverse())
                 # get the best configuration
                 for q in q_out:
                     cost = 0.0
                     # add penalty for singularity
+                    if math.fabs(q[3]) < singularity_angle:
+                        cost += singularity_angle - math.fabs(q[3])
                     if math.fabs(q[5]) < singularity_angle:
                         cost += singularity_angle - math.fabs(q[5])
                     if min_cost > cost:
@@ -321,6 +335,9 @@ Class for grasp learning.
         obj_box = grip.GraspableObject("box", "box", [0.22,0.24,0.135])
         obj_box.addMarker( 7, PyKDL.Frame(PyKDL.Vector(-0.07, 0.085, 0.065)) )
 
+        obj_big_box = grip.GraspableObject("big_box", "box", [0.20,0.20,2.0])
+        obj_big_box.addMarker( 8, PyKDL.Frame(PyKDL.Vector(0, 0, 1.0)) )
+
         obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
         obj_grasp_frames_old = [
         [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
@@ -363,7 +380,7 @@ Class for grasp learning.
             T_M18_Mi = marker[1]
             obj_grasp.addMarker(marker[0], T_Co_M18 * T_M18_Mi)
 
-        self.objects = [obj_table, obj_box, obj_grasp]
+        self.objects = [obj_table, obj_box, obj_grasp, obj_big_box]
 
         if False:
             grip.gripUnitTest(obj_grasp)
@@ -426,7 +443,7 @@ Class for grasp learning.
         camera_fov_x = 50.0/180.0*math.pi
         camera_fov_y = 40.0/180.0*math.pi
 
-        self.openrave.setCamera(velma.T_B_C)
+#        self.openrave.setCamera(velma.T_B_C)
 
 #        self.openrave.addCamera("head_camera",camera_fov_x, camera_fov_y, 0.2)
 #        self.openrave.updatePose("head_camera", velma.T_B_C)
@@ -461,7 +478,8 @@ Class for grasp learning.
             if velma.checkStopCondition(3.0):
                 exit(0)
 
-        if True:
+        # TEST: joint impedance control
+        if False:
             # end pose
             q_start_forced = None
             q_end_forced = None
@@ -483,9 +501,10 @@ Class for grasp learning.
             while not rospy.is_shutdown():
                 velma.updateTransformations()
                 if q_end_forced == None:
-                    T_B_Ed = PyKDL.Frame(PyKDL.Rotation.EulerZYX(random.uniform(-math.pi, math.pi), random.uniform(-math.pi, math.pi), random.uniform(-math.pi, math.pi)), PyKDL.Vector(random.uniform(0.3, 0.7),random.uniform(-0.5, 0.5),random.uniform(0.5, 1.2)))
+                    T_B_Ed = PyKDL.Frame(PyKDL.Rotation.EulerZYX(random.uniform(-math.pi, math.pi), random.uniform(-math.pi, math.pi), random.uniform(-math.pi, math.pi)), PyKDL.Vector(random.uniform(0.3, 0.7),random.uniform(-0.5, 0.5),random.uniform(0.5, 1.4)))
 #                    self.openrave.findIkSolutions()
                     q_end = velma_ikr.isTrajectoryPossibleInOneSubspace(T_B_Ed, velma.qar, velma.T_B_T2.Inverse())
+                    rospy.sleep(0.01)
                 else:
                     q_end = q_end_forced
                 if q_end != None:
@@ -493,17 +512,13 @@ Class for grasp learning.
                     not_possible_dest = 0
                     print "q_start: %s"%(velma.qar)
                     print "q_end:   %s"%(q_end)
-#                    traj, times = velma_ikr.generateTrajectoryInOneSubspace(velma.qar, q_end, velma.T_B_T2.Inverse(), velma.T_E_W)
-#                    velma.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-#                    print "done"
-#                    self.openrave.showTrajectory(1, qar_list=[q_end, q_end])
-#                    self.openrave.showTrajectory(2, qar_list=[velma.qar, velma.qar])
-#                    self.openrave.showTrajectory(2, qar_list=[q_end, q_end])
-                    traj, times = velma_ikr.generateJointTrajectoryInOneSubspace(velma.qar, q_end, 5.0/180.0*math.pi)
-                    velma.moveWristTrajJoint(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-                    velma.updateTransformations()
-                    print "error: %s"%(PyKDL.diff(velma.T_B_W * velma.T_W_E, T_B_Ed))
-#                    self.executeTrajectoryInOneSubspace(T_B_Ed, velma, velma_ikr, q_end=q_end)
+
+                    traj = self.openrave.planMove(T_B_Ed)
+                    if traj != None:
+                        velma.moveWristTrajJoint(traj[0], traj[1], Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+                        velma.updateTransformations()
+                        print "error: %s"%(PyKDL.diff(velma.T_B_W * velma.T_W_E, T_B_Ed))
+                        rospy.sleep(2.0)
                 else:
                     not_possible_dest += 1
             exit(0)
@@ -529,89 +544,56 @@ Class for grasp learning.
         vis = self.openrave.getVisibility("object", velma.T_B_C, pub_marker=self.pub_marker, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.1)
         print "vis: %s"%(vis)
 
+        checked_grasps_idx = []
         # the main loop
         grips_db = []
         while True:
             self.disallowUpdateObjects()
 
+            rospy.sleep(1.0)
             # get the possible grasps for the current scene
             grasps,indices = self.openrave.generateGrasps("object")
 
-            min_grasp_idx, min_q = self.getBestGrasp(grasps, velma, velma_ikr)
+            if len(grasps) == 0:
+                print "could not generate any grasps for current configuration"
+                break
+
+            print "searching for grasp"
+            min_grasp_idx, min_q = self.getBestGrasp(grasps, velma, velma_ikr, checked_grasps_idx)
 
             if min_grasp_idx == None:
                 print "could not find any grasps"
                 break
 
-            print "found grasp"
-            grasp = grasps[min_grasp_idx]
+            checked_grasps_idx.append(min_grasp_idx)
 
-            T_Br_Ed = self.openrave.getGraspTransform(grasp, collisionfree=True)
+            print "found grasp"
+            grasp = copy.deepcopy(grasps[min_grasp_idx])
+
+            T_B_Ed = self.openrave.getGraspTransform(grasp, collisionfree=True)
             self.openrave.showGrasp(grasp)
 
 #            print "best configuration: cost: %s  q: %s"%(min_cost, min_q)
 
-            # test collision detection
-            if False:
-                q_traj = []
-                for q_min in np.linspace(0.0, 90.0/180.0*math.pi, 90):
-                    q = copy.copy(velma.qar)
-                    q[1] = 110.0/180.0*math.pi
-                    q[3] -= q_min
-                    q_traj.append(q)
-                first_collision = self.openrave.showTrajectory(0.1, qar_list=q_traj)
-                print first_collision
+            traj = self.openrave.planMove(T_B_Ed)
+            if traj != None:
+                velma.moveWristTrajJoint(traj[0], traj[1], Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+            else:
+                print "colud not plan trajectory"
+                rospy.sleep(4.0)
+                exit(0)
 
-            while True:
-                # check if singularity passing is required
-                if velma.qar[3] * min_q[3] < 0.0:
-                    q3_flip = True
-                else:
-                    q3_flip = False
-                if velma.qar[5] * min_q[5] < 0.0:
-                    q5_flip = True
-                else:
-                    q5_flip = False
-
-                if q3_flip or q5_flip:
-                    print "please flip the specified joints:"
-                    print "required flips: q[3]: %s   q[5]: %s"%(q3_flip, q5_flip)
-                    print "setting stiffness to very low value"
-                    velma.moveImpedance(velma.k_error, 0.5)
-                    if velma.checkStopCondition(0.5):
-                        exit(0)
-                    if simulation_only:
-                        velma.updateTransformations()
-                        T_B_Wd = velma.T_B_W
-                        velma.qar = copy.copy(min_q)
-                        # wait for openrave env update
-                        rospy.sleep(2.0)
-                        velma.moveWrist(T_B_Wd, 3.0, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
-                    else:
-                        raw_input("Press Enter after joints are flipped...")
-                else:
-                    print "the arm is in proper joint subspace"
-                    break
-
-                if velma.checkStopCondition():
-                    break
-            if velma.checkStopCondition():
-                break
-
-            vis = self.openrave.getVisibility("object", velma.T_B_C, pub_marker=self.pub_marker, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.1)
-            print "vis: %s"%(vis)
-
-            self.executeTrajectoryInOneSubspace(T_Br_Ed, velma, velma_ikr)
-
-            final_config = self.openrave.getFinalConfig(grasp)
+            final_config, contacts = self.openrave.getFinalConfig(grasp)
             print "final_config:"
             print final_config
+            print "contacts: %s"%(len(contacts))
             print "standoff: %s"%(self.openrave.getGraspStandoff(grasp))
 
             raw_input("Press Enter to close fingers for pre-grasp...")
             # close the fingers for pre-grasp
             ad = 10.0/180.0*math.pi
             velma.move_hand_client([final_config[0]-ad, final_config[1]-ad, final_config[2]-ad, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+#            velma.move_hand_client([final_config[0], final_config[1], final_config[2], final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
 
             print "setting stiffness to lower value"
             velma.moveImpedance(k_grasp, 3.0)
@@ -627,18 +609,22 @@ Class for grasp learning.
             # lift the object up
             velma.updateTransformations()
 
+            T_B_Ebeforelift = velma.T_B_W * velma.T_W_E
             T_B_Wd = PyKDL.Frame(PyKDL.Vector(0,0,0.1)) * velma.T_B_W
+            # save the initial position after lift up
+            T_B_Eafterlift = T_B_Wd * velma.T_W_E
+
             duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
-            velma.moveWrist2(T_B_Wd*velma.T_W_T)
-            raw_input("Press Enter to lift the object up in " + str(duration) + " s...")
-            if velma.checkStopCondition():
-                break
             velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
             if velma.checkStopCondition(duration):
                 break
 
+            print "checking the orientation of the object..."
+            # TODO
+            stable_grasp = True
+
             # basic orientations of the gripper, we can rotate them in global z axis and move them around
-            main_R_Br_E = [
+            main_R_Br_E2 = [
             PyKDL.Frame(),                                           # gripper points up
             PyKDL.Frame(PyKDL.Rotation.RotX(180.0/180.0*math.pi)),    # gripper points down
             PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi)),     # gripper points right (E.y points up)
@@ -646,52 +632,80 @@ Class for grasp learning.
             PyKDL.Frame(PyKDL.Rotation.RotY(90.0/180.0*math.pi)),     # gripper points to front (E.x points down)
             PyKDL.Frame(PyKDL.Rotation.RotY(-90.0/180.0*math.pi)),    # gripper points to back (E.x points up)
             ]
+            main_R_Br_E = [
+            [PyKDL.Frame(),1],                                           # gripper points up
+            [PyKDL.Frame(PyKDL.Rotation.RotX(180.0/180.0*math.pi)),0],    # gripper points down
+            [PyKDL.Frame(PyKDL.Rotation.RotX(90.0/180.0*math.pi)),3],     # gripper points right (E.y points up)
+            [PyKDL.Frame(PyKDL.Rotation.RotX(-90.0/180.0*math.pi)),2],    # gripper points left (E.y points down)
+            [PyKDL.Frame(PyKDL.Rotation.RotY(90.0/180.0*math.pi)),5],     # gripper points to front (E.x points down)
+            [PyKDL.Frame(PyKDL.Rotation.RotY(-90.0/180.0*math.pi)),4],    # gripper points to back (E.x points up)
+            ]
 
             vis = self.openrave.getVisibility("object", velma.T_B_C, pub_marker=self.pub_marker, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.2)
             print "vis: %s"%(vis)
 
+            self.openrave.printCollisions()
+            wrist_col = velmautils.WristCollisionAvoidance("right", None, 5.0/180.0*math.pi)
             velma.updateTransformations()
-            T_B_Einit = velma.T_B_W * velma.T_W_E
             list_T_B_Ed = []
             singularity_angle = 20.0/180.0*math.pi
             for basic_orientation_idx in range(0, len(main_R_Br_E)):
-                R_Br_E = main_R_Br_E[basic_orientation_idx]
+                if not stable_grasp:
+                    break
+                R_Br_E = main_R_Br_E[basic_orientation_idx][0]
                 print "generate reasonable destinations for one basic orientation no. %s"%(basic_orientation_idx)
                 # generate reasonable destinations for one basic orientation
                 list_T_B_Ed.append([])
-#                angle_steps = 35
                 angle_steps = 10
-                for angle_deg in np.linspace(0.0, 360.0*(float(angle_steps-1)/angle_steps), angle_steps):
-                    # calculate orientation (rotate along global z axis)
-                    R_Br_Ed = PyKDL.Frame(PyKDL.Rotation.RotZ(angle_deg/180.0*math.pi)) * R_Br_E
-                    # set the position
-                    T_E_G = PyKDL.Frame(PyKDL.Vector(0,0,0.2))
-                    T_G_E = T_E_G.Inverse()
-                    # iterate gripper position in camera frame:
-                    if True:
-#                    for x in np.linspace(-0.2, 0.2, 3):
-#                        for y in np.linspace(-0.2, 0.2, 3):
-                            for z in np.linspace(0.4, 0.6, 3):
-                                x=0
-                                y=0
-#                                z=0.75
-                                pt_G_in_B = velma.T_B_C * PyKDL.Vector(x,y,z)
-                                T_B_Gd = PyKDL.Frame(copy.deepcopy(R_Br_Ed.M), pt_G_in_B)
-                                T_B_Ed = T_B_Gd * T_G_E
-                                q_out_all = velma_ikr.getAllDistinctConfigurations(T_B_Ed, velma.T_B_T2.Inverse())
-                                q_out_ok = []
-                                for q_out in q_out_all:
-                                    if math.fabs(q_out[3]) > singularity_angle and math.fabs(q_out[5]) > singularity_angle:
-                                        q_out_ok.append(q_out)
-                                if len(q_out_ok) > 0:
-                                    list_T_B_Ed[-1].append( [T_B_Ed, q_out_ok] )
+                found_solution = False
+                for r in np.linspace(0.0, 0.2, 5):
+                    density = 10.0    # per meter
+#                    L = 2.0 * math.pi * r
+                    v_sphere = velmautils.generateNormalsSphere(1.0/(r*density))
+                    print "normals: %s"%(len(v_sphere))
+                    for angle_deg in np.linspace(0.0, 360.0*(float(angle_steps-1)/angle_steps), angle_steps):
+                        # calculate orientation (rotate along global z axis)
+                        R_Br_Ed = PyKDL.Frame(PyKDL.Rotation.RotZ(angle_deg/180.0*math.pi)) * R_Br_E
+                        # set the position
+                        T_E_G = PyKDL.Frame(PyKDL.Vector(0,0,0.2))
+                        T_G_E = T_E_G.Inverse()
+                        # iterate gripper position in camera frame:
+
+                        A = 4.0 * math.pi * r * r
+                        density = 100.0    # per square meter
+                        steps = int(A * density) + 1
+                        for i in range(0, steps):
+                            v = r * v_sphere[random.randint(0, len(v_sphere)-1)]#PyKDL.Frame( PyKDL.Rotation.RotX(random.uniform(-math.pi, math.pi)) * PyKDL.Rotation.RotY(random.uniform(-math.pi, math.pi))) * PyKDL.Vector(0,0,r)
+                            pt_G_in_B = velma.T_B_C * PyKDL.Vector(0, 0, 0.5) + v
+                            T_B_Gd = PyKDL.Frame(copy.deepcopy(R_Br_Ed.M), pt_G_in_B)
+                            T_B_Ed = T_B_Gd * T_G_E
+                            q_out = self.openrave.findIkSolution(T_B_Ed)
+                            if q_out != None:
+                                if len(wrist_col.getQ5Q6SpaceSectors(q_out[5],q_out[6])) > 0:
+                                    vis = self.openrave.getVisibility("object", velma.T_B_C, qar=q_out, pub_marker=None, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.2)
+#                                    print "vis: %s   i: %s   angle: %s    r: %s    o: %s"%(vis, i, angle_deg, r, basic_orientation_idx)
+                                    if vis > 0.8:
+                                        found_solution = True
+                                        list_T_B_Ed[-1].append( [T_B_Ed, q_out] )
+                                        print "i: %s"%(i)
+                                        break
+#                            else:
+#                                print "q_out == None"
+                        if found_solution:
+                            print "angle_deg: %s"%(angle_deg)
+                            break
+                    if found_solution:
+                        print "r: %s"%(r)
+                        break
                 print "generated %s poses"%(len(list_T_B_Ed[-1]))
 
             checked_orientations = []
 
             while len(checked_orientations) < len(main_R_Br_E):
+                if not stable_grasp:
+                    break
+
                 velma.updateTransformations()
-                T_B_Einit = velma.T_B_W * velma.T_W_E
 
                 # iterate through all poses and get the closest with reasonable visibility
                 print "looking for reachable and visible poses..."
@@ -699,53 +713,107 @@ Class for grasp learning.
                 best_basic_orientation_idx = -1
                 best_pose_idx = -1
                 best_q_dest = None
+                best_traj = None
                 for basic_orientation_idx in range(0, len(main_R_Br_E)):
                     if basic_orientation_idx in checked_orientations:
                         continue
                     for pose_idx in range(0, len(list_T_B_Ed[basic_orientation_idx])):
-                        T_B_Ed = list_T_B_Ed[basic_orientation_idx][pose_idx][0]
+                            T_B_Ed = list_T_B_Ed[basic_orientation_idx][pose_idx][0]
+                            q_dest = list_T_B_Ed[basic_orientation_idx][pose_idx][1]
 
-                        # get trajectiries within the same joint subspace only
-                        q_dest = self.flipsNeeded(T_B_Einit, T_B_Ed, velma, velma_ikr, velma.qar)
-#                        lin_traj_possible, lin_traj_q_out = velma_ikr.isLinearTrajectoryPossibleInOneSubspace(T_B_Einit, T_B_Ed, velma.qar, velma.T_B_T2.Inverse())
-#                        if lin_traj_possible:
-                        if q_dest != None:
-#                            vis = self.openrave.getVisibility("object", velma.T_B_C, qar=lin_traj_q_out, pub_marker=None, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.2)
-                            vis = self.openrave.getVisibility("object", velma.T_B_C, qar=q_dest, pub_marker=None, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.2)
-                            if vis > 0.8:
-                                cost = 0.0
-                                for q_idx in range(0, 7):
-#                                    cost += (velma.qar[q_idx]-lin_traj_q_out[q_idx])*(velma.qar[q_idx]-lin_traj_q_out[q_idx])
-                                    cost += (velma.qar[q_idx]-q_dest[q_idx])*(velma.qar[q_idx]-q_dest[q_idx])
-                                if cost < min_cost:
-                                    min_cost = cost
-                                    best_basic_orientation_idx = basic_orientation_idx
-                                    best_pose_idx = pose_idx
-                                    best_q_dest = q_dest
+                            cost = 0.0
+                            for q_idx in range(0, 7):
+                                cost += (velma.qar[q_idx]-q_dest[q_idx])*(velma.qar[q_idx]-q_dest[q_idx])
+                            if velma.qar[3]*q_dest[3] < 0:
+                                cost += 100.0
+                            if cost < min_cost:
+                                min_cost = cost
+                                best_basic_orientation_idx = basic_orientation_idx
+                                best_pose_idx = pose_idx
+                                best_q_dest = q_dest
+                                best_traj = traj
 
-#                if best_basic_orientation_idx < 0:
+                print "best_basic_orientation_idx: %s best_pose_idx: %s   min_cost: %s"%(best_basic_orientation_idx, best_pose_idx, min_cost)
 
-                print "best_basic_orientation_idx: %s best_pose_idx: %s"%(best_basic_orientation_idx, best_pose_idx)
+#                self.openrave.showTrajectory(3.0, qar_list=[best_q_dest, best_q_dest])
 
-                self.openrave.showTrajectory(3.0, qar_list=[best_q_dest, best_q_dest])
 
-                T_Br_Ed = list_T_B_Ed[best_basic_orientation_idx][best_pose_idx][0]
-                self.executeTrajectoryInOneSubspace(T_Br_Ed, velma, velma_ikr)
+                T_B_Ed = list_T_B_Ed[best_basic_orientation_idx][best_pose_idx][0]
+                q_dest = list_T_B_Ed[best_basic_orientation_idx][best_pose_idx][1]
+                traj = self.openrave.planMoveInJoints(q_dest)
+                if traj != None:
+                    velma.moveWristTrajJoint(traj[0], traj[1], Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+                else:
+                    print "colud not plan trajectory"
+                    rospy.sleep(4.0)
+                    exit(0)
+
+#                self.executeTrajectoryInOneSubspace(T_Br_Ed, velma, velma_ikr)
                 vis = self.openrave.getVisibility("object", velma.T_B_C, pub_marker=None, fov_x=camera_fov_x, fov_y=camera_fov_y, min_dist=0.2)
                 print "reached the desired pose. Visibility: %s"%(vis)
 
                 checked_orientations.append(best_basic_orientation_idx)
+                if best_basic_orientation_idx == 0:
+                    checked_orientations.append(1)
+                if best_basic_orientation_idx == 1:
+                    checked_orientations.append(0)
+                if best_basic_orientation_idx == 2:
+                    checked_orientations.append(3)
+                if best_basic_orientation_idx == 3:
+                    checked_orientations.append(2)
+                if best_basic_orientation_idx == 4:
+                    checked_orientations.append(5)
+                if best_basic_orientation_idx == 5:
+                    checked_orientations.append(4)
                 print "checked_orientations: %s"%(checked_orientations)
 
-            # show the poses
-#            for v in vis_list:
-#                print "vis: %s"%(v[0])
-#                self.openrave.showTrajectory(1.0, qar_list=[v[1], v[1]])
+                print "checking the orientation of the object..."
+                # TODO
+                stable_grasp = True
 
-            rospy.sleep(2.0)
+            if stable_grasp:
+                print "moving to initial pose"
+                traj = self.openrave.planMove(T_B_Eafterlift)
+                if traj != None:
+                    velma.moveWristTrajJoint(traj[0], traj[1], Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+                else:
+                    print "colud not plan trajectory"
+                    rospy.sleep(4.0)
+                    exit(0)
 
-            exit(0)
+                T_B_Wd = T_B_Ebeforelift * velma.T_E_W
+                duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
+                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+                if velma.checkStopCondition(duration):
+                    break
+            else:
+                # TODO: check the position of the object and decide what to do
+                pass
 
+            velma.move_hand_client([0, 0, 0, 0], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+
+            print "releasing the body"
+            # release the body
+            if simulation_only: 
+                self.openrave.release("object")
+            else:
+                pass
+
+            self.allowUpdateObjects()
+
+            print "moving the gripper up"
+            T_B_Wd = T_B_Eafterlift * velma.T_E_W
+            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
+            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+            if velma.checkStopCondition(duration):
+                break
+
+
+#            rospy.sleep(2.0)
+
+#            raw_input("Press Enter to exit...")
+#            exit(0)
+            continue
 
 
 
