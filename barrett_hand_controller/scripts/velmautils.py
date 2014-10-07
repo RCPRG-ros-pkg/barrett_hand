@@ -69,7 +69,7 @@ class MarkerPublisher:
         marker.ns = namespace
         marker.id = i
         marker.type = m_type
-        marker.action = 0
+        marker.action = Marker.ADD
         if T != None:
             point = T*pt
             q = T.M.GetQuaternion()
@@ -82,6 +82,19 @@ class MarkerPublisher:
         self.pub_marker.publish(m)
         return i+1
 
+    def eraseMarkers(self, idx_from, idx_to, namespace='default'):
+        m = MarkerArray()
+        for idx in range(idx_from, idx_to):
+            marker = Marker()
+            marker.header.stamp = rospy.Time.now()
+            marker.ns = namespace
+            marker.id = idx
+            marker.action = Marker.DELETE
+            m.markers.append(marker)
+        if len(m.markers) > 0:
+            self.pub_marker.publish(m)
+
+
     def publishMultiPointsMarker(self, pt, base_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=None):
         m = MarkerArray()
         ret_id = copy.copy(base_id)
@@ -93,7 +106,7 @@ class MarkerPublisher:
             marker.id = ret_id
             ret_id += 1
             marker.type = m_type
-            marker.action = 0
+            marker.action = Marker.ADD
             if T != None:
                 point = T*pt[i]
                 marker.pose = Pose( Point(point.x(),point.y(),point.z()), Quaternion(0,0,0,1) )
@@ -113,7 +126,7 @@ class MarkerPublisher:
         marker.ns = namespace
         marker.id = i
         marker.type = Marker.ARROW
-        marker.action = 0
+        marker.action = Marker.ADD
         marker.points.append(Point(v1.x(), v1.y(), v1.z()))
         marker.points.append(Point(v2.x(), v2.y(), v2.z()))
         marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
@@ -195,6 +208,7 @@ def sampleMesh(vertices, indices, sample_dist, pt_list, radius):
         points = []
         for s2 in pt_list:
             for face in indices:
+#                face = indices[7]
                 A = vertices[face[0]]
                 B = vertices[face[1]]
                 C = vertices[face[2]]
@@ -219,6 +233,12 @@ def sampleMesh(vertices, indices, sample_dist, pt_list, radius):
                     radius2_square = 0.0
                 radius2 = math.sqrt(radius2_square)
                 # TODO: check only the face's area of interest
+                v0p = v0 * v1 * v0
+                v0p.Normalize()
+                v1p = v1 * v0 * v1
+                v1p.Normalize()
+                d0 = PyKDL.dot(v0p, (s_on-pt_a))
+                d1 = PyKDL.dot(v1p, (s_on-pt_a))
                 n0 = v0.Norm()
                 steps0 = int(n0/sample_dist)
                 if steps0 < 1:
@@ -231,10 +251,22 @@ def sampleMesh(vertices, indices, sample_dist, pt_list, radius):
                 if steps1 < 1:
                     steps1 = 1
                 step_len1 = h/steps1
-                x0 = step_len0/2.0
-                while x0 < n0:
-                    x1 = step_len1/2.0
-                    while x1 < h*(1.0-x0/n0):
+
+                x0_min = (d1-radius)/math.sin(angle)
+                x0_max = (d1+radius)/math.sin(angle)
+                x1_min = d0-radius
+                x1_max = d0+radius
+
+                x0_min2 = max(step_len0/2.0, x0_min)
+                x0_max2 = min(n0, x0_max)
+                if x0_min2 >= x0_max2:
+                    continue
+                for x0 in np.arange(x0_min2, x0_max2, step_len0):
+                    x1_min2 = max(step_len1/2.0, x1_min)
+                    x1_max2 = min(h*(1.0-x0/n0), x1_max)
+                    if x1_min2 >= x1_max2:
+                        continue
+                    for x1 in np.arange(x1_min2, x1_max2, step_len1):
                         point = pt_a + v0*(x0/n0) + v1*(x1/h)
                         in_range = False
                         for s2 in pt_list:
@@ -243,8 +275,6 @@ def sampleMesh(vertices, indices, sample_dist, pt_list, radius):
                                 break
                         if in_range:
                             points.append(point)
-                        x1 += step_len1
-                    x0 += step_len0
         if len(pt_list) == 1:
             return points
         min_dists = []

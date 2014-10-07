@@ -40,6 +40,8 @@ from cartesian_trajectory_msgs.msg import *
 from visualization_msgs.msg import *
 import actionlib
 from actionlib_msgs.msg import *
+from trajectory_msgs.msg import *
+from control_msgs.msg import *
 from threading import Lock
 
 import tf
@@ -47,6 +49,7 @@ from tf import *
 from tf.transformations import * 
 import tf_conversions.posemath as pm
 from tf2_msgs.msg import *
+from controller_manager_msgs.srv import *
 
 import PyKDL
 import math
@@ -71,39 +74,41 @@ class Velma:
     """
 Class for velma robot.
 """
+
     def get_pressure_sensors_info_client(self):
-        service_name = '/' + self.prefix + '_hand/get_pressure_info'
-        rospy.wait_for_service(service_name)
         try:
-            get_pressure_sensors_info = rospy.ServiceProxy(service_name, BHGetPressureInfo)
-            resp = get_pressure_sensors_info()
+            if not hasattr(self, 'get_pressure_sensors_info') or self.get_pressure_sensors_info == None:
+                rospy.wait_for_service('/' + self.prefix + '_hand/get_pressure_info')
+                self.get_pressure_sensors_info = rospy.ServiceProxy('/' + self.prefix + '_hand/get_pressure_info', BHGetPressureInfo)
+            resp = self.get_pressure_sensors_info()
             return resp.info
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
     def calibrate_tactile_sensors(self):
-        service_name = '/' + self.prefix + '_hand/calibrate_tactile_sensors'
-        rospy.wait_for_service(service_name)
         try:
-            calibrate_tactile_sensors = rospy.ServiceProxy(service_name, Empty)
-            resp = calibrate_tactile_sensors()
+            if not hasattr(self, 'calibrate_tactile_sensors') or self.calibrate_tactile_sensors == None:
+                rospy.wait_for_service('/' + self.prefix + '_hand/calibrate_tactile_sensors')
+                self.calibrate_tactile_sensors = rospy.ServiceProxy('/' + self.prefix + '_hand/calibrate_tactile_sensors', Empty)
+            resp = self.calibrate_tactile_sensors()
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
     def reset_fingers(self):
-        service_name = '/' + self.prefix + '_hand/reset_fingers'
-        rospy.wait_for_service(service_name)
         try:
-            reset_fingers = rospy.ServiceProxy(service_name, Empty)
-            resp = reset_fingers()
+            if not hasattr(self, 'reset_fingers') or self.reset_fingers == None:
+                rospy.wait_for_service('/' + self.prefix + '_hand/reset_fingers')
+                self.reset_fingers = rospy.ServiceProxy('/' + self.prefix + '_hand/reset_fingers', Empty)
+            resp = self.reset_fingers()
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
     def set_median_filter(self, samples):
-        rospy.wait_for_service('/' + self.prefix + '_hand/set_median_filter')
         try:
-            set_median_filter = rospy.ServiceProxy('/' + self.prefix + '_hand/set_median_filter', BHSetMedianFilter)
-            resp1 = set_median_filter(samples)
+            if not hasattr(self, 'set_median_filter') or self.set_median_filter == None:
+                rospy.wait_for_service('/' + self.prefix + '_hand/set_median_filter')
+                self.set_median_filter = rospy.ServiceProxy('/' + self.prefix + '_hand/set_median_filter', BHSetMedianFilter)
+            resp1 = self.set_median_filter(samples)
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
@@ -784,19 +789,20 @@ Class for velma robot.
 
         self.emergency_stop_active = False
 
+        # cartesian wrist trajectory for right arm
         self.action_right_trajectory_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_trajectory", CartesianTrajectoryAction)
         self.action_right_trajectory_client.wait_for_server()
 
+        # cartesian tool trajectory for right arm in wrist frame
         self.action_tool_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/tool_trajectory", CartesianTrajectoryAction)
         self.action_tool_client.wait_for_server()
 
+        # cartesian impedance trajectory for right arm
         self.action_impedance_client = actionlib.SimpleActionClient("/" + self.prefix + "_arm/cartesian_impedance", CartesianImpedanceAction)
         self.action_impedance_client.wait_for_server()
 
         self.pub_wrench = rospy.Publisher("/"+self.prefix+"_arm/wrench_stamped", WrenchStamped)
 
-        self.pub_trajectory = rospy.Publisher("/"+self.prefix+"_arm/trajectory", CartesianTrajectory)
-        self.pub_impedance = rospy.Publisher("/"+self.prefix+"_arm/impedance", CartesianImpedanceTrajectory)
         self.listener = tf.TransformListener();
         self.br = tf.TransformBroadcaster()
 
@@ -904,29 +910,42 @@ Class for velma robot.
         self.action_tool_client.send_goal(action_tool_goal)
 
     def moveImpedance(self, k, t, stamp=None, damping=Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7))):
-        self.action_impedance_goal = CartesianImpedanceGoal()
+        action_impedance_goal = CartesianImpedanceGoal()
         if stamp != None:
-            self.action_impedance_goal.trajectory.header.stamp = stamp
+            action_impedance_goal.trajectory.header.stamp = stamp
         else:
-            self.action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
-        self.action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
+            action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
+        action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
         rospy.Duration(t),
         CartesianImpedance(k,damping)))
-        self.action_impedance_client.send_goal(self.action_impedance_goal)
+        self.action_impedance_client.send_goal(action_impedance_goal)
 
     def moveImpedanceTraj(self, k_n, t_n, stamp=None, damping=Wrench(Vector3(0.7, 0.7, 0.7),Vector3(0.7, 0.7, 0.7))):
-        self.action_impedance_goal = CartesianImpedanceGoal()
+        action_impedance_goal = CartesianImpedanceGoal()
         if stamp != None:
-            self.action_impedance_goal.trajectory.header.stamp = stamp
+            action_impedance_goal.trajectory.header.stamp = stamp
         else:
-            self.action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
+            action_impedance_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
         i = 0
         for k in k_n:
-            self.action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
+            action_impedance_goal.trajectory.points.append(CartesianImpedanceTrajectoryPoint(
             rospy.Duration(t_n[i]),
             CartesianImpedance(k,damping)))
 
-        self.action_impedance_client.send_goal(self.action_impedance_goal)
+        self.action_impedance_client.send_goal(action_impedance_goal)
+
+    def moveWristJoint(self, q_dest, time, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        goal = FollowJointTrajectoryGoal()
+        goal.trajectory.joint_names = ['torso_0_joint', 'torso_1_joint',
+        'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint',
+        'left_arm_0_joint', 'left_arm_1_joint', 'left_arm_2_joint', 'left_arm_3_joint', 'left_arm_4_joint', 'left_arm_5_joint', 'left_arm_6_joint']
+        goal.trajectory.points.append(JointTrajectoryPoint(self.qt + q_dest + self.qal, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [], [], rospy.Duration(time)))
+        goal.trajectory.header.stamp = rospy.get_rostime() + rospy.Duration(0.2)
+        self.action_right_joint_client.send_goal(goal)
+
+    def moveWristTrajJoint(self, q_dest, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        # TODO
+        print "moveWristTrajJoint: implement this"
 
     def stopArm(self):
 #        if self.action_right_trajectory_client.gh:
@@ -1406,4 +1425,43 @@ Class for velma robot.
             tab_T_B_Wd.append(T_B_Wd)
             times.append(time)
         return [tab_T_B_Wd, times]
+
+    def switchToJoint(self):
+        result = False
+        try:
+            if not hasattr(self, 'conmanSwitch') or self.conmanSwitch == None:
+                rospy.wait_for_service('/controller_manager/switch_controller')
+                self.conmanSwitch = rospy.ServiceProxy('/controller_manager/switch_controller', SwitchController)
+            # '2' is for STRICT
+            if self.conmanSwitch(['FK', 'JntImp', 'TrajectoryGeneratorJoint'], ['PoseIntLeft', 'PoseIntRight'], 2):
+                result = True
+                # joint trajectory for right arm
+                self.action_right_joint_client = actionlib.SimpleActionClient('/spline_trajectory_action_joint', FollowJointTrajectoryAction)
+                self.action_right_joint_client.wait_for_server()
+
+        except rospy.ROSInterruptException:
+            print "rospy.ROSInterruptException"
+        except IOError:
+            print "IOError"
+        except KeyError:
+            print "KeyError"
+        return result
+
+    def switchToCart(self):
+        result = False
+        try:
+            if not hasattr(self, 'conmanSwitch') or self.conmanSwitch == None:
+                rospy.wait_for_service('/controller_manager/switch_controller')
+                self.conmanSwitch = rospy.ServiceProxy('/controller_manager/switch_controller', SwitchController)
+            # '2' is for STRICT
+            if self.conmanSwitch(['PoseIntLeft', 'PoseIntRight'], ['FK', 'JntImp', 'TrajectoryGeneratorJoint'], 2):
+                result = True
+        except rospy.ROSInterruptException:
+            print "rospy.ROSInterruptException"
+        except IOError:
+            print "IOError"
+        except KeyError:
+            print "KeyError"
+        return result
+
 

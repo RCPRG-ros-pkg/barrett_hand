@@ -84,19 +84,31 @@ def gripDist(a, b):
     def estTransform(l1, l2):
         pos1 = []
         n1 = []
+        def calculateScore(p1, p2, n1, n2):
+#            angle_score = 2.0*velmautils.getAngle(n1,n2)/math.pi
+            pos_score = 1.0*(p1-p2).Norm()
+#            pos_score = 2.0*velmautils.getAngle(p1, p2)/math.pi
+            return pos_score
+        def calculateScore2(p1, p2, n1, n2):
+            angle_score = 2.0*velmautils.getAngle(n1,n2)/math.pi
+#            pos_score = 1.0*(p1-p2).Norm()
+#            pos_score = 2.0*velmautils.getAngle(p1, p2)/math.pi
+            return angle_score
         for f in l1:
             pos1.append( f * PyKDL.Vector() )
             n1.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
         def calc_R(xa, ya, za):
             ret = []
             """ calculate the minimum distance of each contact point from jar surface pt """
-            t = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Frame(PyKDL.Rotation.RotZ(za))
+            t = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Frame(PyKDL.Rotation.RotX(za))
             index1 = 0
             for f in l2:
                 dest_f = t * f
                 pos2 = dest_f * PyKDL.Vector()
-                n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
-                ret.append((pos1[index1]-pos2).Norm()*5.0 + math.fabs(velmautils.getAngle(n1[index1],n2))/math.pi)
+                n2 = dest_f * PyKDL.Vector(0,0,1) - pos2
+#                n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
+                s = calculateScore2(pos1[index1], pos2, n1[index1], n2)
+                ret.append(s)
                 index1 += 1
             return np.array(ret)
         def f_2(c):
@@ -110,26 +122,141 @@ def gripDist(a, b):
         angles_2 = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi, math.pi),(-math.pi, math.pi),(-math.pi, math.pi)], iprint=0)
         # least squares without constraints
 #        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
-        t = PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[0])) * PyKDL.Frame(PyKDL.Rotation.RotY(angles_2[1])) * PyKDL.Frame(PyKDL.Rotation.RotZ(angles_2[2]))
+        t = PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[0])) * PyKDL.Frame(PyKDL.Rotation.RotY(angles_2[1])) * PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[2]))
         index1 = 0
         score = 0.0
+        ret = []
+        ret2 = []
+        n2_s = []
+        pos2_s = []
+        n1_s = []
+        pos1_s = []
+        for f in l2:
+            dest_f = t * f
+            pos2 = dest_f * PyKDL.Vector()
+            n2 = dest_f * PyKDL.Vector(0,0,1) - pos2
+#            n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
+#            score += calculateScore(pos1[index1], pos2, n1[index1], n2)#((pos1[index1]-pos2).Norm()*5.0 + math.fabs(velmautils.getAngle(n1[index1],n2))/math.pi)
+            s = calculateScore(pos1[index1], pos2, n1[index1], n2)
+            s2 = calculateScore2(pos1[index1], pos2, n1[index1], n2)
+            ret.append(s+s2)
+            ret2.append(s2)
+            n2_s.append(n2)
+            pos2_s.append(pos2)
+            n1_s.append(n1[index1])
+            pos1_s.append(pos1[index1])
+            index1 += 1
+        return math.fsum(np.array(ret)**2), angles_2, ret2, n1_s, pos1_s, n2_s, pos2_s
+
+    fr_a = []
+    T_O_Com = PyKDL.Frame(a.grasped_object.com)
+    T_Com_O = T_O_Com.Inverse()
+    for T_O_C in a.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_a.append( T_Com_C )
+
+    fr_b = []
+    for T_O_C in b.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_b.append( T_Com_C )
+
+    if len(fr_a) >= len(fr_b):
+        fr_0 = fr_a
+        fr_1 = fr_b
+    else:
+        fr_0 = fr_b
+        fr_1 = fr_a
+
+    all_scores = []
+    all_scores2 = []
+    all_angles = []
+    n1_s_list = []
+    pos1_s_list = []
+    n2_s_list = []
+    pos2_s_list = []
+    min_score = 10000.0
+    min_angles = None
+    # estimate for each permutation of the smaller set
+    for it in itertools.permutations(fr_1):
+        score, angles, score2, n1_s, pos1_s, n2_s, pos2_s = estTransform(fr_0, it)
+        all_scores.append(score)
+        all_scores2.append(score2)
+        all_angles.append(angles)
+        n2_s_list.append(n2_s)
+        pos2_s_list.append(pos2_s)
+        n1_s_list.append(n1_s)
+        pos1_s_list.append(pos1_s)
+        if score < min_score:
+            min_score = score
+            min_angles = angles
+    return min_score, min_angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list
+
+
+def gripDist2(a, b):
+    def estTransform(l1, l2):
+        pos1 = []
+        n1 = []
+        def calculateScore(p1, p2, n1, n2):
+            angle_score = 2.0*velmautils.getAngle(n1,n2)/math.pi
+            pos_score = 10.0*(p1-p2).Norm()
+#            pos_score = 2.0*velmautils.getAngle(p1, p2)/math.pi
+            return pos_score, angle_score
+        for f in l1:
+            pos1.append( f * PyKDL.Vector() )
+            n1.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        def calc_R(xa, ya, za):
+            ret = []
+            """ calculate the minimum distance of each contact point from jar surface pt """
+            t = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Frame(PyKDL.Rotation.RotX(za))
+            index1 = 0
+            for f in l2:
+                dest_f = t * f
+                pos2 = dest_f * PyKDL.Vector()
+                n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
+                s1, s2 = calculateScore(pos1[index1], pos2, n1[index1], n2)
+                ret.append(s1)
+                ret.append(s2)
+                index1 += 1
+            return np.array(ret)
+        def f_2(c):
+            """ calculate the algebraic distance between each contact point and jar surface pt """
+            Di = calc_R(*c)
+            return Di
+        def sumf_2(p):
+            return math.fsum(f_2(p)**2)
+        angles_estimate = 0.0, 0.0, 0.0
+        # least squares with constraints
+        angles_2 = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi, math.pi),(-math.pi, math.pi),(-math.pi, math.pi)], iprint=0)
+        # least squares without constraints
+#        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
+        t = PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[0])) * PyKDL.Frame(PyKDL.Rotation.RotY(angles_2[1])) * PyKDL.Frame(PyKDL.Rotation.RotX(angles_2[2]))
+        index1 = 0
+        score = 0.0
+        ret = []
         for f in l2:
             dest_f = t * f
             pos2 = dest_f * PyKDL.Vector()
             n2 = PyKDL.Frame(dest_f.M) * PyKDL.Vector(0,0,1)
-            score += ((pos1[index1]-pos2).Norm()*5.0 + math.fabs(velmautils.getAngle(n1[index1],n2))/math.pi)
+#            score += calculateScore(pos1[index1], pos2, n1[index1], n2)#((pos1[index1]-pos2).Norm()*5.0 + math.fabs(velmautils.getAngle(n1[index1],n2))/math.pi)
+            s1, s2 = calculateScore(pos1[index1], pos2, n1[index1], n2)
+            ret.append(s1)
+            ret.append(s2)
             index1 += 1
-        return score, angles_2
+        return math.fsum(np.array(ret)**2), angles_2
 
     fr_a = []
-    for fr in a.contacts:
-        fr_a.append( PyKDL.Frame(-a.grasped_object.com) * fr )
+    T_O_Com = PyKDL.Frame(a.grasped_object.com)
+    T_Com_O = T_O_Com.Inverse()
+    for T_O_C in a.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_a.append( T_Com_C )
 
     fr_b = []
-    for fr in b.contacts:
-        fr_b.append( PyKDL.Frame(-b.grasped_object.com) * fr )
+    for T_O_C in b.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_b.append( T_Com_C )
 
-    if len(fr_a) > len(fr_b):
+    if len(fr_a) >= len(fr_b):
         fr_0 = fr_a
         fr_1 = fr_b
     else:
@@ -138,15 +265,13 @@ def gripDist(a, b):
 
     min_score = 10000.0
     min_angles = None
-#    print "scores:"
     # estimate for each permutation of the smaller set
     for it in itertools.permutations(fr_1):
         score, angles = estTransform(fr_0, it)
         if score < min_score:
             min_score = score
             min_angles = angles
-#        print score
-    return min_score, min_angles
+    return min_score, min_angles, None, None, None, None, None, None, None
 
 def gripUnitTest(obj_grasp):
     print "gripUnitTest begin"

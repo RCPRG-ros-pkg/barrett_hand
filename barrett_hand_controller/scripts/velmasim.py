@@ -794,18 +794,19 @@ Class for velma robot.
                 rospy.sleep(time_diff/10.0)
             i += 1
 
+    def moveWristJoint(self, q_dest, time, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        self.qar = q_dest
+        rospy.sleep(time)
+
     def moveWristTrajJoint(self, q_dest, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
         i = 0
         for q in q_dest:
-#            print "moveWristTrajJoint: %s:   %s"%(i, q)
             if i > 0:
                 time_diff = times[i] - times[i-1]
             else:
                 time_diff = times[i]
-#            self.dofs_lock.acquire()
             self.qar = q
-#            self.dofs_lock.release()
-            rospy.sleep(time_diff)#/5.0)
+            rospy.sleep(time_diff)
             i += 1
 
     def moveTool(self, wrist_frame, t):
@@ -928,13 +929,15 @@ Class for velma robot.
 #        pose = self.listener.lookupTransform('torso_base', self.prefix+'_arm_cmd', rospy.Time(0))
 #        self.T_B_T_cmd = pm.fromTf(pose)
 
-#        pose = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerOneKnuckleOneLink', rospy.Time(0))
-#        self.T_E_F11 = pm.fromTf(pose)
+        self.T_B_F11 = self.openrave.getLinkPose(self.prefix+'_HandFingerOneKnuckleOneLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_E_F11 = self.T_B_E.Inverse() * self.T_B_F11
+        self.T_F11_E = self.T_E_F11.Inverse()
 
-#        pose = self.listener.lookupTransform('right_HandPalmLink', 'right_HandFingerTwoKnuckleOneLink', rospy.Time(0))
-#        self.T_E_F21 = pm.fromTf(pose)
+        self.T_B_F21 = self.openrave.getLinkPose(self.prefix+'_HandFingerTwoKnuckleOneLink', qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
+        self.T_E_F21 = self.T_B_E.Inverse() * self.T_B_F21
+        self.T_F21_E = self.T_E_F21.Inverse()
 
-#        self.T_E_F31 = PyKDL.Frame()
+        self.T_E_F31 = PyKDL.Frame()
 
     def getContactPoints(self, threshold, f1=True, f2=True, f3=True, palm=True):
         return [], []

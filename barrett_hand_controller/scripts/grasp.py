@@ -69,6 +69,7 @@ import openraveinstance
 import itertools
 import dijkstra
 import grip
+import operator
 
 # reference frames:
 # B - robot's base
@@ -246,6 +247,23 @@ Class for grasp learning.
             return min_grasp_idx, min_q
 
     def spin(self):
+
+        # test joint impedance controll
+        if False:
+            # create the robot interface for real hardware
+            velma = Velma()
+            print "created robot interface"
+            rospy.sleep(1.0)
+            velma.switchToJoint()
+            print "current q: %s"%(velma.qar)
+            q = copy.deepcopy(velma.qar)
+            q[6] += 0.1
+            print "next q:    %s"%(q)
+            raw_input("Press Enter to move the robot in joint in 20s...")
+            velma.moveWristJoint(q, 5.0, None)
+            rospy.sleep(5.0)
+            exit(0)
+
         simulation_only = True
         m_id = 0
 
@@ -485,29 +503,35 @@ Class for grasp learning.
             self.openrave.removeObject("box")
             self.openrave.removeObject("big_box")
 
+            obj_grasp.com = PyKDL.Vector(0.15,0,0)
             T_B_O = self.openrave.getPose("object")
+            T_O_B = T_B_O.Inverse()
+            vertices, faces = self.openrave.getMesh("object")
             # get the possible grasps for the current scene
             grasps,indices = self.openrave.generateGrasps("object", checkcollision=False, checkik=False, checkgrasper=True)
             print "generated %s grasps"%(len(grasps))
 
+            # show object in rviz
             m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
+            m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.01, 0.01, 0.01), T=T_B_O*PyKDL.Frame(obj_grasp.com))
 
+            grips = []
             for grasp_idx in range(0, len(grasps)):
+#            for grasp_idx in range(50, 70):
                 grasp = grasps[grasp_idx]
                 q, contacts = self.openrave.getFinalConfig(grasp)
                 if contacts == None:
                     contacts = []
-                print "i: %s   contacts: %s"%(grasp_idx, len(contacts))
+                print "grasp_idx: %s   contacts: %s"%(grasp_idx, len(contacts))
                 if len(contacts) == 0:
                     continue
+
+                T_B_E = self.openrave.getGraspTransform(grasp)
 #                self.openrave.showGrasp(grasp)
 
                 gr = grip.Grip(obj_grasp)
-                m_id = 0
-                # publish contacts
-                for c in contacts:
-                    c_B = c
-                    m_id = self.pub_marker.publishSinglePointMarker(c_B, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
+                self.pub_marker.eraseMarkers(2, m_id)
+                m_id = 2
 
                 checked_contacts = []
                 contacts_groups = []
@@ -536,30 +560,110 @@ Class for grasp learning.
                         center += T_B_O.Inverse() * contacts[c]
                     center *= 1.0/len(g)
                     centers.append(center)
-                    print g
 
-                print "contact centers: %s"%(centers)
                 for c in centers:
-                    c_B = T_B_O * c
-                    m_id = self.pub_marker.publishSinglePointMarker(c_B, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001))
-
-                T_O_B = T_B_O.Inverse()
-                vertices, indices = self.openrave.getMesh("object")
-                for c in centers:
-                        points = velmautils.sampleMesh(vertices, indices, 0.002, [c], 0.01)
-                        print len(points)
-                        m_id = self.pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.004, 0.004, 0.004), T=T_B_O)
+                        points = velmautils.sampleMesh(vertices, faces, 0.003, [c], 0.01)
+                        if len(points) == 0:
+                            continue
+#                        m_id = self.pub_marker.publishMultiPointsMarker(points, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.004, 0.004, 0.004), T=T_B_O)
                         # get the contact surface normal
                         fr = velmautils.estPlane(points)
                         # set the proper direction of the contact surface normal (fr.z axis)
+                        fr_B_p = T_B_O * fr * PyKDL.Vector(0,0,0)
+                        fr_B_z = PyKDL.Frame( copy.deepcopy((T_B_O * fr).M) ) * PyKDL.Vector(0,0,1)
+                        # get the finger in contact index
+                        P_F = PyKDL.Vector(0.0510813, -0.0071884, 0.0)
+                        finger_idx_min = -1
+                        d_min = 1000000.0
+                        for finger_idx in range(0,3):
+                            pt_B = T_B_E * velma.get_T_E_Fd( finger_idx, q[finger_idx], q[3]) * P_F
+                            d = (fr_B_p - pt_B).Norm()
+                            if d < d_min:
+                                d_min = d
+                                finger_idx_min = finger_idx
+                        print "finger_idx_min: %s"%(finger_idx_min)
+                        n_B = PyKDL.Frame( copy.deepcopy((T_B_E * velma.get_T_E_Fd( finger_idx_min, q[finger_idx_min], q[3])).M) ) * PyKDL.Vector(1,-1,0)
+                        if PyKDL.dot(n_B, fr_B_z) < 0:
+                            fr = fr * PyKDL.Frame(PyKDL.Rotation.RotX(math.pi))
                         # add the contact to the grip description
                         gr.addContact(fr)
-                        m_id = self.pub_marker.publishFrameMarker(T_B_O*fr, m_id)
-                        rospy.sleep(1.0)
+#                        m_id = self.pub_marker.publishFrameMarker(T_B_O*fr, m_id, frame='world')
+#                        rospy.sleep(0.05)
 
+                grips.append([grasp_idx,gr])
 
 #                break
-            
+
+            print "added grasps: %s"%(len(grips))
+
+            m_id_old = m_id
+            for i in range(0, len(grips)):
+
+                distances = []
+                for j in range(i+1, len(grips)):
+                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(grips[i][1], grips[j][1])
+                    distances.append([dist, j, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list])
+
+                dist_sorted = sorted(distances, key=operator.itemgetter(0))
+
+                print "showing closest grasps"
+                self.openrave.showGrasp(grasps[grips[i][0]])
+                n1 = []
+                c_idx = 0
+                m_id = m_id_old
+                for c in grips[i][1].contacts:
+                    fr = T_B_O * c
+                    n1.append(fr * PyKDL.Vector(0,0,0.05) - fr * PyKDL.Vector())
+                    m_id = self.pub_marker.publishVectorMarker(fr * PyKDL.Vector(), fr * PyKDL.Vector(0,0,0.05), m_id, 0, 0.3 + 0.3*c_idx, 0, frame='world')
+                    c_idx += 1
+
+                T_O_Com = PyKDL.Frame(obj_grasp.com)
+                T_Com_O = T_O_Com.Inverse()
+
+                for g in dist_sorted:
+                    print "dist between %s and %s: %s"%(grips[i][0], grips[g[1]][0], g[0])
+                    self.openrave.showGrasp(grasps[grips[g[1]][0]])
+                    print "publishing contacts"
+                    m_id2 = m_id
+                    c_idx = 0
+                    for c in grips[g[1]][1].contacts:
+                        fr = T_B_O * c
+                        m_id2 = self.pub_marker.publishVectorMarker(fr * PyKDL.Vector(), fr * PyKDL.Vector(0,0,0.05), m_id2, 0.3 + 0.3*c_idx, 0, 0, frame='world')
+                        c_idx += 1
+                    raw_input("Press Enter to continue...")
+                    print "publishing rotated contacts (min)"
+                    m_id2 = m_id
+                    T_rot = PyKDL.Frame(PyKDL.Rotation.RotX(g[2][0])) * PyKDL.Frame(PyKDL.Rotation.RotY(g[2][1])) * PyKDL.Frame(PyKDL.Rotation.RotX(g[2][2]))
+                    c_idx = 0
+                    for c in grips[g[1]][1].contacts:
+                        fr = T_B_O * T_O_Com * T_rot * T_Com_O * c
+                        m_id2 = self.pub_marker.publishVectorMarker(fr * PyKDL.Vector(), fr * PyKDL.Vector(0,0,0.05), m_id2, 0.3 + 0.3*c_idx, 0, 0, frame='world')
+                        c_idx += 1
+                    raw_input("Press Enter to continue...")
+                    continue
+
+                    print "publishing rotated contacts (all)"
+                    for perm_idx in range(0, len(g[3])):
+                        m_id2 = m_id
+                        T_rot = PyKDL.Frame(PyKDL.Rotation.RotX(g[4][perm_idx][0])) * PyKDL.Frame(PyKDL.Rotation.RotY(g[4][perm_idx][1])) * PyKDL.Frame(PyKDL.Rotation.RotX(g[4][perm_idx][2]))
+                        c_idx = 0
+                        for c in grips[g[1]][1].contacts:
+#                            fr = T_B_O * T_O_Com * T_rot * T_Com_O * c
+#                            n2 = fr * PyKDL.Vector(0,0,0.05) - fr * PyKDL.Vector()
+#                            print "contact %s dists: %s %s %s"%(c_idx, velmautils.getAngle(n1[0], n2), velmautils.getAngle(n1[1], n2), velmautils.getAngle(n1[2], n2))
+#                            m_id2 = self.pub_marker.publishVectorMarker(fr * PyKDL.Vector(), fr * PyKDL.Vector(0,0,0.05), m_id2, 0.5 + 0.25*c_idx, 0, 0, frame='world')
+#                            c_idx += 1
+
+                            pos1 = T_B_O * T_O_Com * g[7][perm_idx][c_idx]
+                            n1 = PyKDL.Frame((T_B_O * T_O_Com).M) * g[6][perm_idx][c_idx]
+                            pos2 = T_B_O * T_O_Com * g[9][perm_idx][c_idx]
+                            n2 = PyKDL.Frame((T_B_O * T_O_Com).M) * g[8][perm_idx][c_idx]
+                            print "contact %s dists: %s %s %s"%(c_idx, velmautils.getAngle(n1, n2), velmautils.getAngle(n1, n2), velmautils.getAngle(n1, n2))
+                            m_id2 = self.pub_marker.publishVectorMarker(pos1, pos1+n1*0.05, m_id2, 0, 0, 0.3 + 0.3*c_idx, frame='world')
+                            m_id2 = self.pub_marker.publishVectorMarker(pos2, pos2+n2*0.05, m_id2, 0.3 + 0.3*c_idx, 0, 0, frame='world')
+                            c_idx += 1
+                        print "score: %s   score2: %s"%(g[3][perm_idx], g[5][perm_idx])
+                        raw_input("Press Enter to continue...")
 
             rospy.sleep(2.0)
             exit(0)
