@@ -73,14 +73,14 @@ class VelmaSim:
     """
 Class for velma robot.
 """
-    def calibrate_tactile_sensors(self):
+    def calibrateTactileSensors(self):
         pass
 
-    def reset_fingers(self):
+    def resetFingers(self):
         # TODO
         pass
 
-    def set_median_filter(self, samples):
+    def setMedianFilter(self, samples):
         pass
 
     def setSavedKinematics(self):
@@ -798,16 +798,10 @@ Class for velma robot.
         self.qar = q_dest
         rospy.sleep(time)
 
-    def moveWristTrajJoint(self, q_dest, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
-        i = 0
-        for q in q_dest:
-            if i > 0:
-                time_diff = times[i] - times[i-1]
-            else:
-                time_diff = times[i]
-            self.qar = q
-            rospy.sleep(time_diff)
-            i += 1
+    def moveWristTrajJoint(self, traj, time_mult, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        for i in range(0, len(traj[0])):
+            rospy.sleep(traj[3][i]*time_mult)
+            self.qar = traj[0][i]
 
     def moveTool(self, wrist_frame, t):
         pass
@@ -1262,9 +1256,12 @@ Class for velma robot.
         return [tab_T_B_Wd, times]
 
     def getAllDOFs(self):
-#        self.dofs_lock.acquire()
         dofs = self.qt + self.qal + self.qhl + self.qar + self.qhr
-#        self.dofs_lock.release()
         return dofs
+
+    def switchToJoint(self):
+        pass
+    def switchToCart(self):
+        pass
 
 

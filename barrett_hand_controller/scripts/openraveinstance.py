@@ -258,6 +258,12 @@ class OpenraveInstance:
             upper[0] = -20.0/180.0*math.pi
 #            joint.SetLimits(lower, upper)
 
+            # set velocity limits
+            vel_limits = []
+            for i in range(0, self.robot_rave.GetDOF()):
+                vel_limits.append(20.0/180.0*math.pi)
+            self.robot_rave.SetDOFVelocityLimits(vel_limits)
+
             env.Add(self.robot_rave)
 
             joint = self.robot_rave.GetJoint("right_arm_5_joint")
@@ -590,7 +596,129 @@ class OpenraveInstance:
 #        return self.ikmodel.manip.FindIKSolutions(IkParameterization(self.KDLToOpenrave(self.T_World_Br * T_Br_E),IkParameterizationType.Transform6D), 0)#IkFilterOptions.CheckEnvCollisions)
         return self.ikmodel.manip.FindIKSolutions(self.KDLToOpenrave(self.T_World_Br * T_Br_E), IkFilterOptions.CheckEnvCollisions)
 
-    def planMove(self, T_Br_E, maxiter=500):
+
+    def planMoveForRightArm(self, T_Br_E, maxiter=500, verbose_print=False):
+        # check for q5-q6 collision
+        if not hasattr(self, 'wrist_collision_avoidance') or self.wrist_collision_avoidance == None:
+            self.wrist_collision_avoidance = velmautils.WristCollisionAvoidance("right", None, 5.0/180.0*math.pi)
+
+        for i in range(0, 10):
+            traj = None
+            self.robot_rave_update_lock.acquire()
+            with self.robot_rave:
+                try:
+                    self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
+                    traj = self.basemanip.MoveToHandPosition(matrices=[self.KDLToOpenrave(self.T_World_Br * T_Br_E)],maxiter=maxiter,maxtries=1,seedik=i,execute=False,outputtrajobj=True)
+                except planning_error,e:
+                    pass
+            self.robot_rave_update_lock.release()
+
+            if traj == None:
+                continue
+
+            conf = traj.GetConfigurationSpecification()
+            q_traj = []
+            steps2 = max(2, int(traj.GetDuration()*200.0))
+            q5q6_collision = False
+            first_q5q6_collision = None
+            for t in np.linspace(0.0, traj.GetDuration(), steps2):
+                q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
+                q_traj.append(list(q))
+                if len(self.wrist_collision_avoidance.getQ5Q6SpaceSectors(q[5], q[6])) == 0:
+                    if first_q5q6_collision == None:
+                        first_q5q6_collision = t
+                    q5q6_collision = True
+
+            if not q5q6_collision:
+                break
+
+        if traj == None:
+            print "planMoveForRightArm: planning error"
+            return None
+
+        if q5q6_collision:
+            print "planMoveForRightArm: q5-q6 collision: %s / %s"%(first_q5q6_collision, traj.GetDuration())
+            return None
+
+
+        if verbose_print:
+            print "all groups:"
+            for gr in conf.GetGroups():
+                print gr.name
+
+        def printGroup(gr):
+            print "offset: %s   dof: %s   name: %s   interpolation: %s"%(gr.offset, gr.dof, gr.name, gr.interpolation)
+
+        try:
+            gr_tim = conf.GetGroupFromName("deltatime")
+            tim = []
+            if verbose_print:
+                print "gr_tim:"
+                printGroup(gr_pos)
+        except openrave_exception:
+            gr_tim = None
+            tim = None
+            if verbose_print:
+                print "gr_tim == None"
+        try:
+            gr_pos = conf.GetGroupFromName("joint_values")
+            pos = []
+            if verbose_print:
+                print "gr_pos:"
+                printGroup(gr_pos)
+        except openrave_exception:
+            gr_pos = None
+            pos = None
+            if verbose_print:
+                print "gr_pos == None"
+        try:
+            gr_vel = conf.GetGroupFromName("joint_velocities")
+            vel = []
+            if verbose_print:
+                print "gr_vel:"
+                printGroup(gr_vel)
+        except openrave_exception:
+            gr_vel = None
+            vel = None
+            if verbose_print:
+                print "gr_vel == None"
+        try:
+            gr_acc = conf.GetGroupFromName("joint_accelerations")
+            acc = []
+            if verbose_print:
+                print "gr_acc:"
+                printGroup(gr_acc)
+        except openrave_exception:
+            gr_acc = None
+            acc = None
+            if verbose_print:
+                print "gr_acc == None"
+
+        if verbose_print:
+            print "waypoints: %s"%(traj.GetNumWaypoints())
+
+        for idx in range(0, traj.GetNumWaypoints()):
+            w = traj.GetWaypoint(idx)
+            if pos != None:
+                pos.append( [w[gr_pos.offset], w[gr_pos.offset + 1], w[gr_pos.offset + 2], w[gr_pos.offset + 3], w[gr_pos.offset + 4], w[gr_pos.offset + 5], w[gr_pos.offset + 6]] )
+            if vel != None:
+               vel.append( [w[gr_vel.offset], w[gr_vel.offset + 1], w[gr_vel.offset + 2], w[gr_vel.offset + 3], w[gr_vel.offset + 4], w[gr_vel.offset + 5], w[gr_vel.offset + 6]] )
+            if acc != None:
+               acc.append( [w[gr_acc.offset], w[gr_acc.offset + 1], w[gr_acc.offset + 2], w[gr_acc.offset + 3], w[gr_acc.offset + 4], w[gr_acc.offset + 5], w[gr_acc.offset + 6]] )
+            if tim != None:
+               tim.append( w[gr_tim.offset] )
+
+        if verbose_print:
+            print "pos"
+            print pos
+            print "tim"
+            print tim
+            if tim != None:
+                print "tim sum: %s"%(math.fsum(tim))
+            print "duration: %s"%(traj.GetDuration())
+        return pos, vel, acc, tim, q_traj, q5q6_collision
+
+    def planMove_old(self, T_Br_E, maxiter=500):
         traj = None
         self.robot_rave_update_lock.acquire()
         with self.robot_rave:
@@ -618,8 +746,8 @@ class OpenraveInstance:
                         max_q_vel = q_vel
             q_prev = q
 
-        time_d = 0.01
-        q_vel_limit = 20.0/180.0*math.pi
+        time_d = 0.1
+        q_vel_limit = 10.0/180.0*math.pi
         f = max_q_vel / (q_vel_limit)
 
         time = traj.GetDuration() * f

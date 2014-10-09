@@ -75,7 +75,7 @@ class Velma:
 Class for velma robot.
 """
 
-    def get_pressure_sensors_info_client(self):
+    def getPressureSensorsInfoClient(self):
         try:
             if not hasattr(self, 'get_pressure_sensors_info') or self.get_pressure_sensors_info == None:
                 rospy.wait_for_service('/' + self.prefix + '_hand/get_pressure_info')
@@ -85,7 +85,7 @@ Class for velma robot.
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
-    def calibrate_tactile_sensors(self):
+    def calibrateTactileSensors(self):
         try:
             if not hasattr(self, 'calibrate_tactile_sensors') or self.calibrate_tactile_sensors == None:
                 rospy.wait_for_service('/' + self.prefix + '_hand/calibrate_tactile_sensors')
@@ -94,7 +94,7 @@ Class for velma robot.
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
-    def reset_fingers(self):
+    def resetFingers(self):
         try:
             if not hasattr(self, 'reset_fingers') or self.reset_fingers == None:
                 rospy.wait_for_service('/' + self.prefix + '_hand/reset_fingers')
@@ -103,7 +103,7 @@ Class for velma robot.
         except rospy.ServiceException, e:
             print "Service call failed: %s"%e
 
-    def set_median_filter(self, samples):
+    def setMedianFilter(self, samples):
         try:
             if not hasattr(self, 'set_median_filter') or self.set_median_filter == None:
                 rospy.wait_for_service('/' + self.prefix + '_hand/set_median_filter')
@@ -668,12 +668,12 @@ Class for velma robot.
                     except:
                         pass
 
-                if self.abort_on_q5_q6_self_collision and self.getQ5Q6SpaceSector(self.qar[5], self.qar[6], margin=10.0/180.0*math.pi) < 0 and not self.aborted_on_q5_q6_self_collision:    # self-collision
-                    try:
-                        self.aborted_on_q5_q6_self_collision = True
-                        self.action_right_trajectory_client.cancel_goal()
-                    except:
-                        pass
+#                if self.abort_on_q5_q6_self_collision and self.getQ5Q6SpaceSector(self.qar[5], self.qar[6], margin=10.0/180.0*math.pi) < 0 and not self.aborted_on_q5_q6_self_collision:    # self-collision
+#                    try:
+#                        self.aborted_on_q5_q6_self_collision = True
+#                        self.action_right_trajectory_client.cancel_goal()
+#                    except:
+#                        pass
 
     def tactileCallback(self, data):
         max_tactile_value = -1.0
@@ -729,8 +729,9 @@ Class for velma robot.
         wtx = abs(wrench.torque.x)
         wty = abs(wrench.torque.y)
         wtz = abs(wrench.torque.z)
-        if (wfx>self.current_max_wrench.force.x*2.0) or (wfy>self.current_max_wrench.force.y*2.0) or (wfz>self.current_max_wrench.force.z*2.0) or (wtx>self.current_max_wrench.torque.x*2.0) or (wty>self.current_max_wrench.torque.y*2.0) or (wtz>self.current_max_wrench.torque.z*2.0):
-            self.wrench_emergency_stop = True
+        if not self.joint_traj_active:
+            if (wfx>self.current_max_wrench.force.x*2.0) or (wfy>self.current_max_wrench.force.y*2.0) or (wfz>self.current_max_wrench.force.z*2.0) or (wtx>self.current_max_wrench.torque.x*2.0) or (wty>self.current_max_wrench.torque.y*2.0) or (wtz>self.current_max_wrench.torque.z*2.0):
+                self.wrench_emergency_stop = True
 
 #        ws = WrenchStamped()
 #        ws.header.stamp = rospy.Time.now()
@@ -740,6 +741,7 @@ Class for velma robot.
 
     def __init__(self):
 
+        self.joint_traj_active = False
         self.q_rf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.q_lf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.qt = [0.0, 0.0]
@@ -810,7 +812,7 @@ Class for velma robot.
         
         self.max_tactile_value = 0
 
-        self.pressure_info = self.get_pressure_sensors_info_client()
+        self.pressure_info = self.getPressureSensorsInfoClient()
         self.pressure_frames = []
         for i in range(0, 24):
             center = PyKDL.Vector(self.pressure_info.sensor[0].center[i].x, self.pressure_info.sensor[0].center[i].y, self.pressure_info.sensor[0].center[i].z)
@@ -854,6 +856,7 @@ Class for velma robot.
         self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
         self.aborted_on_q5_q6_self_collision = False
 
+        self.joint_traj_active = False
         # we are moving the tool, so: T_B_Wd*T_W_T
         wrist_pose = pm.toMsg(wrist_frame*self.T_W_T)
         self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
@@ -877,6 +880,8 @@ Class for velma robot.
         self.aborted_on_q5_singularity = False
         self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
         self.aborted_on_q5_q6_self_collision = False
+
+        self.joint_traj_active = False
 
         # we are moving the tool, so: T_B_Wd*T_W_T
         action_trajectory_goal = CartesianTrajectoryGoal()
@@ -935,17 +940,84 @@ Class for velma robot.
         self.action_impedance_client.send_goal(action_impedance_goal)
 
     def moveWristJoint(self, q_dest, time, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+
         goal = FollowJointTrajectoryGoal()
         goal.trajectory.joint_names = ['torso_0_joint', 'torso_1_joint',
         'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint',
         'left_arm_0_joint', 'left_arm_1_joint', 'left_arm_2_joint', 'left_arm_3_joint', 'left_arm_4_joint', 'left_arm_5_joint', 'left_arm_6_joint']
         goal.trajectory.points.append(JointTrajectoryPoint(self.qt + q_dest + self.qal, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], [], [], rospy.Duration(time)))
-        goal.trajectory.header.stamp = rospy.get_rostime() + rospy.Duration(0.2)
+        position_tol = 1.0/180.0 * math.pi
+        velocity_tol = 1.0/180.0 * math.pi
+        acceleration_tol = 1.0/180.0 * math.pi
+        goal.path_tolerance.append(JointTolerance('torso_0_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('torso_1_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_0_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_1_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_2_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_3_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_4_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_5_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_6_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_0_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_1_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_2_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_3_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_4_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_5_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_6_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.2)
+        self.joint_traj_active = True
         self.action_right_joint_client.send_goal(goal)
 
-    def moveWristTrajJoint(self, q_dest, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
-        # TODO
-        print "moveWristTrajJoint: implement this"
+    def moveWristTrajJoint(self, traj, time_mult, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        goal = FollowJointTrajectoryGoal()
+        goal.trajectory.joint_names = ['torso_0_joint', 'torso_1_joint',
+        'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint',
+        'left_arm_0_joint', 'left_arm_1_joint', 'left_arm_2_joint', 'left_arm_3_joint', 'left_arm_4_joint', 'left_arm_5_joint', 'left_arm_6_joint']
+
+        pos = traj[0]
+        vel = traj[1]
+        acc = traj[2]
+        dti = traj[3]
+        time = 0.0
+        for i in range(0, len(pos)):
+            time += dti[i] * time_mult
+            if vel != None:
+                v = [0.0, 0.0, vel[i][0]/time_mult, vel[i][1]/time_mult, vel[i][2]/time_mult, vel[i][3]/time_mult, vel[i][4]/time_mult, vel[i][5]/time_mult, vel[i][6]/time_mult, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            else:
+                v = []
+            if acc != None:
+                a = [0.0, 0.0] + acc[i] + [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            else:
+                a = []
+#            print "time: %s"%(time)
+#            print "pos: %s"%(pos[i])
+#            print "vel: %s"%(v)
+#            print "acc: %s"%(a)
+            goal.trajectory.points.append(JointTrajectoryPoint(self.qt + pos[i] + self.qal, v, a, [], rospy.Duration(time)))
+
+        position_tol = 7.0/180.0 * math.pi
+        velocity_tol = 7.0/180.0 * math.pi
+        acceleration_tol = 7.0/180.0 * math.pi
+        goal.path_tolerance.append(JointTolerance('torso_0_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('torso_1_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_0_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_1_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_2_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_3_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_4_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_5_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('right_arm_6_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_0_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_1_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_2_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_3_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_4_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_5_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.path_tolerance.append(JointTolerance('left_arm_6_joint', position_tol, velocity_tol, acceleration_tol))
+        goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(1.0)
+        self.joint_traj_active = True
+        self.action_right_joint_client.send_goal(goal)
 
     def stopArm(self):
 #        if self.action_right_trajectory_client.gh:
@@ -1433,7 +1505,7 @@ Class for velma robot.
                 rospy.wait_for_service('/controller_manager/switch_controller')
                 self.conmanSwitch = rospy.ServiceProxy('/controller_manager/switch_controller', SwitchController)
             # '2' is for STRICT
-            if self.conmanSwitch(['FK', 'JntImp', 'TrajectoryGeneratorJoint'], ['PoseIntLeft', 'PoseIntRight'], 2):
+            if self.conmanSwitch(['JntImp', 'TrajectoryGeneratorJoint'], ['CImp', 'PoseIntLeft', 'PoseIntRight'], 2):
                 result = True
                 # joint trajectory for right arm
                 self.action_right_joint_client = actionlib.SimpleActionClient('/spline_trajectory_action_joint', FollowJointTrajectoryAction)
@@ -1445,6 +1517,9 @@ Class for velma robot.
             print "IOError"
         except KeyError:
             print "KeyError"
+        if not result:
+            print "ERROR: switchToJoint"
+            exit(0)
         return result
 
     def switchToCart(self):
@@ -1454,7 +1529,7 @@ Class for velma robot.
                 rospy.wait_for_service('/controller_manager/switch_controller')
                 self.conmanSwitch = rospy.ServiceProxy('/controller_manager/switch_controller', SwitchController)
             # '2' is for STRICT
-            if self.conmanSwitch(['PoseIntLeft', 'PoseIntRight'], ['FK', 'JntImp', 'TrajectoryGeneratorJoint'], 2):
+            if self.conmanSwitch(['CImp', 'PoseIntLeft', 'PoseIntRight'], ['JntImp', 'TrajectoryGeneratorJoint'], 2):
                 result = True
         except rospy.ROSInterruptException:
             print "rospy.ROSInterruptException"
@@ -1462,6 +1537,12 @@ Class for velma robot.
             print "IOError"
         except KeyError:
             print "KeyError"
+        if not result:
+            print "ERROR: switchToCart"
+            exit(0)
         return result
 
+    def getAllDOFs(self):
+        dofs = self.qt + self.qal + self.qhl + self.qar + self.qhr
+        return dofs
 
