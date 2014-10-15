@@ -741,6 +741,8 @@ Class for velma robot.
 
     def __init__(self):
 
+        self.joint_impedance_active = False
+        self.cartesian_impedance_active = False
         self.joint_traj_active = False
         self.q_rf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.q_lf = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
@@ -851,6 +853,9 @@ Class for velma robot.
         self.br.sendTransform([wrist_pose.position.x, wrist_pose.position.y, wrist_pose.position.z], [wrist_pose.orientation.x, wrist_pose.orientation.y, wrist_pose.orientation.z, wrist_pose.orientation.w], rospy.Time.now(), "dest", "torso_base")
 
     def moveWrist(self, wrist_frame, t, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (self.cartesian_impedance_active and not self.joint_impedance_active):
+            print "FATAL ERROR: moveWrist"
+            exit(0)
         self.abort_on_q5_singularity = abort_on_q5_singularity
         self.aborted_on_q5_singularity = False
         self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
@@ -876,6 +881,9 @@ Class for velma robot.
         self.action_right_trajectory_client.send_goal(action_trajectory_goal)
 
     def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (self.cartesian_impedance_active and not self.joint_impedance_active):
+            print "FATAL ERROR: moveWristTraj"
+            exit(0)
         self.abort_on_q5_singularity = abort_on_q5_singularity
         self.aborted_on_q5_singularity = False
         self.abort_on_q5_q6_self_collision = abort_on_q5_q6_self_collision
@@ -940,7 +948,9 @@ Class for velma robot.
         self.action_impedance_client.send_goal(action_impedance_goal)
 
     def moveWristJoint(self, q_dest, time, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
-
+        if not (not self.cartesian_impedance_active and self.joint_impedance_active):
+            print "FATAL ERROR: moveWristJoint"
+            exit(0)
         goal = FollowJointTrajectoryGoal()
         goal.trajectory.joint_names = ['torso_0_joint', 'torso_1_joint',
         'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint',
@@ -970,6 +980,9 @@ Class for velma robot.
         self.action_right_joint_client.send_goal(goal)
 
     def moveWristTrajJoint(self, traj, time_mult, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (not self.cartesian_impedance_active and self.joint_impedance_active):
+            print "FATAL ERROR: moveWristTrajJoint"
+            exit(0)
         goal = FollowJointTrajectoryGoal()
         goal.trajectory.joint_names = ['torso_0_joint', 'torso_1_joint',
         'right_arm_0_joint', 'right_arm_1_joint', 'right_arm_2_joint', 'right_arm_3_joint', 'right_arm_4_joint', 'right_arm_5_joint', 'right_arm_6_joint',
@@ -1498,7 +1511,12 @@ Class for velma robot.
             times.append(time)
         return [tab_T_B_Wd, times]
 
+    def getAllDOFs(self):
+        dofs = self.qt + self.qal + self.qhl + self.qar + self.qhr
+        return dofs
+
     def switchToJoint(self):
+        self.cartesian_impedance_active = False
         result = False
         try:
             if not hasattr(self, 'conmanSwitch') or self.conmanSwitch == None:
@@ -1518,11 +1536,13 @@ Class for velma robot.
         except KeyError:
             print "KeyError"
         if not result:
-            print "ERROR: switchToJoint"
+            print "FATAL ERROR: switchToJoint"
             exit(0)
+        self.joint_impedance_active = True
         return result
 
     def switchToCart(self):
+        self.joint_impedance_active = False
         result = False
         try:
             if not hasattr(self, 'conmanSwitch') or self.conmanSwitch == None:
@@ -1538,11 +1558,19 @@ Class for velma robot.
         except KeyError:
             print "KeyError"
         if not result:
-            print "ERROR: switchToCart"
+            print "FATAL ERROR: switchToCart"
             exit(0)
+        self.cartesian_impedance_active = True
         return result
 
-    def getAllDOFs(self):
-        dofs = self.qt + self.qal + self.qhl + self.qar + self.qhr
-        return dofs
+    def isJointImpedanceActive(self):
+        if self.joint_impedance_active and not self.cartesian_impedance_active:
+            return True
+        return False
+
+    def isCartesianImpedanceActive(self):
+        if not self.joint_impedance_active and self.cartesian_impedance_active:
+            return True
+        return False
+
 

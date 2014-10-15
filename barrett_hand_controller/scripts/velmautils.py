@@ -145,7 +145,7 @@ class MarkerPublisher:
 def getAngle(v1, v2):
     return math.atan2((v1*v2).Norm(), PyKDL.dot(v1,v2))
 
-def generateNormalsSphere(angle):
+def generateNormalsSphere(angle, x_positive=None, y_positive=None, z_positive=None):
     if angle <= 0:
         return None
     v_approach = []
@@ -161,6 +161,21 @@ def generateNormalsSphere(angle):
         beta_d = 360.0/180.0*math.pi/steps
         for beta in np.arange(0.0, 360.0/180.0*math.pi, beta_d):
             pt = PyKDL.Vector(math.cos(alpha)*math.cos(beta), math.cos(alpha)*math.sin(beta), math.sin(alpha))
+            if x_positive != None:
+                if x_positive and pt.x() < 0:
+                    continue
+                if not x_positive and pt.x() > 0:
+                    continue
+            if y_positive != None:
+                if y_positive and pt.y() < 0:
+                    continue
+                if not y_positive and pt.y() > 0:
+                    continue
+            if z_positive != None:
+                if z_positive and pt.z() < 0:
+                    continue
+                if not z_positive and pt.z() > 0:
+                    continue
             v_approach.append(pt)
     return v_approach
 
@@ -179,7 +194,7 @@ def generateFramesForNormals(angle, normals):
         y = z * x
         for angle in np.arange(0.0, 359.9/180.0*math.pi, angle_d):
             frames.append(PyKDL.Frame(PyKDL.Rotation(x,y,z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(angle)))
-            print angle/math.pi*180.0
+#            print angle/math.pi*180.0
 
     return frames
 
@@ -645,6 +660,47 @@ class WristCollisionAvoidance:
             v *= f
         return [v.x() + center.x(), v.y() + center.y()]
 
+    def getQ5Q6Traj(self, q5, q6, q5_d, q6_d):
+        sect_d = self.getQ5Q6SpaceSectors(q5_d, q6_d)
+        # if destination is outside, force it to the nearest sector
+        if len(sect_d) == 0:
+            closest_sect_d = self.getClosestQ5Q6SpaceSector(q5_d, q6_d)
+#            q5_d, q6_d = self.forceMoveQ5Q6ToSector(q5_d, q6_d, closest_sect_d)
+            sect_d = [closest_sect_d] #self.getQ5Q6SpaceSectors(q5_d, q6_d)
+
+        sect = self.getQ5Q6SpaceSectors(q5, q6)
+        if len(sect) == 0:
+            closest_sect = self.getClosestQ5Q6SpaceSector(q5, q6)
+#            q5, q6 = self.forceMoveQ5Q6ToSector(q5, q6, closest_sect)
+            sect = [closest_sect] #self.getQ5Q6SpaceSectors(q5, q6)
+
+        same_sector = False
+        same_sector_no = None
+        for s in sect:
+            if s in sect_d:
+                same_sector = True
+                break
+        if same_sector:
+            print "same_sect"
+#            r1 = self.getSectorWithMargin(same_sector_no)
+            return [ [q5_d, q6_d] ]
+
+        path_len = 1000000
+        best_path = None
+        for s in sect:
+            for s_d in sect_d:
+                path = dijkstra.shortestPath(self.G, s, s_d)
+                if len(path) < path_len:
+                    path_len = len(path)
+                    best_path = path
+        print best_path
+        gateways_d = []
+        for idx in range(0, len(best_path)-1):
+            gateways_d.append( [self.gateways[best_path[idx]][best_path[idx+1]][0], self.gateways[best_path[idx]][best_path[idx+1]][1]] )
+
+        return gateways_d
+
+
     # returns [q5_diff q6_diff] with proper vector direction and with length of the whole path through sectors
     def moveQ5Q6ToDest(self, q5, q6, q5_d, q6_d):
         sect_d = self.getQ5Q6SpaceSectors(q5_d, q6_d)
@@ -777,7 +833,8 @@ class VelmaIkSolver:
 
         self.q_min = PyKDL.JntArray(7)
         self.q_max = PyKDL.JntArray(7)
-        self.q_limit = 0.26
+#        self.q_limit = 0.26
+        self.q_limit = 0.06
         self.q_min[0] = -2.96 + self.q_limit
 #        self.q_min[1] = -2.09 + self.q_limit
         self.q_min[1] = 0.1

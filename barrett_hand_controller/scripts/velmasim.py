@@ -707,11 +707,13 @@ Class for velma robot.
         self.velma_ikr = velma_ikr
         self.openrave = openraveinstance
 
+        self.joint_impedance_active = False
+        self.cartesian_impedance_active = False
         self.qar = [-90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, 0, -90.0/180.0*math.pi, 0]
         self.qal = [-90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 0, 90.0/180.0*math.pi, 0]
         self.qhr = [0.0, 0.0, 0.0, 0.0]
         self.qhl = [0.0, 0.0, 0.0, 0.0]
-        self.qt = [0.0, 0.0]
+        self.qt = [0.0, -1.5707963267948966]
 
         # barrett hand kinematics
         self.setSavedKinematics()
@@ -760,11 +762,15 @@ Class for velma robot.
         pass
 
     def moveWrist(self, wrist_frame, t, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (self.cartesian_impedance_active and not self.joint_impedance_active):
+            print "FATAL ERROR: moveWrist"
+            exit(0)
         self.T_B_W_current = self.openrave.getLinkPose("right_arm_7_link", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
         self.T_B_T2_current = self.openrave.getLinkPose("torso_link2", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
         self.T_T2_B_current = self.T_B_T2_current.Inverse()
+        qar = copy.deepcopy(self.qar)
         for f in np.linspace(0.0, 1.0, 50):
-            q_out, T_B_Ei = self.velma_ikr.simulateTrajectory(self.T_B_W_current * self.T_W_E, wrist_frame * self.T_W_E, f, self.qar, self.T_T2_B_current)
+            q_out, T_B_Ei = self.velma_ikr.simulateTrajectory(self.T_B_W_current * self.T_W_E, wrist_frame * self.T_W_E, f, qar, self.T_T2_B_current)
             if q_out == None :
                 print "moveWrist: could not reach the desired pose"
                 break
@@ -774,6 +780,9 @@ Class for velma robot.
             rospy.sleep(t/50.0)
 
     def moveWristTraj(self, wrist_frames, times, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (self.cartesian_impedance_active and not self.joint_impedance_active):
+            print "FATAL ERROR: moveWristTraj"
+            exit(0)
         i = 0
         for wrist_frame in wrist_frames:
             self.T_B_W_current = self.openrave.getLinkPose("right_arm_7_link", qt=self.qt, qar=self.qar, qal=self.qal, qhr=self.qhr, qhl=self.qhl)
@@ -795,10 +804,16 @@ Class for velma robot.
             i += 1
 
     def moveWristJoint(self, q_dest, time, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (not self.cartesian_impedance_active and self.joint_impedance_active):
+            print "FATAL ERROR: moveWristJoint"
+            exit(0)
         self.qar = q_dest
         rospy.sleep(time)
 
     def moveWristTrajJoint(self, traj, time_mult, max_wrench, start_time=0.01, stamp=None, abort_on_q5_singularity = False, abort_on_q5_q6_self_collision=False):
+        if not (not self.cartesian_impedance_active and self.joint_impedance_active):
+            print "FATAL ERROR: moveWristTrajJoint"
+            exit(0)
         for i in range(0, len(traj[0])):
             rospy.sleep(traj[3][i]*time_mult)
             self.qar = traj[0][i]
@@ -1260,8 +1275,21 @@ Class for velma robot.
         return dofs
 
     def switchToJoint(self):
-        pass
+        self.joint_impedance_active = True
+        self.cartesian_impedance_active = False
+
     def switchToCart(self):
-        pass
+        self.joint_impedance_active = False
+        self.cartesian_impedance_active = True
+
+    def isJointImpedanceActive(self):
+        if self.joint_impedance_active and not self.cartesian_impedance_active:
+            return True
+        return False
+
+    def isCartesianImpedanceActive(self):
+        if not self.joint_impedance_active and self.cartesian_impedance_active:
+            return True
+        return False
 
 

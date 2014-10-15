@@ -65,6 +65,11 @@ class Grip:
         self.grasped_object = grasped_object
         self.contacts = []
         self.successful = False
+        self.count_no_contact = 0
+        self.count_too_little_contacts = 0
+        self.count_moved_on_grip = 0
+        self.count_unstable = 0
+        self.count_stable = 0
 
     def addContact(self, T_O_Co):
         self.contacts.append(copy.deepcopy(T_O_Co))
@@ -79,6 +84,60 @@ class Grip:
             print "grips_db[-1].addContact( PyKDL.Frame(PyKDL.Rotation.Quaternion(%s,%s,%s,%s),PyKDL.Vector(%s,%s,%s)) )"%(q[0], q[1], q[2], q[3], c.p.x(), c.p.y(), c.p.z())
         if self.successful:
             print "grips_db[-1].success()"
+
+    def toStr(self):
+        line = str(self.successful) + ' ' + str(len(self.contacts))
+        for c in self.contacts:
+            q = c.M.GetQuaternion()
+            line += ' ' + str(c.p.x()) + ' ' + str(c.p.y()) + ' ' + str(c.p.z())
+            line += ' ' + str(q[0]) + ' ' + str(q[1]) + ' ' + str(q[2]) + ' ' + str(q[3])
+        return line
+#        with open('filemane', 'a') as f:
+#                read_data = f.write(line)
+
+    def fromStr(self, line):
+        tab = line.split()
+        self.successful = bool(tab[0])
+        contacts_count = int(tab[1])
+        self.contacts = []
+        for idx in range(0, contacts_count):
+            px = float(tab[2 + idx*7 + 0])
+            py = float(tab[2 + idx*7 + 1])
+            pz = float(tab[2 + idx*7 + 2])
+            qx = float(tab[2 + idx*7 + 3])
+            qy = float(tab[2 + idx*7 + 4])
+            qz = float(tab[2 + idx*7 + 5])
+            qw = float(tab[2 + idx*7 + 6])
+            self.contacts.append(PyKDL.Frame(PyKDL.Rotation.Quaternion(qx, qy, qz, qw), PyKDL.Vector(px,py,pz)))
+
+def gripDist_new(a, b):
+    fr_a = []
+    T_O_Com = PyKDL.Frame(a.grasped_object.com)
+    T_Com_O = T_O_Com.Inverse()
+    for T_O_C in a.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_a.append( T_Com_C )
+
+    fr_b = []
+    for T_O_C in b.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_b.append( T_Com_C )
+
+    if len(fr_a) >= len(fr_b):
+        fr_0 = fr_a
+        fr_1 = fr_b
+    else:
+        fr_0 = fr_b
+        fr_1 = fr_a
+
+    # fr_0 has more or equal number of contacts than fr_1
+    for i in range(0, len(fr_0)):
+        for j in range(0, len(fr_0)):
+            if i == j:
+                continue
+            
+        
+
 
 def gripDist(a, b):
     def estTransform(l1, l2):

@@ -42,7 +42,7 @@ from cartesian_trajectory_msgs.msg import *
 from visualization_msgs.msg import *
 import actionlib
 from actionlib_msgs.msg import *
-from threading import Lock
+from threading import RLock
 
 import tf
 from tf import *
@@ -60,6 +60,8 @@ from openravepy import *
 from optparse import OptionParser
 from openravepy.misc import OpenRAVEGlobalArguments
 import velmautils
+import operator
+import random
 
 class OpenraveInstance:
 
@@ -71,7 +73,7 @@ class OpenraveInstance:
         self.listener = tf.TransformListener();
         self.kinBodies = []
         self.visibility_surface_samples_dict = {}
-        self.robot_rave_update_lock = Lock()
+        self.robot_rave_update_lock = RLock()
 
     def addRobotInterface(self, robot):
         self.robot = robot
@@ -105,6 +107,7 @@ class OpenraveInstance:
         body.SetName(name)
         body.InitFromSpheres(numpy.array([[0,0,0,0.5*size]]),True)
         self.env.Add(body,True)
+        return body
 
     def addCamera(self, name, fov_x, fov_y, dist):
         body = RaveCreateKinBody(self.env,'')
@@ -176,6 +179,11 @@ class OpenraveInstance:
 
     def main(self,env,options):
         try:
+            self.wrist_collision_avoidance = velmautils.WristCollisionAvoidance("right", None, 5.0/180.0*math.pi)
+            self.normals_sphere_30_deg = velmautils.generateNormalsSphere(60.0/180.0*math.pi)
+            self.frames_60_deg = velmautils.generateFramesForNormals(60.0/180.0*math.pi, self.normals_sphere_30_deg)
+
+            self.normals_sphere_5_deg = velmautils.generateNormalsSphere(5.0/180.0*math.pi, x_positive = True, y_positive = False)
             self.env = env
             self.robot_rave = env.ReadRobotXMLFile('robots/velma_col.robot.xml')
 
@@ -201,12 +209,24 @@ class OpenraveInstance:
             ]
 
             self.right_arm_dof_indices = []
+            self.right_arm_wrist_dof_indices = []
+            self.right_arm_not_wrist_dof_indices = []
             self.left_arm_dof_indices = []
+            self.left_arm_wrist_dof_indices = []
+            self.left_arm_not_wrist_dof_indices = []
             for j in self.robot_rave.GetJoints():
                 if j.GetName().startswith("right_arm_"):
                     self.right_arm_dof_indices.append(j.GetJointIndex())
+                    if j.GetName() == "right_arm_5_joint" or j.GetName() == "right_arm_6_joint":
+                        self.right_arm_wrist_dof_indices.append(j.GetJointIndex())
+                    else:
+                        self.right_arm_not_wrist_dof_indices.append(j.GetJointIndex())
                 if j.GetName().startswith("left_arm_"):
                     self.left_arm_dof_indices.append(j.GetJointIndex())
+                    if j.GetName() == "left_arm_5_joint" or j.GetName() == "left_arm_6_joint":
+                        self.left_arm_wrist_dof_indices.append(j.GetJointIndex())
+                    else:
+                        self.left_arm_not_wrist_dof_indices.append(j.GetJointIndex())
                 print j
 
             self.right_palm_links_indices = []
@@ -219,7 +239,7 @@ class OpenraveInstance:
                 print j
 
             # apply soft limits
-            q_soft_limit = 0.26*0.2
+            q_soft_limit = 0.0#0.26*0.2
             for name in arms_joint_names:
                 joint = self.robot_rave.GetJoint(name)
                 lower, upper = joint.GetLimits()
@@ -258,10 +278,10 @@ class OpenraveInstance:
             upper[0] = -20.0/180.0*math.pi
 #            joint.SetLimits(lower, upper)
 
-            # set velocity limits
+            # set velocity limits - it is not working
             vel_limits = []
             for i in range(0, self.robot_rave.GetDOF()):
-                vel_limits.append(20.0/180.0*math.pi)
+                vel_limits.append(5.0/180.0*math.pi)
             self.robot_rave.SetDOFVelocityLimits(vel_limits)
 
             env.Add(self.robot_rave)
@@ -271,10 +291,16 @@ class OpenraveInstance:
             print lower, upper
 
             self.robot_rave.SetActiveManipulator('right_arm')
+            print "manipulator - arm indices: %s"%(self.robot_rave.GetActiveManipulator().GetArmIndices())
+            print "manipulator - gripper indices: %s"%(self.robot_rave.GetActiveManipulator().GetGripperIndices())
 
             self.ikmodel = databases.inversekinematics.InverseKinematicsModel(self.robot_rave,iktype=IkParameterizationType.Transform6D)
             if not self.ikmodel.load():
                 self.ikmodel.autogenerate()
+
+#            self.ikmodel_translation3D = databases.inversekinematics.InverseKinematicsModel(self.robot_rave, iktype=IkParameterization.Type.Translation3D, freeindices=[self.robot_rave.GetJointIndex("right_arm_1_joint"), self.robot_rave.GetJointIndex("right_arm_4_joint"), self.robot_rave.GetJointIndex("right_arm_5_joint"), self.robot_rave.GetJointIndex("right_arm_6_joint")])
+#            if not self.ikmodel_translation3D.load():
+#                self.ikmodel_translation3D.autogenerate()
 
             links = self.robot_rave.GetLinks()
             # 31   <link:right_HandPalmLink (31), parent=Velma>
@@ -340,41 +366,58 @@ class OpenraveInstance:
         # start thread for jar tf publishing and for visualization
         thread.start_new_thread(self.run, (None,1))
 
-    def generateGrasps(self, target_name, show=False, checkcollision=True, checkik=True, checkgrasper=True):
-        target = self.env.GetKinBody(target_name)
-        if target == None:
-            print "target body <%s> not found"%(target_name)
-            return False
+    def prepareGraspingModule(self, target_name):
+        if not hasattr(self, 'gmodel') or self.gmodel == None:
+            self.gmodel = {}
 
-        self.gmodel = databases.grasping.GraspingModel(self.robot_rave,target)
-        if not self.gmodel.load():
-            print 'generating grasping model (one time computation)'
-            self.gmodel.init(friction=1.0,avoidlinks=[])
-            approachrays = self.gmodel.computeBoxApproachRays(delta=0.05,normalanglerange=0.0)#201, directiondelta=0.2)
-            print len(approachrays)
+        if not target_name in self.gmodel.keys():
+            target = self.env.GetKinBody(target_name)
+            self.gmodel[target_name] = databases.grasping.GraspingModel(self.robot_rave,target)
+            if not self.gmodel[target_name].load():
+                print 'generating grasping model (one time computation)'
+                self.gmodel[target_name].init(friction=1.0,avoidlinks=[])
+                approachrays = self.gmodel[target_name].computeBoxApproachRays(delta=0.05,normalanglerange=0.0)#201, directiondelta=0.2)
+                print len(approachrays)
 # possible arguments for generate:
 # preshapes=None, standoffs=None, rolls=None, approachrays=None, graspingnoise=None, forceclosure=True, forceclosurethreshold=1.0000000000000001e-09, checkgraspfn=None, manipulatordirections=None, translationstepmult=None, finestep=None, friction=None, avoidlinks=None, plannername=None, boxdelta=None, spheredelta=None, normalanglerange=None
 # http://openrave.org/docs/latest_stable/openravepy/databases.grasping/#openravepy.databases.grasping.GraspingModel.generatepcg
-            self.gmodel.generate(approachrays=approachrays, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
-            self.gmodel.save()
+#                self.gmodel[target_name].generate(approachrays=approachrays, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
+                self.gmodel[target_name].generate(approachrays=approachrays, forceclosure=False, standoffs=[0.05, 0.06, 0.07])
+                self.gmodel[target_name].save()
 
-        validgrasps,validindices = self.gmodel.computeValidGrasps(checkcollision=checkcollision, checkik=checkik, checkgrasper=checkgrasper)
+    def getGraspsCount(self, target_name):
+        self.prepareGraspingModule(target_name)
+        return len(self.gmodel[target_name].grasps)
+
+    def getGrasp(self, target_name, grasp_idx):
+        self.prepareGraspingModule(target_name)
+        return self.gmodel[target_name].grasps[grasp_idx]
+
+    def generateGrasps(self, target_name, show=False, checkcollision=True, checkik=True, checkgrasper=True):
+#        target = self.env.GetKinBody(target_name)
+#        if target == None:
+#            print "target body <%s> not found"%(target_name)
+#            return False
+
+        self.prepareGraspingModule(target_name)
+
+        validgrasps,validindices = self.gmodel[target_name].computeValidGrasps(checkcollision=checkcollision, checkik=checkik, checkgrasper=checkgrasper)
         print "all valid grasps: %s"%(len(validgrasps))
 
         print "done."
-        return validgrasps,validindices
+        return validindices
+#        return validgrasps,validindices
 
-    def getGraspTransform(self, grasp, collisionfree=False):
-        return self.T_World_Br.Inverse()*self.OpenraveToKDL( self.gmodel.getGlobalGraspTransform(grasp,collisionfree=collisionfree) )
+    def getGraspTransform(self, target_name, grasp, collisionfree=False):
+        return self.T_World_Br.Inverse()*self.OpenraveToKDL( self.gmodel[target_name].getGlobalGraspTransform(grasp,collisionfree=collisionfree) )
 
-    def showGrasp(self, grasp):
+    def showGrasp(self, target_name, grasp):
         self.robot_rave_update_lock.acquire()
-#        self.gmodel.showgrasp(grasp, collisionfree=True, useik=True)
-        self.gmodel.showgrasp(grasp, collisionfree=False, useik=False)
+        self.gmodel[target_name].showgrasp(grasp, collisionfree=False, useik=False)
         self.robot_rave_update_lock.release()
 
-    def getGraspStandoff(self, grasp):
-        return grasp[self.gmodel.graspindices.get('igraspstandoff')]
+    def getGraspStandoff(self, target_name, grasp):
+        return grasp[self.gmodel[target_name].graspindices.get('igraspstandoff')]
 
     def showTrajectory(self, time, qt_list=None, qar_list=None, qal_list=None, qhr_list=None, qhl_list=None):
         length = 0
@@ -440,14 +483,14 @@ class OpenraveInstance:
         col = link.GetCollisionData()
         return col.vertices, col.indices
 
-    def getFinalConfig(self, grasp):
+    def getFinalConfig(self, target_name, grasp):
         hand_config = None
         contacts = None
         self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
             with self.env:
                 try:
-                    contacts,finalconfig,mindist,volume = self.gmodel.runGraspFromTrans(grasp)
+                    contacts,finalconfig,mindist,volume = self.gmodel[target_name].runGraspFromTrans(grasp)
                     hand_config = [
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerTwoKnuckleTwoJoint")],
@@ -466,7 +509,7 @@ class OpenraveInstance:
         return hand_config, contacts_ret
 
     def grab(self, name):
-#        body = self.env.GetKinBody(name)
+        body = self.env.GetKinBody(name)
 #        self.robot_rave.Grab(body)
         self.robot_rave_update_lock.acquire()
         with self.env:
@@ -596,8 +639,401 @@ class OpenraveInstance:
 #        return self.ikmodel.manip.FindIKSolutions(IkParameterization(self.KDLToOpenrave(self.T_World_Br * T_Br_E),IkParameterizationType.Transform6D), 0)#IkFilterOptions.CheckEnvCollisions)
         return self.ikmodel.manip.FindIKSolutions(self.KDLToOpenrave(self.T_World_Br * T_Br_E), IkFilterOptions.CheckEnvCollisions)
 
+    def findIkSolutionsTranslation3D(self, T_Br_E):
+#        return self.ikmodel.manip.FindIKSolutions(IkParameterization(self.KDLToOpenrave(self.T_World_Br * T_Br_E),IkParameterizationType.Transform6D), 0)#IkFilterOptions.CheckEnvCollisions)
+        return self.ikmodel_translation3D.manip.FindIKSolutions(self.KDLToOpenrave(self.T_World_Br * T_Br_E), IkFilterOptions.CheckEnvCollisions)
 
-    def planMoveForRightArm(self, T_Br_E, maxiter=500, verbose_print=False):
+
+
+    def getBestFinalConfigs(self, T_Br_E):
+        q_list = self.findIkSolutions(T_Br_E)
+        print "ik solutions: %s"%(len(q_list))
+        q_score = []
+        lower_lim, upper_lim = self.robot_rave.GetDOFLimits(self.right_arm_dof_indices)
+        print lower_lim
+        print upper_lim
+        for q in q_list:
+            q_score.append([1000000.0, q])
+            # punish for singularities in end configuration
+            if abs(q[1]) < 20.0/180.0*math.pi:
+                continue
+            if abs(q[3]) < 20.0/180.0*math.pi:
+                continue
+            if abs(q[5]) < 20.0/180.0*math.pi:
+                continue
+
+            score = 0.0
+
+            if abs(q[1]) < 30.0/180.0*math.pi:
+                score += 30.0/180.0*math.pi - abs(q[1])
+            if abs(q[3]) < 30.0/180.0*math.pi:
+                score += 30.0/180.0*math.pi - abs(q[3])
+            if abs(q[5]) < 30.0/180.0*math.pi:
+                score += 30.0/180.0*math.pi - abs(q[5])
+
+            score *= 10.0
+
+            for i in range(0, 7):
+                score += (self.robot.qar[i]-q[i])*(self.robot.qar[i]-q[i])
+                if abs(q[i]-lower_lim[i]) < 40.0/180.0*math.pi:
+                    score += 40.0/180.0*math.pi - abs(q[i]-lower_lim[i])
+                if abs(q[i]-upper_lim[i]) < 40.0/180.0*math.pi:
+                    score += 40.0/180.0*math.pi - abs(q[i]-upper_lim[i])
+            q_score[-1] = [score, q]
+
+        q_sorted = sorted(q_score, key=operator.itemgetter(0))
+        return q_sorted
+
+    def findFreeSpaceSphere(self, radius, dist_from_shoulder):
+        self.robot_rave_update_lock.acquire()
+
+        # first, find the free space in the best area for manipulation
+        with self.robot_rave.CreateRobotStateSaver():
+                    self.robot_rave.GetController().Reset(0)
+                    dof_values = self.robot_rave.GetDOFValues()
+                    qt = dof_values[0:2]
+                    qal = dof_values[2:9]
+                    qhl = dof_values[9:13]
+                    qar = [0.0, -90.0/180*math.pi, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    qhr = dof_values[20:24]
+                    dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
+                    self.robot_rave.SetDOFValues(dof_values)
+
+                    with self.env:
+                        wrist_sphere = self.addSphere("wrist_sphere", 2.0 * radius)
+                        T_Br_T2 = self.getLinkPose("torso_link2")
+                        T_Br_L2r = self.getLinkPose("right_arm_2_link")
+                        Pc_T2 = T_Br_T2.Inverse() * T_Br_L2r * PyKDL.Vector()
+                        it = 0
+                        while True:
+                            v = self.normals_sphere_5_deg[random.randint(0, len(self.normals_sphere_5_deg)-1)]
+                            P_Br = T_Br_T2 * (Pc_T2 + v * dist_from_shoulder)
+                            wrist_sphere.SetTransform(self.KDLToOpenrave(self.T_World_Br*PyKDL.Frame(PyKDL.Vector(P_Br))))
+                            report = CollisionReport()
+                            self.env.CheckCollision(wrist_sphere, report)
+
+                            if report.numCols == 0:
+                                break
+                            it += 1
+                            if it > 200:
+                                P_Br = None
+                                break
+                        self.env.Remove(wrist_sphere)
+
+        self.robot_rave_update_lock.release()
+
+        return P_Br
+
+    def planMoveToFreeSpace(self):
+        self.robot_rave_update_lock.acquire()
+        P_Br = self.findFreeSpaceSphere(0.35, 0.5)
+        if P_Br == None:
+            print "planMoveToFreeSpace: could not find free area"
+            return None
+
+        init_q = self.robot_rave.GetDOFValues(self.right_arm_dof_indices)
+        init_sect = self.wrist_collision_avoidance.getQ5Q6SpaceSectors(init_q[5], init_q[6])
+        print "init_sect: %s"%(init_sect)
+        if len(init_sect) == 0:
+            init_sect = [ self.wrist_collision_avoidance.getClosestQ5Q6SpaceSector(init_q[5], init_q[6]) ]
+            print "planMoveToFreeSpace: wrong starting position in q5: %s and q6: %s"%(init_q[5], init_q[6])
+
+        with self.robot_rave:
+                    try:
+                        init_q = self.robot_rave.GetDOFValues(self.right_arm_dof_indices)
+                        self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
+                        # set the intermediate point
+                        T_Br_E_int = PyKDL.Frame(P_Br)
+                        T_Br_E_current = self.getLinkPose("right_HandPalmLink")
+
+                        print "frames: %s"%(len(self.frames_60_deg))
+                        q_list = []
+                        for fr in self.frames_60_deg:
+                            diff1 = PyKDL.diff(fr, T_Br_E_current)
+                            if diff1.rot.Norm() > 90.0/180.0*math.pi:
+                                continue
+                            sol = list(self.findIkSolutions(T_Br_E_int * fr))
+                            print len(sol)
+                            q_list += sol
+                        print "found solutions: %s"%(len(q_list))
+
+                        min_score = 1000000.0
+                        min_q_sol = None
+                        # get the closest solution to the current and the end configuration
+                        for q_sol in q_list:
+                            end_sect = self.wrist_collision_avoidance.getQ5Q6SpaceSectors(q_sol[5], q_sol[6])
+                            same_sector = False
+                            for s in init_sect:
+                                if s in end_sect:
+                                    same_sector = True
+                                    break
+                            if not same_sector:
+                                continue
+                            score = 0.0
+                            for q_idx in range(0, 5):
+                                score += (q_sol[q_idx]-init_q[q_idx])*(q_sol[q_idx]-init_q[q_idx])
+                            if score < min_score:
+                                min_score = score
+                                min_q_sol = q_sol
+                    except planning_error,e:
+                        pass
+        self.robot_rave_update_lock.release()
+        return min_q_sol
+
+    def planMoveThroughGoals(self, goals):
+        traj = None
+        self.robot_rave_update_lock.acquire()
+        try:
+            with self.robot_rave:
+                self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
+                traj = self.basemanip.MoveActiveJoints(goal=goals[0],execute=False,outputtrajobj=True)
+                for idx in range(1, len(goals)):
+                    with self.robot_rave.CreateRobotStateSaver():
+                        self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
+                        self.robot_rave.GetController().Reset(0)
+                        dof_values = self.robot_rave.GetDOFValues()
+                        qt = dof_values[0:2]
+                        qal = dof_values[2:9]
+                        qhl = dof_values[9:13]
+                        qar = goals[idx-1]
+                        qhr = dof_values[20:24]
+                        dof_values = list(qt) + list(qal) + list(qhl) + list(qar) + list(qhr)
+                        print dof_values
+                        self.robot_rave.SetDOFValues(dof_values)
+                        t = self.basemanip.MoveActiveJoints(goal=goals[idx],execute=False,outputtrajobj=True)
+                    print "trajectory len: %s"%(t.GetNumWaypoints())
+                    if t.GetNumWaypoints() > 1:
+                        traj.Insert(traj.GetNumWaypoints(), t.GetWaypoints(0, t.GetNumWaypoints()), False)
+        except planning_error,e:
+            print "planMoveThroughGoals: planning error"
+        self.robot_rave_update_lock.release()
+        return traj
+
+    def planMoveForRightArm(self, T_Br_E, q_dest, maxiter=500, verbose_print=False):
+        self.robot_rave_update_lock.acquire()
+
+        if T_Br_E != None and q_dest == None:
+            q_list = self.getBestFinalConfigs(T_Br_E)
+            if len(q_list) < 30:
+                self.robot_rave_update_lock.release()
+                print "planMoveForRightArm: strange pose - a few ik solutions"
+                return None
+        elif T_Br_E == None and q_dest != None:
+            q_list = [[0.0, q_dest]]
+        else:
+            self.robot_rave_update_lock.release()
+            print "planMoveForRightArm: wrong arguments: %s %s"%(T_Br_E, q_dest)
+            return None
+
+        init_q = self.robot_rave.GetDOFValues(self.right_arm_dof_indices)
+        init_sect = self.wrist_collision_avoidance.getQ5Q6SpaceSectors(init_q[5], init_q[6])
+        print "init_sect: %s"%(init_sect)
+        if len(init_sect) == 0:
+#            init_sect = [ self.wrist_collision_avoidance.getClosestQ5Q6SpaceSector(init_q[5], init_q[6]) ]
+            print "planMoveForRightArm: wrong starting position in q5: %s and q6: %s"%(init_q[5], init_q[6])
+        for q_s in q_list:
+
+            traj = None
+            q = q_s[1]
+            end_sect = self.wrist_collision_avoidance.getQ5Q6SpaceSectors(q[5], q[6])
+            print "end_sect: %s"%(end_sect)
+            if len(end_sect) == 0:
+                continue
+
+            score = q_s[0]
+            print score
+            if score > 10000.0:
+                break
+
+            goals = []
+            # the starting position is outside the safe q5-q6 area
+            if len(init_sect) == 0:
+                closest_sect = self.wrist_collision_avoidance.getClosestQ5Q6SpaceSector(q[5], q[6])
+                q5_d, q6_d = self.wrist_collision_avoidance.forceMoveQ5Q6ToSector(q[5], q[6], closest_sect)
+                goals.append(np.array([init_q[0], init_q[1], init_q[2], init_q[3], init_q[4], q5_d, q6_d]))
+                init_sect = [ closest_sect ]
+            same_sector = False
+            for s in init_sect:
+                if s in end_sect:
+                    same_sector = True
+                    break
+            # q5 and q6 are in the same sector - there should be no problem in path execution
+            if same_sector:
+                goals.append(q)
+            else:
+                # q5 and q6 are in different sectors - we have to move the wrist to the safe area first
+                q5q6_traj = self.wrist_collision_avoidance.getQ5Q6Traj(init_q[5], init_q[6], q[5], q[6])
+
+                P_Br = self.findFreeSpaceSphere(0.35, 0.5)
+                if P_Br == None:
+                    print "planMoveForRightArm: could not find free area"
+
+                with self.robot_rave:
+                    try:
+#                        self.robot_rave.SetActiveDOFs(self.right_arm_not_wrist_dof_indices)
+                        self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
+                        # set the intermediate point
+                        T_Br_E_int = PyKDL.Frame(P_Br)
+                        T_Br_E_current = self.getLinkPose("right_HandPalmLink")
+
+                        print "frames: %s"%(len(self.frames_60_deg))
+                        q_list2 = []
+                        for fr in self.frames_60_deg:
+                            diff1 = PyKDL.diff(fr, T_Br_E_current)
+                            if diff1.rot.Norm() > 90.0/180.0*math.pi:
+                                continue
+                            sol = list(self.findIkSolutions(T_Br_E_int * fr))
+                            print len(sol)
+                            q_list2 += sol
+                        print "found solutions: %s"%(len(q_list2))
+
+                        min_score = 1000000.0
+                        min_q_sol = None
+                        # get the closest solution to the current and the end configuration
+                        for q_sol in q_list2:
+                            end_sect = self.wrist_collision_avoidance.getQ5Q6SpaceSectors(q_sol[5], q_sol[6])
+                            same_sector = False
+                            for s in init_sect:
+                                if s in end_sect:
+                                    same_sector = True
+                                    break
+                            if not same_sector:
+                                continue
+                            score = 0.0
+                            for q_idx in range(0, 5):
+                                score += (q_sol[q_idx]-init_q[q_idx])*(q_sol[q_idx]-init_q[q_idx])
+                                score += (q_sol[q_idx]-q[q_idx])*(q_sol[q_idx]-q[q_idx])
+                            if score < min_score:
+                                min_score = score
+                                min_q_sol = q_sol
+
+                        goals = []
+                        goals.append(min_q_sol)
+
+                        for q5q6 in q5q6_traj:
+                            goals.append(np.array([min_q_sol[0], min_q_sol[1], min_q_sol[2], min_q_sol[3], min_q_sol[4], q5q6[0], q5q6[1]]))
+                        goals.append(q)
+                    except planning_error,e:
+                        pass
+
+            print "goals count: %s"%(len(goals))
+            print "goals:"
+            print goals
+            traj = self.planMoveThroughGoals(goals)
+            if traj == None:
+                continue
+
+            # verify the trajectory
+            conf = traj.GetConfigurationSpecification()
+            q_traj = []
+            steps2 = max(2, int(traj.GetDuration()*200.0))
+            q5q6_collision = False
+            first_q5q6_collision = None
+            for t in np.linspace(0.0, traj.GetDuration(), steps2):
+                q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
+                q_traj.append(list(q))
+                if len(self.wrist_collision_avoidance.getQ5Q6SpaceSectors(q[5], q[6])) == 0:
+                    if first_q5q6_collision == None:
+                        first_q5q6_collision = t
+                    q5q6_collision = True
+
+            if q5q6_collision:
+                # TODO: better handle the q5-q6 collision
+                print "q5q6 collision"
+#                continue
+
+            break
+
+        self.robot_rave_update_lock.release()
+
+        if traj == None:
+            print "planMoveForRightArm: planning error"
+            return None
+
+        if q5q6_collision:
+            print "planMoveForRightArm: q5-q6 collision: %s / %s"%(first_q5q6_collision, traj.GetDuration())
+#            return None
+
+        if verbose_print:
+            print "all groups:"
+            for gr in conf.GetGroups():
+                print gr.name
+
+        def printGroup(gr):
+            print "offset: %s   dof: %s   name: %s   interpolation: %s"%(gr.offset, gr.dof, gr.name, gr.interpolation)
+
+        try:
+            gr_tim = conf.GetGroupFromName("deltatime")
+            tim = []
+            if verbose_print:
+                print "gr_tim:"
+                printGroup(gr_pos)
+        except openrave_exception:
+            gr_tim = None
+            tim = None
+            if verbose_print:
+                print "gr_tim == None"
+        try:
+            gr_pos = conf.GetGroupFromName("joint_values")
+            pos = []
+            if verbose_print:
+                print "gr_pos:"
+                printGroup(gr_pos)
+        except openrave_exception:
+            gr_pos = None
+            pos = None
+            if verbose_print:
+                print "gr_pos == None"
+        try:
+            gr_vel = conf.GetGroupFromName("joint_velocities")
+            vel = []
+            if verbose_print:
+                print "gr_vel:"
+                printGroup(gr_vel)
+        except openrave_exception:
+            gr_vel = None
+            vel = None
+            if verbose_print:
+                print "gr_vel == None"
+        try:
+            gr_acc = conf.GetGroupFromName("joint_accelerations")
+            acc = []
+            if verbose_print:
+                print "gr_acc:"
+                printGroup(gr_acc)
+        except openrave_exception:
+            gr_acc = None
+            acc = None
+            if verbose_print:
+                print "gr_acc == None"
+
+        if verbose_print:
+            print "waypoints: %s"%(traj.GetNumWaypoints())
+
+        for idx in range(0, traj.GetNumWaypoints()):
+            w = traj.GetWaypoint(idx)
+            if pos != None:
+                pos.append( [w[gr_pos.offset], w[gr_pos.offset + 1], w[gr_pos.offset + 2], w[gr_pos.offset + 3], w[gr_pos.offset + 4], w[gr_pos.offset + 5], w[gr_pos.offset + 6]] )
+            if vel != None:
+               vel.append( [w[gr_vel.offset], w[gr_vel.offset + 1], w[gr_vel.offset + 2], w[gr_vel.offset + 3], w[gr_vel.offset + 4], w[gr_vel.offset + 5], w[gr_vel.offset + 6]] )
+            if acc != None:
+               acc.append( [w[gr_acc.offset], w[gr_acc.offset + 1], w[gr_acc.offset + 2], w[gr_acc.offset + 3], w[gr_acc.offset + 4], w[gr_acc.offset + 5], w[gr_acc.offset + 6]] )
+            if tim != None:
+               tim.append( w[gr_tim.offset] )
+
+        if verbose_print:
+            print "pos"
+            print pos
+            print "tim"
+            print tim
+            if tim != None:
+                print "tim sum: %s"%(math.fsum(tim))
+            print "duration: %s"%(traj.GetDuration())
+        return pos, vel, acc, tim, q_traj, q5q6_collision
+
+    def planMoveInJoints(self, q_dest):
+        print "planMoveInJoints: ERROR"
+        return
         # check for q5-q6 collision
         if not hasattr(self, 'wrist_collision_avoidance') or self.wrist_collision_avoidance == None:
             self.wrist_collision_avoidance = velmautils.WristCollisionAvoidance("right", None, 5.0/180.0*math.pi)
@@ -608,7 +1044,8 @@ class OpenraveInstance:
             with self.robot_rave:
                 try:
                     self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
-                    traj = self.basemanip.MoveToHandPosition(matrices=[self.KDLToOpenrave(self.T_World_Br * T_Br_E)],maxiter=maxiter,maxtries=1,seedik=i,execute=False,outputtrajobj=True)
+                    #traj = self.basemanip.MoveToHandPosition(matrices=[self.KDLToOpenrave(self.T_World_Br * T_Br_E)],maxiter=maxiter,maxtries=1,seedik=i,execute=False,outputtrajobj=True)
+                    traj = self.basemanip.MoveActiveJoints(goal=q_dest,execute=False,outputtrajobj=True)
                 except planning_error,e:
                     pass
             self.robot_rave_update_lock.release()
@@ -717,90 +1154,6 @@ class OpenraveInstance:
                 print "tim sum: %s"%(math.fsum(tim))
             print "duration: %s"%(traj.GetDuration())
         return pos, vel, acc, tim, q_traj, q5q6_collision
-
-    def planMove_old(self, T_Br_E, maxiter=500):
-        traj = None
-        self.robot_rave_update_lock.acquire()
-        with self.robot_rave:
-            try:
-                self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
-                traj = self.basemanip.MoveToHandPosition(matrices=[self.KDLToOpenrave(self.T_World_Br * T_Br_E)],maxiter=maxiter,maxtries=1,seedik=4,execute=False,outputtrajobj=True)
-            except planning_error,e:
-                print "planMove: planning error"
-        self.robot_rave_update_lock.release()
-
-        if traj == None:
-            return None
-
-        conf = traj.GetConfigurationSpecification()
-        q_prev = None
-        max_q_vel = 0.0
-        steps = max(2, int(traj.GetDuration()/0.01))
-        traj_time_d = traj.GetDuration() / steps
-        for t in np.linspace(0.0, traj.GetDuration(), steps):
-            q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
-            if q_prev != None:
-                for i in range(0,7):
-                    q_vel = math.fabs(q[i] - q_prev[i]) / traj_time_d
-                    if q_vel > max_q_vel:
-                        max_q_vel = q_vel
-            q_prev = q
-
-        time_d = 0.1
-        q_vel_limit = 10.0/180.0*math.pi
-        f = max_q_vel / (q_vel_limit)
-
-        time = traj.GetDuration() * f
-        times = []
-        q_traj = []
-        steps2 = max(2, int(f * traj.GetDuration() / 0.01))
-        for t in np.linspace(0.0, traj.GetDuration(), steps2):
-            q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
-            q_traj.append(list(q))
-            times.append(t/traj.GetDuration()*time)
-        return q_traj, times
-
-    def planMoveInJoints(self, q_dest):
-        traj = None
-        self.robot_rave_update_lock.acquire()
-        with self.robot_rave:
-            try:
-                self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
-                traj = self.basemanip.MoveActiveJoints(goal=q_dest,execute=False,outputtrajobj=True)
-            except planning_error,e:
-                print "planMove: planning error"
-        self.robot_rave_update_lock.release()
-
-        if traj == None:
-            return None
-
-        conf = traj.GetConfigurationSpecification()
-        q_prev = None
-        max_q_vel = 0.0
-        steps = max(2, int(traj.GetDuration()/0.01))
-        traj_time_d = traj.GetDuration() / steps
-        for t in np.linspace(0.0, traj.GetDuration(), steps):
-            q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
-            if q_prev != None:
-                for i in range(0,7):
-                    q_vel = math.fabs(q[i] - q_prev[i]) / traj_time_d
-                    if q_vel > max_q_vel:
-                        max_q_vel = q_vel
-            q_prev = q
-
-        time_d = 0.01
-        q_vel_limit = 20.0/180.0*math.pi
-        f = max_q_vel / (q_vel_limit)
-
-        time = traj.GetDuration() * f
-        times = []
-        q_traj = []
-        steps2 = max(2, int(f * traj.GetDuration() / 0.01))
-        for t in np.linspace(0.0, traj.GetDuration(), steps2):
-            q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
-            q_traj.append(list(q))
-            times.append(t/traj.GetDuration()*time)
-        return q_traj, times
 
     def printCollisions(self):
         report = CollisionReport()
