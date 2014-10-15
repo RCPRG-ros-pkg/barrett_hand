@@ -625,10 +625,10 @@ Class for velma robot.
                 self.q_rf[5] = data.position[5]
                 self.q_rf[6] = data.position[6]
                 self.q_rf[7] = data.position[7]
-                self.qhr[0] = self.q_rf[0]
-                self.qhr[1] = self.q_rf[1]
-                self.qhr[2] = self.q_rf[4]
-                self.qhr[3] = self.q_rf[6]
+                self.qhr[0] = self.q_rf[0]    # spread
+                self.qhr[1] = self.q_rf[1]    # f1
+                self.qhr[2] = self.q_rf[4]    # f2
+                self.qhr[3] = self.q_rf[6]    # f3
             if data.name[0] == 'left_HandFingerOneKnuckleOneJoint':
                 self.q_lf[0] = data.position[0]
                 self.q_lf[1] = data.position[1]

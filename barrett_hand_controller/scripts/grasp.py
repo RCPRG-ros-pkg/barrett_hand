@@ -174,100 +174,6 @@ Class for grasp learning.
                 break
             rospy.sleep(0.5)
 
-    def flipsNeeded(self, T_B_Einit, T_B_Edest, velma, velma_ikr, qar):
-        q_out = velma_ikr.isTrajectoryPossibleInOneSubspace(T_B_Edest, velma.qar, velma.T_B_T2.Inverse())
-#        q_out = velma_ikr.getAllDistinctConfigurations(T_B_Edest, velma.T_B_T2.Inverse())
-#        q3_flip = True
-#        q5_flip = True
-#        for q in q_out:
-#            # check if singularity passing is required
-#            if qar[3] * q[3] > 0.0 and qar[5] * q[5] > 0.0:
-#                return q
-        return q_out
-
-    def executeTrajectoryInOneSubspace(self, T_B_Ed, velma, velma_ikr, q_end=None):
-            counter = 0
-            self.openrave.showTrajectory(2, qar_list=[velma.qar, velma.qar])
-            self.openrave.showTrajectory(2, qar_list=[q_end, q_end])
-
-            while True:
-                velma.updateTransformations()
-                T_B_Einit = velma.T_B_W * velma.T_W_E
-
-                lin_traj_possible, lin_traj_q_out = velma_ikr.isLinearTrajectoryPossibleInOneSubspace(T_B_Einit, T_B_Ed, velma.qar, velma.T_B_T2.Inverse())
-                if lin_traj_possible != None and lin_traj_possible == True:
-                    print "linear trajectory is possible"
-                    T_B_Wd = T_B_Ed * velma.T_E_W
-                    duration = velma.getMovementTime(T_B_Wd, max_v_l=0.4, max_v_r=0.8)
-                    velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
-                    if velma.checkStopCondition(duration):
-                        exit(0)
-                    print "done"
-                    break
-
-                T_B_Edi = velma_ikr.incrementTrajectoryInOneSubspace(T_B_Einit, T_B_Ed, velma.T_W_E, velma.qar, velma.T_B_T2.Inverse(), q_end=q_end)
-                T_B_Wd = T_B_Edi * velma.T_E_W
-                duration = velma.getMovementTime(T_B_Wd, max_v_l=1.0, max_v_r=1.0)
-                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
-                if velma.checkStopCondition(duration):
-                    exit(0)
-
-                counter += 1
-                if counter > 100:
-                    counter = 0
-                    if q_end != None:
-                        print "showing final pose"
-                        self.openrave.showTrajectory(2, qar_list=[q_end, q_end])
-
-#                q_idx, q_diff = velma_ikr.planTrajectoryInOneSubspace(T_B_Einit, T_B_Ed, velma.T_W_E, velma.qar, velma.T_B_T2.Inverse())
-#                print "q_idx: %s   q_diff: %s"%(q_idx, q_diff)
-#                if q_idx == None or q_diff == None:
-#                    print "could not find trajectory"
-#                    return
-#                traj, times = velma.generateTrajectoryInJoint(q_idx, q_diff, 20.0/180.0*math.pi)
-#                velma.moveWristTraj(traj, times, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-#                if velma.checkStopCondition(times[-1]):
-#                    exit(0)
-
-    def getBestGrasp(self, grasps, velma, velma_ikr, checked_grasps_idx):
-            # get manipulator configuration without singularity in q[5]
-            velma.updateTransformations()
-            min_cost = 1000000.0
-            min_q = None
-            min_grasp_idx = None
-            singularity_angle = 30.0/180.0*math.pi
-            for i in range(0, len(grasps)):
-#                if i in checked_grasps_idx:
-#                    continue
-                T_Br_E = self.openrave.getGraspTransform(grasps[i], collisionfree=True)
-#                print "i: %s"%(i)
-#                print "grasp:"
-#                print grasps[i]
-#                self.openrave.showGrasp(grasps[i])
-                final_config, contacts = self.openrave.getFinalConfig(grasps[i])
-                if len(contacts) == 0:
-                    continue
-                q_out = velma_ikr.getAllDistinctConfigurations(T_Br_E, velma.T_B_T2.Inverse())
-                # get the best configuration
-                for q in q_out:
-                    cost = 0.0
-                    # add penalty for singularity
-                    if math.fabs(q[3]) < singularity_angle:
-                        cost += singularity_angle - math.fabs(q[3])
-                    if math.fabs(q[5]) < singularity_angle:
-                        cost += singularity_angle - math.fabs(q[5])
-                    if min_cost > cost:
-                        min_cost = cost
-                        min_q = q
-                        min_grasp_idx = i
-                if min_cost == 0.0:
-                    break
-
-            if min_cost > 1000.0:
-                print "could not reach the destination point"
-                return None
-            return min_grasp_idx, min_q
-
     def switchToJoint(self, robot):
         if robot.isCartesianImpedanceActive():
             raw_input("Press Enter to enable joint impedance...")
@@ -282,10 +188,10 @@ Class for grasp learning.
 
     def switchToCartesian(self, robot):
         if robot.isJointImpedanceActive():
-            raw_input("Press Enter to enable joint impedance...")
+            raw_input("Press Enter to enable cartesian impedance...")
             if robot.checkStopCondition():
                 exit(0)
-            robot.switchToCartesian()
+            robot.switchToCart()
         elif robot.isCartesianImpedanceActive():
             pass
         else:
@@ -314,7 +220,7 @@ Class for grasp learning.
         if simulation_only:
             time_mult = 5.0
         else:
-            time_mult = 20.0
+            time_mult = 10.0
         m_id = 0
 
         # create objects definitions
@@ -600,15 +506,17 @@ Class for grasp learning.
             self.openrave.updatePose("object", T_B_Oorig)
             self.allowUpdateObjects()
 
+        ################
+        # the main loop
+        ################
         base_qar = copy.deepcopy(velma.qar)
         T_B_O_prev = None
-        last_grasp_result = "none"
         checked_grasps_idx = []
-        # the main loop
         grips_db = []
         while True:
 
             self.allowUpdateObjects()
+            rospy.sleep(1.0)
             # move to base pose
             dist = 0.0
             for q_idx in range(0,7):
@@ -636,11 +544,13 @@ Class for grasp learning.
                 if velma.checkStopCondition(duration * time_mult + 1.0):
                     exit(0)
            
+            velma.calibrateTactileSensors()
 
             rospy.sleep(1.0)
             self.disallowUpdateObjects()
             rospy.sleep(0.2)
 
+            # check if we need to generate new set of possible grasps
             generate_new_grasps = True
             T_B_O = self.openrave.getPose("object")
             if T_B_O_prev != None:
@@ -653,65 +563,76 @@ Class for grasp learning.
                 indices = self.openrave.generateGrasps("object")
 
             if len(indices) == 0:
-                print "could not generate any grasps for current configuration"
-                break
+                print "FATAL ERROR: could not generate any grasps for current configuration"
+                exit(0)
 
             print "number of possible grasps for current pose: %s"%(len(indices))
 
+            # show all possible grasps
 #            for idx in indices:
 #                self.openrave.showGrasp("object", self.openrave.getGrasp("object", idx))
 
-            # get index of the next grasp to check:
-            # which is not in the checked grasps list
-            # - if the last grasp failed (is non-contact):
-            #     which is close to the last failed grasp (non-contact)
-            # - if the last grasp failed (but has all 3 contacts):
-            #     which is most distant to the already checked grasps
-            # the first iteration - get the first grasp on a list
-            print "last grasp status: %s"%(last_grasp_result)
-            if last_grasp_result == "none":
-                for idx in indices:
-                    if (idx in checked_grasps_idx) or sim_grips[idx] == None:
+            max_dist = -1000000.0
+            max_idx = None
+            # TODO
+            first_ok_idx = None
+            # iterate through all available grasps
+            for idx in indices:
+                if sim_grips[idx] == None:
+                    continue
+                # ignore grasps which failed due to planning error for pose close to the current pose
+                close_to_failed = False
+                for T_Br_O_failed in sim_grips[idx].planning_failure_poses:
+                    diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_O_failed)
+                    if diff.vel.Norm() < 0.02 and diff.rot.Norm() < 5.0/180.0*math.pi:
+                        close_to_failed = True
+                        break
+                if close_to_failed:
+                    continue
+
+                # ignore the grasps with:
+                # count_no_contact > 0
+                # count_too_little_contacts > 0
+                # count_moved_on_grip > 0
+                # count_unstable > 0
+                # count_stable > 0
+                if sim_grips[idx].count_no_contact > 0 or sim_grips[idx].count_too_little_contacts > 0 or sim_grips[idx].count_moved_on_grip > 0 or sim_grips[idx].count_unstable > 0 or sim_grips[idx].count_stable > 0:
+                    continue
+
+                # save the index of the first possibly good grasp
+                if first_ok_idx == None:
+                    first_ok_idx = idx
+
+                # search for grasp most distant from other grasps with:
+                # count_no_contact > 0
+                # count_too_little_contacts > 0
+                # count_unstable > 0
+
+                min_dist = None
+                # iterate through all checked grasps - find the closest grasp in checked grasps set
+                for idx_2 in range(0, self.openrave.getGraspsCount("object")):
+                    if sim_grips[idx_2] == None:
                         continue
-                    grasp_idx = idx
-                    break
-            # the last grasp failed with non-contact result - get the closest available grasp
-            elif last_grasp_result == "planning_fail":
-                min_dist = 1000000.0
-                min_idx = -1
-                for idx in indices:
-                    if (idx in checked_grasps_idx) or sim_grips[idx] == None:
+                    if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0:
                         continue
-                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[grasp_idx])
-                    if dist < min_dist:
+                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[idx_2])
+                    if min_dist == None or dist < min_dist:
                         min_dist = dist
-                        min_idx = idx
-                grasp_idx = min_idx
-            # the last grasp failed with contact result - get the grasp that is most distant from all checked grasps
-            elif last_grasp_result == "contact_fail" or last_grasp_result == "non_contact_fail":
-                max_dist = -1000000.0
-                max_idx = -1
-                # iterate through all available grasps
-                for idx in indices:
-                    if (idx in checked_grasps_idx) or sim_grips[idx] == None:
-                        continue
-                    min_dist = 1000000.0
-                    # iterate through all checked grasps - find the closest grasp in checked grasps set
-                    for c_idx in checked_grasps_idx:
-                        dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[c_idx])
-                        if dist < min_dist:
-                            min_dist = dist
-                    if min_dist > max_dist:
-                        max_dist = min_dist
-                        max_idx = idx
-                print "found grasp that is the most distant from all checked grasps: %s"%(max_dist)
+                if min_dist != None and min_dist > max_dist:
+                    max_dist = min_dist
+                    max_idx = idx
+            print "found grasp that is the most distant from all checked grasps: %s"%(max_dist)
+            if max_idx != None:
                 grasp_idx = max_idx
+            elif first_ok_idx != None:
+                grasp_idx = first_ok_idx
             else:
-                print "last grasp status: %s. exiting..."%(last_grasp_result)
-                break
+                print "FATAL ERROR: max_idx == None and first_ok_idx == None"
+                exit(0)
+
+            current_sim_grip = sim_grips[grasp_idx]
 
             print "choosed grasp no. %s"%(grasp_idx)
-            checked_grasps_idx.append(grasp_idx)
 
             print "found grasp"
             grasp = copy.deepcopy(self.openrave.getGrasp("object", grasp_idx))
@@ -722,15 +643,11 @@ Class for grasp learning.
             traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
             if traj == None:
                 print "colud not plan trajectory"
-                last_grasp_result = "planning_fail"
-                self.allowUpdateObjects()
-                rospy.sleep(1.0)
+                current_sim_grip.setPlanningFailure(obj_grasp.T_Br_Co)
                 continue
-#                rospy.sleep(4.0)
-#                exit(0)
 
-            print "q_start: %s"%(traj[0][0])
-            print "q_end:   %s"%(traj[0][-1])
+#            print "q_start: %s"%(traj[0][0])
+#            print "q_end:   %s"%(traj[0][-1])
 
             duration = math.fsum(traj[3])
 
@@ -788,44 +705,51 @@ Class for grasp learning.
             if velma.checkStopCondition(3.0):
                 break
 
-            # grab the body
-#            if simulation_only:
-            self.openrave.grab("object")
-#            else:
-
-            # get contact points and forces for each finger
             if not simulation_only:
+                # get contact points and forces for each finger
                 velma.updateTransformations()
                 contacts = [[],[],[]]
                 forces = [[],[],[]]
                 contacts[0], forces[0] = velma.getContactPoints(100, f1=True, f2=False, f3=False, palm=False)
                 contacts[1], forces[1] = velma.getContactPoints(100, f1=False, f2=True, f3=False, palm=False)
                 contacts[2], forces[2] = velma.getContactPoints(100, f1=False, f2=False, f3=True, palm=False)
-                if len(contacts[0]) == 0 and len(contacts[1]) == 0 and len(contacts[2]) == 0:
-                    print "one or more fingers have no contact"
-                    last_grasp_result = "non_contact_fail"
-                    self.openrave.release("object")
-                    self.allowUpdateObjects()
-                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-                    if velma.checkStopCondition(3.0):
-                        break
-                    continue
+                fingers_in_contact = 0
+                print "f1: %s   %s    %s"%((final_config[0]+ad2), velma.qhr[1], len(contacts[0]))
+                print "f2: %s   %s    %s"%((final_config[1]+ad2), velma.qhr[2], len(contacts[1]))
+                print "f3: %s   %s    %s"%((final_config[2]+ad2), velma.qhr[3], len(contacts[2]))
+                if abs((final_config[0]+ad2) - velma.qhr[1]) > 1.0/180.0*math.pi or len(contacts[0]) > 0:
+                    fingers_in_contact += 1
+                    f1_contact = True
+                if abs((final_config[1]+ad2) - velma.qhr[2]) > 1.0/180.0*math.pi or len(contacts[1]) > 0:
+                    fingers_in_contact += 1
+                    f2_contact = True
+                if abs((final_config[3]+ad2) - velma.qhr[3]) > 1.0/180.0*math.pi or len(contacts[2]) > 0:
+                    fingers_in_contact += 1
+                    f3_contact = True
             else:
-                if random.random() < 0:
-                    print "one or more fingers have no contact"
-                    last_grasp_result = "non_contact_fail"
-                    self.openrave.release("object")
-                    self.allowUpdateObjects()
-                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-                    if velma.checkStopCondition(3.0):
-                        break
-                    continue
+                fingers_in_contact = 3
+
+            if fingers_in_contact == 0:
+                current_sim_grip.setNoContact()
+            elif fingers_in_contact < 3:
+                current_sim_grip.setTooLittleContacts()
+
+            if fingers_in_contact < 3:
+                print "only %s fingers have contact"%(fingers_in_contact)
+                self.openrave.release("object")
+                velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+                if velma.checkStopCondition(3.0):
+                    break
+                continue
 
             self.allowUpdateObjects()
             print "checking the object pose after grip..."
             rospy.sleep(1.0)
 
-            pose_tolerance = [0.01, 5.0/180.0*math.pi]
+            # grab the body
+            self.openrave.grab("object")
+
+            pose_tolerance = [0.02, 5.0/180.0*math.pi]
             # check the object pose before lift-up
             dur = rospy.Time.now() - obj_grasp.pose_update_time
             if abs(dur.to_sec()) < 1.0:
@@ -834,29 +758,17 @@ Class for grasp learning.
                 T_Br_Co_sim = self.openrave.getPose("object")
                 pose_diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_Co_sim)
                 if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
-                    print "object pose is different after the grip - diff: %s > %s     %s > %s deg."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
-                    last_grasp_result = "contact_fail"
-                    self.openrave.release("object")
-                    self.allowUpdateObjects()
-                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-                    if velma.checkStopCondition(3.0):
-                        break
-                    continue
+                    print "object pose is different after the grip - diff: %s > %s     %s > %s deg. but it is okay..."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
+#                    current_sim_grip.setMovedOnGrip()
+#                    self.openrave.release("object")
+#                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+#                    if velma.checkStopCondition(3.0):
+#                        break
+#                    continue
             else:
                 print "fresh pose not available: %s"%(dur.to_sec())
                 fresh_pose = False
 
-####
-            # for test only
-            if False:
-                last_grasp_result = "contact_fail"
-                self.openrave.release("object")
-                self.allowUpdateObjects()
-                velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-                if velma.checkStopCondition(3.0):
-                    break
-                continue
-####
             # lift the object up
             velma.updateTransformations()
 
@@ -883,25 +795,24 @@ Class for grasp learning.
                 contacts[0], forces[0] = velma.getContactPoints(100, f1=True, f2=False, f3=False, palm=False)
                 contacts[1], forces[1] = velma.getContactPoints(100, f1=False, f2=True, f3=False, palm=False)
                 contacts[2], forces[2] = velma.getContactPoints(100, f1=False, f2=False, f3=True, palm=False)
-                if len(contacts[0]) == 0 or len(contacts[1]) == 0 or len(contacts[2]) == 0:
-                    print "one or more fingers have no contact"
-                    last_grasp_result = "contact_fail"
-                    self.openrave.release("object")
-                    self.allowUpdateObjects()
-                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-                    if velma.checkStopCondition(3.0):
-                        break
-                    continue
+                fingers_in_contact = 0
+                if len(contacts[0]) > 0:
+                    fingers_in_contact += 1
+                if len(contacts[1]) > 0:
+                    fingers_in_contact += 1
+                if len(contacts[2]) > 0:
+                    fingers_in_contact += 1
             else:
-                if random.random() < 0:
-                    print "one or more fingers have no contact"
-                    last_grasp_result = "contact_fail"
-                    self.openrave.release("object")
-                    self.allowUpdateObjects()
-                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-                    if velma.checkStopCondition(3.0):
-                        break
-                    continue
+                fingers_in_contact = 3
+
+            if fingers_in_contact < 3:
+                print "only %s fingers have contact"%(fingers_in_contact)
+                current_sim_grip.setUnstable()
+                self.openrave.release("object")
+                velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+                if velma.checkStopCondition(3.0):
+                    break
+                continue
 
             self.allowUpdateObjects()
             print "checking the object pose after the lift-up..."
@@ -915,9 +826,8 @@ Class for grasp learning.
                 pose_diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_Co_sim)
                 if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
                     print "object pose is different after the lift-up - diff: %s > %s     %s > %s deg."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
-                    last_grasp_result = "contact_fail"
+                    current_sim_grip.setUnstable()
                     self.openrave.release("object")
-                    self.allowUpdateObjects()
                     velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
                     if velma.checkStopCondition(3.0):
                         break
@@ -925,6 +835,26 @@ Class for grasp learning.
             else:
                 print "fresh pose not available: %s"%(dur.to_sec())
                 fresh_pose = False
+
+            print "success"
+            current_sim_grip.setStable()
+            self.openrave.release("object")
+            velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+            if velma.checkStopCondition(3.0):
+                break
+            rospy.sleep(1.0)
+
+            continue
+
+
+
+
+
+
+
+
+
+
 
 
 #            raw_input("Press Enter to exit...")

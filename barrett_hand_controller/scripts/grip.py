@@ -65,11 +65,32 @@ class Grip:
         self.grasped_object = grasped_object
         self.contacts = []
         self.successful = False
+        self.count_planning_failure = 0
+        self.planning_failure_poses = []
         self.count_no_contact = 0
         self.count_too_little_contacts = 0
         self.count_moved_on_grip = 0
         self.count_unstable = 0
         self.count_stable = 0
+
+    def setPlanningFailure(self, T_Br_O):
+         self.count_planning_failure += 1
+         self.planning_failure_poses.append(T_Br_O)
+
+    def setNoContact(self):
+         self.count_no_contact += 1
+
+    def setTooLittleContacts(self):
+         self.count_too_little_contacts += 1
+
+    def setMovedOnGrip(self):
+         self.count_moved_on_grip += 1
+
+    def setUnstable(self):
+        self.count_unstable += 1
+
+    def setStable(self):
+        self.count_stable += 1
 
     def addContact(self, T_O_Co):
         self.contacts.append(copy.deepcopy(T_O_Co))

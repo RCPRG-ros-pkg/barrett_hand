@@ -780,13 +780,18 @@ class OpenraveInstance:
         self.robot_rave_update_lock.release()
         return min_q_sol
 
-    def planMoveThroughGoals(self, goals):
+    def planMoveThroughGoals(self, goals, goal0_wrist_only=False):
         traj = None
         self.robot_rave_update_lock.acquire()
         try:
             with self.robot_rave:
                 self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
-                traj = self.basemanip.MoveActiveJoints(goal=goals[0],execute=False,outputtrajobj=True)
+                if goal0_wrist_only:
+                    self.robot_rave.GetLink("right_arm_5_link").Enable(False)
+                    traj = self.basemanip.MoveActiveJoints(goal=goals[0],execute=False,outputtrajobj=True)
+                    self.robot_rave.GetLink("right_arm_5_link").Enable(True)
+                else:
+                    traj = self.basemanip.MoveActiveJoints(goal=goals[0],execute=False,outputtrajobj=True)
                 for idx in range(1, len(goals)):
                     with self.robot_rave.CreateRobotStateSaver():
                         self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
@@ -845,6 +850,7 @@ class OpenraveInstance:
             if score > 10000.0:
                 break
 
+            goal0_wrist_only = False
             goals = []
             # the starting position is outside the safe q5-q6 area
             if len(init_sect) == 0:
@@ -852,6 +858,7 @@ class OpenraveInstance:
                 q5_d, q6_d = self.wrist_collision_avoidance.forceMoveQ5Q6ToSector(q[5], q[6], closest_sect)
                 goals.append(np.array([init_q[0], init_q[1], init_q[2], init_q[3], init_q[4], q5_d, q6_d]))
                 init_sect = [ closest_sect ]
+                goal0_wrist_only = True
             same_sector = False
             for s in init_sect:
                 if s in end_sect:
@@ -919,7 +926,7 @@ class OpenraveInstance:
             print "goals count: %s"%(len(goals))
             print "goals:"
             print goals
-            traj = self.planMoveThroughGoals(goals)
+            traj = self.planMoveThroughGoals(goals, goal0_wrist_only=goal0_wrist_only)
             if traj == None:
                 continue
 
