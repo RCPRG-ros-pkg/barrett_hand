@@ -655,21 +655,21 @@ class OpenraveInstance:
         for q in q_list:
             q_score.append([1000000.0, q])
             # punish for singularities in end configuration
-            if abs(q[1]) < 20.0/180.0*math.pi:
+            if abs(q[1]) < 30.0/180.0*math.pi:
                 continue
-            if abs(q[3]) < 20.0/180.0*math.pi:
+            if abs(q[3]) < 30.0/180.0*math.pi:
                 continue
-            if abs(q[5]) < 20.0/180.0*math.pi:
+            if abs(q[5]) < 30.0/180.0*math.pi:
                 continue
 
             score = 0.0
 
-            if abs(q[1]) < 30.0/180.0*math.pi:
-                score += 30.0/180.0*math.pi - abs(q[1])
-            if abs(q[3]) < 30.0/180.0*math.pi:
-                score += 30.0/180.0*math.pi - abs(q[3])
-            if abs(q[5]) < 30.0/180.0*math.pi:
-                score += 30.0/180.0*math.pi - abs(q[5])
+            if abs(q[1]) < 40.0/180.0*math.pi:
+                score += 40.0/180.0*math.pi - abs(q[1])
+            if abs(q[3]) < 40.0/180.0*math.pi:
+                score += 40.0/180.0*math.pi - abs(q[3])
+            if abs(q[5]) < 40.0/180.0*math.pi:
+                score += 40.0/180.0*math.pi - abs(q[5])
 
             score *= 10.0
 
@@ -679,7 +679,7 @@ class OpenraveInstance:
                     score += 40.0/180.0*math.pi - abs(q[i]-lower_lim[i])
                 if abs(q[i]-upper_lim[i]) < 40.0/180.0*math.pi:
                     score += 40.0/180.0*math.pi - abs(q[i]-upper_lim[i])
-            q_score[-1] = [score, q]
+            q_score[-1][0] = score
 
         q_sorted = sorted(q_score, key=operator.itemgetter(0))
         return q_sorted

@@ -522,6 +522,7 @@ Class for grasp learning.
             for q_idx in range(0,7):
                 dist += (velma.qar[q_idx] - base_qar[q_idx])*(velma.qar[q_idx] - base_qar[q_idx])
             if math.sqrt(dist) > 10.0/180.0*math.pi:
+                print "moving to base pose..."
                 traj = self.openrave.planMoveForRightArm(None, base_qar)
                 if traj == None:
                     print "FATAL ERROR: colud not plan trajectory to base pose"
@@ -543,13 +544,14 @@ Class for grasp learning.
                 velma.moveWristTrajJoint(traj, time_mult, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
                 if velma.checkStopCondition(duration * time_mult + 1.0):
                     exit(0)
-           
+
             velma.calibrateTactileSensors()
 
-            rospy.sleep(1.0)
+            rospy.sleep(2.0)
             self.disallowUpdateObjects()
             rospy.sleep(0.2)
 
+            print "generating possible grasps..."
             # check if we need to generate new set of possible grasps
             generate_new_grasps = True
             T_B_O = self.openrave.getPose("object")
@@ -573,6 +575,7 @@ Class for grasp learning.
 #                self.openrave.showGrasp("object", self.openrave.getGrasp("object", idx))
 
             max_dist = -1000000.0
+            min_score = None
             max_idx = None
             # TODO
             first_ok_idx = None
@@ -583,6 +586,16 @@ Class for grasp learning.
                 # ignore grasps which failed due to planning error for pose close to the current pose
                 close_to_failed = False
                 for T_Br_O_failed in sim_grips[idx].planning_failure_poses:
+                    diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_O_failed)
+                    if diff.vel.Norm() < 0.02 and diff.rot.Norm() < 5.0/180.0*math.pi:
+                        close_to_failed = True
+                        break
+                if close_to_failed:
+                    continue
+
+                # ignore grasps which failed due to visibility error for pose close to the current pose
+                close_to_failed = False
+                for T_Br_O_failed in sim_grips[idx].visibility_problem_poses:
                     diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_O_failed)
                     if diff.vel.Norm() < 0.02 and diff.rot.Norm() < 5.0/180.0*math.pi:
                         close_to_failed = True
@@ -608,20 +621,43 @@ Class for grasp learning.
                 # count_too_little_contacts > 0
                 # count_unstable > 0
 
-                min_dist = None
-                # iterate through all checked grasps - find the closest grasp in checked grasps set
+                # iterate through all checked grasps and calculate the total score
+                score = 0.0
                 for idx_2 in range(0, self.openrave.getGraspsCount("object")):
                     if sim_grips[idx_2] == None:
                         continue
-                    if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0:
+                    sc_mul = 1.0
+                    if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0 and sim_grips[idx_2].count_stable == 0:
                         continue
                     dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[idx_2])
-                    if min_dist == None or dist < min_dist:
-                        min_dist = dist
-                if min_dist != None and min_dist > max_dist:
-                    max_dist = min_dist
+
+                    penalty_no_contact = sim_grips[idx_2].count_no_contact * max(5.0-dist, 0.0)
+                    penalty_too_little_contacts = sim_grips[idx_2].count_too_little_contacts * max(5.0-dist, 0.0)
+                    penalty_unstable = sim_grips[idx_2].count_unstable * max(5.0-dist, 0.0)
+                    reward_stable = sim_grips[idx_2].count_stable * max(5.0-dist, 0.0)
+
+                    score += penalty_no_contact + penalty_too_little_contacts + penalty_unstable - reward_stable
+
+                if min_score == None or min_score > score:
+                    min_score = score
                     max_idx = idx
-            print "found grasp that is the most distant from all checked grasps: %s"%(max_dist)
+
+#                min_dist = None
+#                # iterate through all checked grasps - find the closest grasp in checked grasps set
+#                for idx_2 in range(0, self.openrave.getGraspsCount("object")):
+#                    if sim_grips[idx_2] == None:
+#                        continue
+#                    if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0:
+#                        continue
+#                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[idx_2])
+#                    if min_dist == None or dist < min_dist:
+#                        min_dist = dist
+#                if min_dist != None and min_dist > max_dist:
+#                    max_dist = min_dist
+#                    max_idx = idx
+#            print "found grasp that is the most distant from all checked grasps: %s"%(max_dist)
+            print "found grasp that has the best score: %s"%(min_score)
+
             if max_idx != None:
                 grasp_idx = max_idx
             elif first_ok_idx != None:
@@ -640,11 +676,23 @@ Class for grasp learning.
             T_B_Ed = self.openrave.getGraspTransform("object", grasp, collisionfree=True)
             self.openrave.showGrasp("object", grasp)
 
+            T_Br_O_init = obj_grasp.T_Br_Co
             traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
             if traj == None:
                 print "colud not plan trajectory"
                 current_sim_grip.setPlanningFailure(obj_grasp.T_Br_Co)
                 continue
+
+            final_config, contacts = self.openrave.getFinalConfig("object", grasp)
+            if final_config == None:
+                print "colud not plan trajectory"
+                current_sim_grip.setPlanningFailure(obj_grasp.T_Br_Co)
+                continue
+
+            print "final_config:"
+            print final_config
+            print "contacts (sim): %s"%(len(contacts))
+            print "standoff: %s"%(self.openrave.getGraspStandoff("object", grasp))
 
 #            print "q_start: %s"%(traj[0][0])
 #            print "q_end:   %s"%(traj[0][-1])
@@ -678,16 +726,6 @@ Class for grasp learning.
             velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
             if velma.checkStopCondition(duration):
                 break
-
-
-
-
-
-            final_config, contacts = self.openrave.getFinalConfig("object", grasp)
-            print "final_config:"
-            print final_config
-            print "contacts: %s"%(len(contacts))
-            print "standoff: %s"%(self.openrave.getGraspStandoff("object", grasp))
 
             raw_input("Press Enter to close fingers for pre-grasp...")
             # close the fingers for pre-grasp
@@ -835,6 +873,12 @@ Class for grasp learning.
             else:
                 print "fresh pose not available: %s"%(dur.to_sec())
                 fresh_pose = False
+                current_sim_grip.setVisibilityProblem(T_Br_O_init)
+                self.openrave.release("object")
+                velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
+                if velma.checkStopCondition(3.0):
+                    break
+                continue
 
             print "success"
             current_sim_grip.setStable()

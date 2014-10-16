@@ -72,6 +72,8 @@ class Grip:
         self.count_moved_on_grip = 0
         self.count_unstable = 0
         self.count_stable = 0
+        self.count_visibility_problem = 0
+        self.visibility_problem_poses = []
 
     def setPlanningFailure(self, T_Br_O):
          self.count_planning_failure += 1
@@ -91,6 +93,10 @@ class Grip:
 
     def setStable(self):
         self.count_stable += 1
+
+    def setVisibilityProblem(self, T_Br_O):
+        self.count_visibility_problem = 0
+        self.visibility_problem_poses.append(T_Br_O)
 
     def addContact(self, T_O_Co):
         self.contacts.append(copy.deepcopy(T_O_Co))
