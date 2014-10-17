@@ -146,8 +146,8 @@ Class for grasp learning.
             for obj in self.objects:
                 for marker in obj.markers:
                     T_Br_M = self.getMarkerPose(marker[0], wait = False, timeBack = 0.3)
-                    if T_Br_M != None:
-                        T_B_C = self.getCameraPose()
+                    if T_Br_M != None and self.velma != None:
+                        T_B_C = self.velma.T_B_C #self.getCameraPose()
                         T_C_M = T_B_C.Inverse() * T_Br_M
                         v = T_C_M * PyKDL.Vector(0,0,1) - T_C_M * PyKDL.Vector()
                         if v.z() > -0.7:
@@ -238,6 +238,8 @@ Class for grasp learning.
         obj_wall_right = grip.GraspableObject("wall_right", "box", [3.0,0.2,3.0])
         obj_ceiling = grip.GraspableObject("ceiling", "box", [3.0,3.0,0.2])
 
+        obj_cbeam = grip.GraspableObject("cbeam", "cbeam", [0.1, 0.1, 0.2, 0.02])
+
         obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
         obj_grasp_frames_old = [
         [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
@@ -280,7 +282,7 @@ Class for grasp learning.
             T_M18_Mi = marker[1]
             obj_grasp.addMarker(marker[0], T_Co_M18 * T_M18_Mi)
 
-        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]
+        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]#, obj_cbeam]
 
         if False:
             grip.gripUnitTest(obj_grasp)
@@ -305,6 +307,8 @@ Class for grasp learning.
         for obj in self.objects:
             if obj.isBox():
                 self.openrave.addBox(obj.name, obj.size[0], obj.size[1], obj.size[2])
+            elif obj.isCBeam():
+                self.openrave.addCBeam(obj.name, obj.size[0], obj.size[1], obj.size[2], obj.size[3])
 
         print "added objects"
 
@@ -329,6 +333,7 @@ Class for grasp learning.
             vertices, indices = self.openrave.getMesh("object")
             velmautils.sampleMeshUnitTest(vertices, indices, self.pub_marker)
 
+        self.velma = None
         self.allowUpdateObjects()
         # start thread for updating objects' positions in openrave
         thread.start_new_thread(self.poseUpdaterThread, (None,1))
@@ -340,6 +345,7 @@ Class for grasp learning.
             # create the robot interface for real hardware
             velma = Velma()
 
+        self.velma = velma
         self.openrave.addRobotInterface(velma)
 
         velma.updateTransformations()
@@ -396,6 +402,10 @@ Class for grasp learning.
             rospy.sleep(1.0)
 
         sim_grips = []
+
+        vertices, faces = self.openrave.getMesh("object")
+        com_pt = velmautils.generateComSamples(vertices, faces, 2000)
+        obj_grasp.addComPoints(com_pt)
 
         try:
             print "trying to read grasping data from file"
@@ -505,6 +515,14 @@ Class for grasp learning.
                         f.write(gr.toStr() + '\n')
             self.openrave.updatePose("object", T_B_Oorig)
             self.allowUpdateObjects()
+
+        if False:
+            velmautils.comSamplesUnitTest(self.openrave, self.pub_marker, "cbeam")
+            exit(0)
+
+        if False:
+            velmautils.updateComUnitTest(self.openrave, self.pub_marker, "object")
+            exit(0)
 
         ################
         # the main loop
@@ -629,7 +647,7 @@ Class for grasp learning.
                     sc_mul = 1.0
                     if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0 and sim_grips[idx_2].count_stable == 0:
                         continue
-                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[idx_2])
+                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist3(sim_grips[idx], sim_grips[idx_2])
 
                     penalty_no_contact = sim_grips[idx_2].count_no_contact * max(5.0-dist, 0.0)
                     penalty_too_little_contacts = sim_grips[idx_2].count_too_little_contacts * max(5.0-dist, 0.0)
@@ -864,6 +882,16 @@ Class for grasp learning.
                 pose_diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_Co_sim)
                 if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
                     print "object pose is different after the lift-up - diff: %s > %s     %s > %s deg."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
+                    print "adding experience for determination of COM"
+                    obj_grasp.updateCom(T_Br_O_init ,obj_grasp.T_Br_Co, list(contacts[0]) + list(contacts[1]) + list(contacts[2]))
+                    for idx in range(0, len(obj_grasp.com_pt)):
+                        if obj_grasp.com_weights[idx] > 0:
+                            m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=0, g=1, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
+                        else:
+                            m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
+                        if idx % 10 == 0:
+                            rospy.sleep(0.01)
+
                     current_sim_grip.setUnstable()
                     self.openrave.release("object")
                     velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))

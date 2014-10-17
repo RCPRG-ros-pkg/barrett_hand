@@ -353,7 +353,7 @@ Class for grasp learning.
 #        self.openrave.updatePose("head_camera", velma.T_B_C)
 
         k_pregrasp = Wrench(Vector3(1000.0, 1000.0, 1000.0), Vector3(300.0, 300.0, 300.0))
-        k_grasp = Wrench(Vector3(800.0, 800.0, 100.0), Vector3(150.0, 150.0, 150.0))
+        k_grasp = Wrench(Vector3(1000.0, 1000.0, 400.0), Vector3(300.0, 300.0, 300.0))
 
         if True:
             # reset the gripper
@@ -395,6 +395,7 @@ Class for grasp learning.
             velma.qar[6] = 90.0/180.0*math.pi
             rospy.sleep(1.0)
 
+# /ar_pose_marker /joint_states /right_arm/impedance /right_arm/torques /right_arm/trajectory /right_arm/wrench /right_hand/BHCmdx /right_hand/BHPressureState /right_hand/BHTemp /spline_trajectory_action_joint/cancel /spline_trajectory_action_joint/feedback /spline_trajectory_action_joint/goal /spline_trajectory_action_joint/result /spline_trajectory_action_joint/status /tf /tf_static 
         ################
         # the main loop
         ################
@@ -409,27 +410,30 @@ Class for grasp learning.
             T_B_M = self.getMarkerPose(25)
             T_B_Ed = T_B_M * PyKDL.Frame(PyKDL.Rotation.RotX(180.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Vector(0,0,-0.2))
 
-            traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
-            if traj == None:
-                print "FATAL ERROR: colud not plan trajectory"
-                exit(0)
+            joint_traj_enable = False
 
-            duration = math.fsum(traj[3])
+            if joint_traj_enable:
+                traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
+                if traj == None:
+                    print "FATAL ERROR: colud not plan trajectory"
+                    exit(0)
 
-            raw_input("Press Enter to visualize the trajectory...")
-            if velma.checkStopCondition():
-                exit(0)
-            self.openrave.showTrajectory(duration * time_mult * 0.5, qar_list=traj[4])
+                duration = math.fsum(traj[3])
 
-            self.switchToJoint(velma)
+                raw_input("Press Enter to visualize the trajectory...")
+                if velma.checkStopCondition():
+                    exit(0)
+                self.openrave.showTrajectory(duration * time_mult * 0.1, qar_list=traj[4])
 
-            print "trajectory len: %s"%(len(traj[0]))
-            raw_input("Press Enter to execute the trajectory on real robot in " + str(duration * time_mult) + "s ...")
-            if velma.checkStopCondition():
-                exit(0)
-            velma.moveWristTrajJoint(traj, time_mult, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
-            if velma.checkStopCondition(duration * time_mult + 1.0):
-                exit(0)
+                self.switchToJoint(velma)
+
+                print "trajectory len: %s"%(len(traj[0]))
+                raw_input("Press Enter to execute the trajectory on real robot in " + str(duration * time_mult) + "s ...")
+                if velma.checkStopCondition():
+                    exit(0)
+                velma.moveWristTrajJoint(traj, time_mult, Wrench(Vector3(20,20,20), Vector3(4,4,4)))
+                if velma.checkStopCondition(duration * time_mult + 1.0):
+                    exit(0)
 
             self.switchToCartesian(velma)
 
@@ -440,38 +444,60 @@ Class for grasp learning.
             raw_input("Press Enter to move the robot in " + str(duration) + " s...")
             if velma.checkStopCondition():
                 exit(0)
-            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=False, abort_on_q5_q6_self_collision=True)
             if velma.checkStopCondition(duration):
                 return
 
-            raw_input("Press Enter to set lower stiffness in 3s...")
-            velma.moveImpedance(k_grasp, 3.0)
-            if velma.checkStopCondition(3.0):
-                exit(0)
+            if False:
+                raw_input("Press Enter to set lower stiffness in 3s...")
+                velma.moveImpedance(k_grasp, 3.0)
+                if velma.checkStopCondition(3.0):
+                    exit(0)
 
-            # move down
+                # move down
+                velma.updateTransformations()
+                T_B_Ed2 = T_B_Ed * PyKDL.Frame(PyKDL.Vector(0,0,0.28))
+                T_B_Wd = T_B_Ed2 * velma.T_E_W
+                duration = velma.getMovementTime(T_B_Wd, max_v_l=0.05, max_v_r=0.1)
+                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+                if velma.checkStopCondition():
+                    exit(0)
+                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(30,30,30), Vector3(4,4,4)), abort_on_q5_singularity=False, abort_on_q5_q6_self_collision=True)
+                if velma.checkStopCondition(duration):
+                    return
+
+                # move up
+                velma.updateTransformations()
+                T_B_Wd = T_B_Ed * velma.T_E_W
+                duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
+                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+                if velma.checkStopCondition():
+                    exit(0)
+                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(30,30,30), Vector3(4,4,4)), abort_on_q5_singularity=False, abort_on_q5_q6_self_collision=True)
+                if velma.checkStopCondition(duration):
+                    return
+
             velma.updateTransformations()
-            T_B_Ed2 = T_B_Ed * PyKDL.Frame(PyKDL.Vector(0,0,0.25))
+            T_B_Ed2 = T_B_Ed * PyKDL.Frame(PyKDL.Rotation.RotZ(-20.0/180.0*math.pi))
             T_B_Wd = T_B_Ed2 * velma.T_E_W
             duration = velma.getMovementTime(T_B_Wd, max_v_l=0.05, max_v_r=0.1)
             raw_input("Press Enter to move the robot in " + str(duration) + " s...")
             if velma.checkStopCondition():
                 exit(0)
-            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(40,40,40), Vector3(7,7,7)), abort_on_q5_singularity=False, abort_on_q5_q6_self_collision=True)
             if velma.checkStopCondition(duration):
                 return
 
-            # move up
             velma.updateTransformations()
-            T_B_Wd = T_B_Ed * velma.T_E_W
-            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
+            T_B_Ed2 = T_B_Ed * PyKDL.Frame(PyKDL.Rotation.RotZ(40.0/180.0*math.pi))
+            T_B_Wd = T_B_Ed2 * velma.T_E_W
+            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.05, max_v_r=0.1)
             raw_input("Press Enter to move the robot in " + str(duration) + " s...")
             if velma.checkStopCondition():
                 exit(0)
-            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(40,40,40), Vector3(7,7,7)), abort_on_q5_singularity=False, abort_on_q5_q6_self_collision=True)
             if velma.checkStopCondition(duration):
                 return
-
 
             raw_input("Press Enter to set bigger stiffness in 3s...")
             velma.moveImpedance(k_pregrasp, 3.0)
@@ -492,7 +518,7 @@ Class for grasp learning.
             raw_input("Press Enter to visualize the trajectory...")
             if velma.checkStopCondition():
                 exit(0)
-            self.openrave.showTrajectory(duration * time_mult * 0.5, qar_list=traj[4])
+            self.openrave.showTrajectory(duration * time_mult * 0.1, qar_list=traj[4])
 
             self.switchToJoint(velma)
 

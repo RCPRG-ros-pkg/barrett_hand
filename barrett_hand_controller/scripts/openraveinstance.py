@@ -97,6 +97,16 @@ class OpenraveInstance:
         body.InitFromBoxes(numpy.array([[0,0,0,0.5*x_size,0.5*y_size,0.5*z_size]]),True)
         self.env.Add(body,True)
 
+    def addCBeam(self, name, w, h, l, t):
+        body = RaveCreateKinBody(self.env,'')
+        body.SetName(name)
+        body.InitFromBoxes(numpy.array([
+        [0.0, w/2.0 - t/2.0, 0.0, 0.5 * h, 0.5 * t, 0.5 * l],
+        [-h/2.0 + t/2.0, 0.0, 0.0, 0.5 * t, 0.5 * (w - 2.0 * t), 0.5 * l],
+        [0.0, -(w/2.0 - t/2.0), 0.0, 0.5 * h, 0.5 * t, 0.5 * l],
+        ]),True)
+        self.env.Add(body,True)
+
     def removeObject(self, name):
         with self.env:
             body = self.env.GetKinBody(name)

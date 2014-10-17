@@ -56,6 +56,7 @@ from urdf_parser_py.urdf import URDF
 from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
 
 import dijkstra
+from subprocess import Popen, PIPE, STDOUT
 
 class MarkerPublisher:
     def __init__(self):
@@ -211,6 +212,8 @@ def pointInTriangle(A, B, C, P):
     dot11 = v1[0]*v1[0] + v1[1]*v1[1]
     dot12 = v1[0]*v2[0] + v1[1]*v2[1]
 
+    if dot00 * dot11 - dot01 * dot01 == 0.0:
+        return False
     # Compute barycentric coordinates
     invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01)
     u = (dot11 * dot02 - dot01 * dot12) * invDenom
@@ -547,6 +550,159 @@ def point_inside_polygon(x,y,poly):
                         inside = not inside
         p1x,p1y = p2x,p2y
     return inside
+
+def getQHull(points):
+    stdin_str = "3\n" + str(len(points)) + "\n"
+    for p in points:
+        stdin_str += str(p[0]) + " " + str(p[1]) + " " + str(p[2]) + "\n"
+
+#    print "calling qconvex"
+    p = Popen(['qconvex', 'Qt', 'i'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+    stdout_str = p.communicate(input=stdin_str)[0]
+
+    faces = []
+    values = stdout_str.split()
+    if (len(values)-1)/3 != int(values[0]):
+        print "getQHull error: %s %s"%((len(values)-1)/3, int(values[0]))
+        return None
+    for idx in range(1, len(values), 3):
+        faces.append([int(values[idx+0]), int(values[idx+1]), int(values[idx+2])])
+
+    return points, faces
+
+def pointInMesh(vertices, faces, point):
+    pos = 0
+    for f in faces:
+        A = vertices[f[0]]
+        B = vertices[f[1]]
+        C = vertices[f[2]]
+        a = PyKDL.Vector(A[0], A[1], A[2])
+        b = PyKDL.Vector(B[0], B[1], B[2])
+        c = PyKDL.Vector(C[0], C[1], C[2])
+
+        n = (b-a) * (c-a)
+        n.Normalize()
+        if n.z() == 0.0:
+            continue
+
+        if pointInTriangle( [a.x(), a.y()], [b.x(), b.y()], [c.x(), c.y()], [point.x(), point.y()] ):
+            d = -PyKDL.dot(a, n)
+            z = -(n.x() * point.x() + n.y() * point.y() + d)/n.z()
+            if z > point.z():
+                pos += 1
+
+    if pos % 2 == 0:
+        return False
+    return True            
+
+def getMeshBB(vertices, faces):
+    minv = [None, None, None]
+    maxv = [None, None, None]
+    for v in vertices:
+        for i in range(0, 3):
+            if minv[i] == None or minv[i] > v[i]:
+                minv[i] = v[i]
+            if maxv[i] == None or maxv[i] < v[i]:
+                maxv[i] = v[i]
+
+    return minv, maxv
+
+def generateComSamples(vertices, faces, count):
+    bb = getMeshBB(vertices, faces)
+    points = sampleMesh(vertices, faces, 0.01, [PyKDL.Vector()], 10.0)
+    qhull = getQHull(points)
+    qvertices, qfaces = qhull
+    com_samples = []
+    dist_add = 0.0
+    for i in range(0,count):
+        pt = PyKDL.Vector(random.uniform(bb[0][0]-dist_add, bb[1][0]+dist_add), random.uniform(bb[0][1]-dist_add, bb[1][1]+dist_add), random.uniform(bb[0][2]-dist_add, bb[1][2]+dist_add))
+        if pointInMesh(qvertices, qfaces, pt):
+            com_samples.append( pt )
+    return com_samples
+
+def comSamplesUnitTest(openrave, pub_marker, object_name):
+    vertices, faces = openrave.getMesh(object_name)
+    com = generateComSamples(vertices, faces, 2000)
+    m_id = 0
+    for pt in com:
+        m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=None)
+        rospy.sleep(0.01)
+
+def updateCom(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights):
+    diff = PyKDL.diff(T_B_O, T_B_O_2)
+#    m_id = self.pub_marker.publishVectorMarker(PyKDL.Vector(), diff.rot, m_id, r=0, g=1, b=0, frame='world', namespace='default', scale=0.01)
+
+    up_v = PyKDL.Vector(0,0,1)
+    n_v = diff.rot * up_v
+#    m_id = self.pub_marker.publishVectorMarker(PyKDL.Vector(), n_v, m_id, r=1, g=1, b=1, frame='world', namespace='default', scale=0.01)
+
+    n_O = T_B_O.Inverse() * n_v
+    n_O_2 = T_B_O_2.Inverse() * n_v
+
+    # get all com points that lies in the positive direction from the most negative contact point with respect to n_v in T_B_O and T_B_O_2
+    # get the minimum contact point for n_O
+    min_c_dot = None
+    for c in contacts_O:
+        dot = PyKDL.dot(c, n_O)
+        if min_c_dot == None or dot < min_c_dot:
+            min_c_dot = dot
+    # get all com points that lies in the positive direction from min_c_dot
+    com_2_idx = []
+    for c_idx in range(0, len(com_pt)):
+        c = com_pt[c_idx]
+        dot = PyKDL.dot(c, n_O)
+        if dot > min_c_dot:
+           com_2_idx.append(c_idx)
+
+    # get the minimum contact point for n_O
+    min_c_dot = None
+    for c in contacts_O:
+        dot = PyKDL.dot(c, n_O_2)
+        if min_c_dot == None or dot < min_c_dot:
+            min_c_dot = dot
+    # get all com points that lies in the positive direction from min_c_dot
+    com_3_idx = []
+    for c_idx in com_2_idx:
+        c = com_pt[c_idx]
+        dot = PyKDL.dot(c, n_O_2)
+        if dot > min_c_dot:
+           com_3_idx.append(c_idx)
+
+    for c_idx in range(0, len(com_pt)):
+        com_weights[c_idx] -= 1
+
+    for c_idx in com_3_idx:
+        com_weights[c_idx] += 2
+
+def updateComUnitTest(openrave, pub_marker, object_name):
+            vertices, faces = openrave.getMesh(object_name)
+            com = generateComSamples(vertices, faces, 2000)
+
+            m_id = 0
+            contacts_O = [
+            PyKDL.Vector(-0.1, 0.03, 0),
+            PyKDL.Vector(-0.15, 0.03, 0),
+            PyKDL.Vector(-0.125, -0.03, 0)
+            ]
+
+            T_B_O = PyKDL.Frame()
+            m_id = pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
+            m_id = pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O)
+
+            T_B_O_2 = PyKDL.Frame(PyKDL.Vector(0,0,0.1)) * PyKDL.Frame(PyKDL.Rotation.RotY(30.0/180.0*math.pi))
+            m_id = pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O_2)
+            m_id = pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O_2)
+
+            com_weights = list(np.zeros(len(com)))
+            updateCom(T_B_O, T_B_O_2, contacts_O, com, com_weights)
+
+            for idx in range(0, len(com)):
+                if com_weights[idx] > 0:
+                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
+                else:
+                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
+                rospy.sleep(0.01)
+
 
 class WristCollisionAvoidance:
 
