@@ -628,7 +628,39 @@ def comSamplesUnitTest(openrave, pub_marker, object_name):
         m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=None)
         rospy.sleep(0.01)
 
-def updateCom(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights):
+def updateCom(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights, m_id=0, pub_marker=None):
+#    diff_B = T_B_O * PyKDL.diff(T_B_O, T_B_O_2)
+    diff_B = PyKDL.diff(T_B_O, T_B_O_2)
+    up_v_B = PyKDL.Vector(0,0,1)
+    n_v_B = diff_B.rot * up_v_B
+    if pub_marker != None:
+        m_id = pub_marker.publishVectorMarker(PyKDL.Vector(), diff_B.rot, m_id, r=0, g=1, b=0, frame='world', namespace='default', scale=0.01)
+        m_id = pub_marker.publishVectorMarker(PyKDL.Vector(), n_v_B, m_id, r=1, g=1, b=1, frame='world', namespace='default', scale=0.01)
+
+    n_O = PyKDL.Frame(T_B_O.Inverse().M) * n_v_B
+    n_O_2 = PyKDL.Frame(T_B_O_2.Inverse().M) * n_v_B
+
+    # get all com points that lies in the positive direction from the most negative contact point with respect to n_v in T_B_O and T_B_O_2
+    c_dot_list = []
+    c_dot_list_2 = []
+    for c in contacts_O:
+        dot = PyKDL.dot(c, n_O)
+        c_dot_list.append(dot)
+        dot_2 = PyKDL.dot(c, n_O_2)
+        c_dot_list_2.append(dot_2)
+
+    # get all com points that lies in the positive direction from given contact
+    for contact_idx in range(0, len(c_dot_list)):
+        for com_idx in range(0, len(com_pt)):
+            c = com_pt[com_idx]
+            dot = PyKDL.dot(c, n_O)
+            dot_2 = PyKDL.dot(c, n_O_2)
+            if dot > c_dot_list[contact_idx] and dot_2 > c_dot_list_2[contact_idx]:
+                com_weights[com_idx] += 1
+
+    return m_id
+
+def updateCom2(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights):
     diff = PyKDL.diff(T_B_O, T_B_O_2)
 #    m_id = self.pub_marker.publishVectorMarker(PyKDL.Vector(), diff.rot, m_id, r=0, g=1, b=0, frame='world', namespace='default', scale=0.01)
 
@@ -685,22 +717,29 @@ def updateComUnitTest(openrave, pub_marker, object_name):
             PyKDL.Vector(-0.125, -0.03, 0)
             ]
 
-            T_B_O = PyKDL.Frame()
+            T_B_O = PyKDL.Frame(PyKDL.Vector(0.4,0,1.0)) * PyKDL.Frame(PyKDL.Rotation.RotZ(45.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Rotation.RotX(45.0/180.0*math.pi))
             m_id = pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
             m_id = pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O)
 
-            T_B_O_2 = PyKDL.Frame(PyKDL.Vector(0,0,0.1)) * PyKDL.Frame(PyKDL.Rotation.RotY(30.0/180.0*math.pi))
+            T_B_O_2 = PyKDL.Frame(PyKDL.Vector(0,0,0.1)) * T_B_O * PyKDL.Frame(PyKDL.Rotation.RotY(30.0/180.0*math.pi))
             m_id = pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O_2)
             m_id = pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O_2)
 
             com_weights = list(np.zeros(len(com)))
-            updateCom(T_B_O, T_B_O_2, contacts_O, com, com_weights)
+            m_id = updateCom(T_B_O, T_B_O_2, contacts_O, com, com_weights, m_id, pub_marker)
 
             for idx in range(0, len(com)):
-                if com_weights[idx] > 0:
+                if int(com_weights[idx]) == 3:
+                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=1, g=0.9, b=0.9, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
+                elif int(com_weights[idx]) == 2:
+                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=1, g=0.5, b=0.5, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
+                elif int(com_weights[idx]) == 1:
+                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=1, g=0.2, b=0.2, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
+                elif int(com_weights[idx]) == 0:
                     m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
                 else:
-                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
+                    print com_weights[idx]
+                    m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
                 rospy.sleep(0.01)
 
 

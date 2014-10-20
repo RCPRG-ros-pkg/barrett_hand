@@ -144,6 +144,7 @@ Class for grasp learning.
             if self.allow_update_objects_pose == None or not self.allow_update_objects_pose:
                 continue
             for obj in self.objects:
+                visible_markers_Br_Co = []
                 for marker in obj.markers:
                     T_Br_M = self.getMarkerPose(marker[0], wait = False, timeBack = 0.3)
                     if T_Br_M != None and self.velma != None:
@@ -154,9 +155,15 @@ Class for grasp learning.
                             continue
                         T_Co_M = marker[1]
                         T_Br_Co = T_Br_M * T_Co_M.Inverse()
-                        obj.updatePose(T_Br_Co)
-                        self.openrave.updatePose(obj.name, T_Br_Co)
-                        break
+                        visible_markers_Br_Co.append(T_Br_Co)
+                if len(visible_markers_Br_Co) > 0:
+                    R_B_Co = velmautils.meanOrientation(visible_markers_Br_Co)[1]
+                    p_B_Co = PyKDL.Vector()
+                    for T_B_Co in visible_markers_Br_Co:
+                        p_B_Co += T_B_Co.p
+                    p_B_Co *= 1.0/float(len(visible_markers_Br_Co))
+                    obj.updatePose( PyKDL.Frame(copy.deepcopy(R_B_Co.M), copy.deepcopy(p_B_Co)) )
+                    self.openrave.updatePose(obj.name, T_Br_Co)
 
             index += 1
             if index >= 100:
@@ -220,7 +227,7 @@ Class for grasp learning.
         if simulation_only:
             time_mult = 5.0
         else:
-            time_mult = 10.0
+            time_mult = 8.0
         m_id = 0
 
         # create objects definitions
@@ -240,47 +247,58 @@ Class for grasp learning.
 
         obj_cbeam = grip.GraspableObject("cbeam", "cbeam", [0.1, 0.1, 0.2, 0.02])
 
-        obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
-        obj_grasp_frames_old = [
-        [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
-        [19, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00785118489648,-0.00136981350282,-0.000184602454162,0.999968223709),PyKDL.Vector(0.14748831582,-0.00390004064458,0.00494675382036))],
-        [20, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0108391070454,-0.00679278400361,-0.0154191552083,0.999799290606),PyKDL.Vector(0.289969171073,-0.00729932931459,0.00759828464719))],
-        [21, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.707914450157,0.00553703354292,-0.0049088621984,0.706259425134),PyKDL.Vector(-0.00333471065688,-0.0256403932819,-0.0358967610179))],
-        [22, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.711996124932,0.000529252451241,-0.00578615630039,0.702159353971),PyKDL.Vector(0.147443644368,-0.03209918445,-0.028549100504))],
-        [23, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.714618336612,-0.00917868744082,0.000177822438207,0.699454325209),PyKDL.Vector(0.29031370529,-0.0348959795876,-0.0263138015496))],
-        [24, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.999814315554,-0.00730751409695,0.00318617054665,0.0175437444253),PyKDL.Vector(-0.00774666114837,0.0127324931914,-0.0605032370936))],
-        [25, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.999769709131,-0.00683690807754,0.00565692317327,0.0195393093955),PyKDL.Vector(0.143402769587,0.00560941008048,-0.0682080677974))],
-        [26, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.999702001968,0.00436508873022,0.00893993421014,0.0222919455689),PyKDL.Vector(0.2867315755,0.0037977729025,-0.0723254241133))],
-        [27, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.718926115108,0.0025958563067,0.000863904789675,0.695081114845),PyKDL.Vector(0.00685389266037,0.041611313921,-0.0242848250842))],
-        [28, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.723920159064,-0.00406580031329,-0.00237155614562,0.689867703469),PyKDL.Vector(0.152973875805,0.0480443334089,-0.0203619760073))],
-        [29, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.730592084981,-0.0115053876764,-0.00159217841913,0.682715384612),PyKDL.Vector(0.296627722109,0.0526564873934,-0.0157362559562))],
-        [30, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0107101025933,-0.707578018883,-0.00676540180519,0.706521670039),PyKDL.Vector(-0.0316984701649,0.00141765295049,-0.0308603633287))],
-        [31, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00385143207656,0.706841586598,0.00284731518612,0.707355660699),PyKDL.Vector(0.319944660728,-0.00029327409029,-0.0292236368986))],
-        ]
+        obj_model = "small_box"
+        if obj_model == "small_box":
+            obj_grasp = grip.GraspableObject("object", "box", [0.213, 0.056, 0.063])
+            obj_grasp_frames = [
+            [32, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
+            [33, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.476415048088,0.506991531256,0.535847585538,0.478388601728),PyKDL.Vector(0.171902780644,0.015484630181,-0.0358638278243))],
+            [34, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00232981773607,0.00112909537834,0.00941735014758,0.999952304167),PyKDL.Vector(0.147645852213,0.000390249270086,0.000668615794865))],
+            [35, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00531442729247,-0.00148853793046,0.00813486006956,0.999951681417),PyKDL.Vector(0.0665568281854,0.00224423703193,0.00111350255405))],
+            [36, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.693355695893,0.0176864851879,0.00475384182304,0.720362733769),PyKDL.Vector(0.0674437609483,-0.0264759261376,-0.0359458767302))],
+            [37, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.697810893165,0.0185815546272,0.00926373682594,0.715981051696),PyKDL.Vector(0.14469056796,-0.0244927381799,-0.0402162367183))],
+            [38, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.695822653251,0.00513123479502,0.00074687284782,0.718194923286),PyKDL.Vector(0.00246976816412,-0.0290920242125,-0.0345945703545))],
+            [39, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.717544197129,-0.00121899527374,-0.00347930923759,0.696503218675),PyKDL.Vector(-0.000727941179089,0.0260474925053,-0.032006337674))],
+            [40, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.714351406937,-0.00329260614077,-0.000231012293521,0.699779374364),PyKDL.Vector(0.143756457099,0.0313492884571,-0.0306638540963))],
+            [41, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.723500552996,-0.0178604118324,0.00609666125085,0.690065783984),PyKDL.Vector(0.0672989279037,0.0311582168068,-0.0287569055643))],
+            [42, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999253045077,0.0186776422628,0.0309290299434,0.0137073954286),PyKDL.Vector(0.1452140182,0.00299751381556,-0.0731135644333))],
+            [43, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999700942127,0.0203100605493,-0.00475316283946,0.0127646070846),PyKDL.Vector(0.0671180998645,0.00225584347208,-0.0678502651338))],
+            [44, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.99987100879,0.00361855348825,-0.0076843637788,0.0136316692101),PyKDL.Vector(9.73711128789e-05,-0.00034495011368,-0.0673206921801))],
+            [45, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.697540042223,0.000607288852708,-0.71639447066,0.0147133647545),PyKDL.Vector(-0.0277395492321,-0.00467821975443,-0.0372505056897))],
+            ]
+            T_M32_M35 = obj_grasp_frames[3][1]
+            T_M35_Co = PyKDL.Frame(PyKDL.Vector(0,0,-0.03))
+            T_M32_Co = T_M32_M35 * T_M35_Co
+            T_Co_M32 = T_M32_Co.Inverse()
+            for marker in obj_grasp_frames:
+                T_M32_Mi = marker[1]
+                obj_grasp.addMarker(marker[0], T_Co_M32 * T_M32_Mi)
 
-        obj_grasp_frames = [
-        [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
-        [19, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00165433105633,-0.00223969436551,0.00783500583865,0.999965429223),PyKDL.Vector(0.150364188592,0.00540315928786,0.00332539142516))],
-        [20, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00288819470565,0.000787875354111,-0.00584291384849,0.999978448739),PyKDL.Vector(0.283704103524,0.00072398461679,-0.00573581222652))],
-        [21, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.700515458788,0.00669571919817,-0.000414650985238,0.71360569463),PyKDL.Vector(0.00448758480338,-0.0246391219393,-0.0318239341873))],
-        [22, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.703637094621,0.0128037540093,-0.00696099928093,0.710410055845),PyKDL.Vector(0.147645037233,-0.0270235353887,-0.0319539994022))],
-        [23, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.705573146762,-0.0108101497697,0.0078757141097,0.708510866789),PyKDL.Vector(0.2869132353,-0.0311870916024,-0.0364408741191))],
-        [24, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999936222986,-0.00719147497613,-0.00856953614561,0.00154780136503),PyKDL.Vector(0.000967154696901,-0.000658291054497,-0.059361255947))],
-        [25, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999925422492,0.00698873688352,-0.00978855330626,0.00211925234593),PyKDL.Vector(0.139811416338,-0.00107135691589,-0.0658641046354))],
-        [26, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999573485418,0.0127628877053,-0.0151291896644,0.0214723907838),PyKDL.Vector(0.294537733385,0.0266765305375,-0.0716188295568))],
-        [27, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.715893512402,-0.00285901607723,0.00295541105269,0.698197372148),PyKDL.Vector(0.00499777040554,0.0411443197242,-0.0229397580848))],
-        [28, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.720365484604,-0.00848358345308,-0.00122745492272,0.693541700807),PyKDL.Vector(0.153434321293,0.0483251803469,-0.017733228985))],
-        [29, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.730806278242,-0.012226144189,-0.000233600920018,0.682475384546),PyKDL.Vector(0.299578008092,0.0554137486219,-0.0115267264344))],
-        [30, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00153631145759,-0.704471851921,-0.0141334264319,0.709589526314),PyKDL.Vector(-0.0328832398393,-0.000711552687509,-0.0280278186323))],
-        [31, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00648923236188,0.70344139916,-0.0037097168268,0.710713954987),PyKDL.Vector(0.320515478778,-0.000808849733968,-0.0336656231855))],
-        ]
-        T_M18_M19 = obj_grasp_frames[1][1]
-        T_M19_Co = PyKDL.Frame(PyKDL.Vector(0,0,-0.03))
-        T_M18_Co = T_M18_M19 * T_M19_Co
-        T_Co_M18 = T_M18_Co.Inverse()
-        for marker in obj_grasp_frames:
-            T_M18_Mi = marker[1]
-            obj_grasp.addMarker(marker[0], T_Co_M18 * T_M18_Mi)
+        elif obj_model == "big_box":
+            obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
+            obj_grasp_frames = [
+            [18, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
+            [19, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00165433105633,-0.00223969436551,0.00783500583865,0.999965429223),PyKDL.Vector(0.150364188592,0.00540315928786,0.00332539142516))],
+            [20, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00288819470565,0.000787875354111,-0.00584291384849,0.999978448739),PyKDL.Vector(0.283704103524,0.00072398461679,-0.00573581222652))],
+            [21, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.700515458788,0.00669571919817,-0.000414650985238,0.71360569463),PyKDL.Vector(0.00448758480338,-0.0246391219393,-0.0318239341873))],
+            [22, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.703637094621,0.0128037540093,-0.00696099928093,0.710410055845),PyKDL.Vector(0.147645037233,-0.0270235353887,-0.0319539994022))],
+            [23, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.705573146762,-0.0108101497697,0.0078757141097,0.708510866789),PyKDL.Vector(0.2869132353,-0.0311870916024,-0.0364408741191))],
+            [24, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999936222986,-0.00719147497613,-0.00856953614561,0.00154780136503),PyKDL.Vector(0.000967154696901,-0.000658291054497,-0.059361255947))],
+            [25, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999925422492,0.00698873688352,-0.00978855330626,0.00211925234593),PyKDL.Vector(0.139811416338,-0.00107135691589,-0.0658641046354))],
+            [26, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.999573485418,0.0127628877053,-0.0151291896644,0.0214723907838),PyKDL.Vector(0.294537733385,0.0266765305375,-0.0716188295568))],
+            [27, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.715893512402,-0.00285901607723,0.00295541105269,0.698197372148),PyKDL.Vector(0.00499777040554,0.0411443197242,-0.0229397580848))],
+            [28, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.720365484604,-0.00848358345308,-0.00122745492272,0.693541700807),PyKDL.Vector(0.153434321293,0.0483251803469,-0.017733228985))],
+            [29, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.730806278242,-0.012226144189,-0.000233600920018,0.682475384546),PyKDL.Vector(0.299578008092,0.0554137486219,-0.0115267264344))],
+            [30, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00153631145759,-0.704471851921,-0.0141334264319,0.709589526314),PyKDL.Vector(-0.0328832398393,-0.000711552687509,-0.0280278186323))],
+            [31, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00648923236188,0.70344139916,-0.0037097168268,0.710713954987),PyKDL.Vector(0.320515478778,-0.000808849733968,-0.0336656231855))],
+            ]
+            T_M18_M19 = obj_grasp_frames[1][1]
+            T_M19_Co = PyKDL.Frame(PyKDL.Vector(0,0,-0.03))
+            T_M18_Co = T_M18_M19 * T_M19_Co
+            T_Co_M18 = T_M18_Co.Inverse()
+            for marker in obj_grasp_frames:
+                T_M18_Mi = marker[1]
+                obj_grasp.addMarker(marker[0], T_Co_M18 * T_M18_Mi)
 
         self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]#, obj_cbeam]
 
@@ -409,7 +427,7 @@ Class for grasp learning.
 
         try:
             print "trying to read grasping data from file"
-            with open('sim_grips.txt', 'r') as f:
+            with open('sim_grips_' + obj_model + '.txt', 'r') as f:
                 for line in f:
                     if line == 'None' or line == 'None\n':
                         sim_grips.append(None)
@@ -507,7 +525,7 @@ Class for grasp learning.
 
             print "added grasps: %s / %s"%(valid_grasps, len(sim_grips))
             print "writing grasping data to file"
-            with open('sim_grips.txt', 'w') as f:
+            with open('sim_grips_' + obj_model + '.txt', 'w') as f:
                 for gr in sim_grips:
                     if gr == None:
                         f.write('None\n')
@@ -551,7 +569,7 @@ Class for grasp learning.
                 raw_input("Press Enter to visualize the trajectory...")
                 if velma.checkStopCondition():
                     exit(0)
-                self.openrave.showTrajectory(duration * time_mult * 0.5, qar_list=traj[4])
+                self.openrave.showTrajectory(duration * time_mult * 0.3, qar_list=traj[4])
 
                 self.switchToJoint(velma)
 
@@ -649,8 +667,8 @@ Class for grasp learning.
                         continue
                     dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist3(sim_grips[idx], sim_grips[idx_2])
 
-                    penalty_no_contact = sim_grips[idx_2].count_no_contact * max(5.0-dist, 0.0)
-                    penalty_too_little_contacts = sim_grips[idx_2].count_too_little_contacts * max(5.0-dist, 0.0)
+                    penalty_no_contact = 4.0 * sim_grips[idx_2].count_no_contact * max(5.0-dist, 0.0)
+                    penalty_too_little_contacts = 4.0 * sim_grips[idx_2].count_too_little_contacts * max(5.0-dist, 0.0)
                     penalty_unstable = sim_grips[idx_2].count_unstable * max(5.0-dist, 0.0)
                     reward_stable = sim_grips[idx_2].count_stable * max(5.0-dist, 0.0)
 
@@ -720,7 +738,7 @@ Class for grasp learning.
             raw_input("Press Enter to visualize the trajectory...")
             if velma.checkStopCondition():
                 exit(0)
-            self.openrave.showTrajectory(duration * time_mult * 0.5, qar_list=traj[4])
+            self.openrave.showTrajectory(duration * time_mult * 0.3, qar_list=traj[4])
 
             self.switchToJoint(velma)
 
@@ -756,8 +774,8 @@ Class for grasp learning.
                 break
 
             # close the fingers
-            ad2 = 10.0/180.0*math.pi
-            velma.move_hand_client([final_config[0]+ad2, final_config[1]+ad2, final_config[2]+ad2, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(2000.0, 2000.0, 2000.0, 2000.0))
+            ad2 = 20.0/180.0*math.pi
+            velma.move_hand_client([final_config[0]+ad2, final_config[1]+ad2, final_config[2]+ad2, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(2500.0, 2500.0, 2500.0, 2500.0))
             if velma.checkStopCondition(3.0):
                 break
 
@@ -829,11 +847,11 @@ Class for grasp learning.
             velma.updateTransformations()
 
             T_B_Ebeforelift = velma.T_B_W * velma.T_W_E
-            T_B_Wd = PyKDL.Frame(PyKDL.Vector(0,0,0.1)) * velma.T_B_W
+            T_B_Wd = PyKDL.Frame(PyKDL.Vector(0,0,0.08)) * velma.T_B_W
             # save the initial position after lift up
             T_B_Eafterlift = T_B_Wd * velma.T_W_E
 
-            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.1, max_v_r=0.2)
+            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
             raw_input("Press Enter to move the robot in " + str(duration) + " s...")
             if velma.checkStopCondition():
                 exit(0)
@@ -861,7 +879,7 @@ Class for grasp learning.
             else:
                 fingers_in_contact = 3
 
-            if fingers_in_contact < 3:
+            if fingers_in_contact < 2:
                 print "only %s fingers have contact"%(fingers_in_contact)
                 current_sim_grip.setUnstable()
                 self.openrave.release("object")
@@ -883,14 +901,36 @@ Class for grasp learning.
                 if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
                     print "object pose is different after the lift-up - diff: %s > %s     %s > %s deg."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
                     print "adding experience for determination of COM"
-                    obj_grasp.updateCom(T_Br_O_init ,obj_grasp.T_Br_Co, list(contacts[0]) + list(contacts[1]) + list(contacts[2]))
+                    # calculate the contacts in object frame
+                    contacts_O = []
+                    for c in list(contacts[0]) + list(contacts[1]) + list(contacts[2]):
+                        contacts_O.append(obj_grasp.T_Br_Co.Inverse() * c)
+
+                    m_id = 0
+                    T_B_O = T_Br_O_init
+                    m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
+                    m_id = self.pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O)
+
+                    T_B_O_2 = obj_grasp.T_Br_Co
+                    m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O_2)
+                    m_id = self.pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O_2)
+
+                    m_id = obj_grasp.updateCom(T_Br_O_init ,obj_grasp.T_Br_Co, contacts_O, m_id=m_id, pub_marker=self.pub_marker)
+                    # get max value
+                    max_com = None
+                    for com_value in obj_grasp.com_weights:
+                        if max_com == None or max_com < com_value:
+                            max_com = com_value
+                    good_com_count = 0
                     for idx in range(0, len(obj_grasp.com_pt)):
-                        if obj_grasp.com_weights[idx] > 0:
+                        if obj_grasp.com_weights[idx] == max_com:
+                            good_com_count += 1
                             m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=0, g=1, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
                         else:
                             m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
                         if idx % 10 == 0:
                             rospy.sleep(0.01)
+                    print "COM estimation: %s  com: %s"%(float(good_com_count)/float(len(obj_grasp.com_pt)), obj_grasp.com)
 
                     current_sim_grip.setUnstable()
                     self.openrave.release("object")

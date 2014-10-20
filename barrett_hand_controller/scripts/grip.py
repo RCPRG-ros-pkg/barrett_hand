@@ -70,8 +70,21 @@ class GraspableObject:
         self.com_pt = com_pt
         self.com_weights = list(np.zeros(len(self.com_pt)))
 
-    def updateCom(self, T_B_O, T_B_O_2, contacts_O):
-        velmautils.updateCom(T_B_O, T_B_O_2, contacts_O, self.com_pt, self.com_weights)
+    def updateCom(self, T_B_O, T_B_O_2, contacts_O, m_id=0, pub_marker=None):
+        ret_m_id = velmautils.updateCom(T_B_O, T_B_O_2, contacts_O, self.com_pt, self.com_weights, m_id=m_id, pub_marker=pub_marker)
+        max_com = None
+        for com_value in self.com_weights:
+            if max_com == None or max_com < com_value:
+                max_com = com_value
+        mean_com = PyKDL.Vector()
+        mean_count = 0
+        for com_idx in range(0, len(self.com_weights)):
+            com_value = self.com_weights[com_idx]
+            if com_value == max_com:
+                mean_com += self.com_pt[com_idx]
+                mean_count += 1
+        self.com = (1.0/float(mean_count)) * mean_com
+        return ret_m_id
 
 class Grip:
     def __init__(self, grasped_object):

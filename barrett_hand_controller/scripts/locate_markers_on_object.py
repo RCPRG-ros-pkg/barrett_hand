@@ -67,12 +67,13 @@ Class for marker localization.
 """
     def spin(self):
         # locate all markers on the object
-        if False:
+        if True:
             max_angle = 60.0/180.0*math.pi
             min_z = math.cos(max_angle)
             print "min_z: %s"%(min_z)
 
-            marker_list = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+#            marker_list = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+            marker_list = [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45]
             mtrans_matrix = []
             for i in range(0, len(marker_list)):
                 mtrans_matrix.append([])
