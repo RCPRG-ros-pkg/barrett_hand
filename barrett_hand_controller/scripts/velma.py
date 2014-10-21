@@ -1268,6 +1268,15 @@ Class for velma robot.
         print "moving tool"
         self.moveTool( self.T_W_T, duration )
 
+    def updateAndMoveToolOnly(self, tool, duration):
+        self.T_W_T = copy.deepcopy(tool)    # tool transformation
+        self.updateTransformations()
+
+        print "setting the tool to %s relative to wrist frame"%(self.T_W_T)
+        # move both tool position and wrist position - the gripper holds its position
+        print "moving tool"
+        self.moveTool( self.T_W_T, duration )
+
     def waitForFirstContact(self, threshold, duration, emergency_stop=True, f1=True, f2=True, f3=True, palm=True):
         contacts = []
         contact_found = False

@@ -376,23 +376,26 @@ class OpenraveInstance:
         # start thread for jar tf publishing and for visualization
         thread.start_new_thread(self.run, (None,1))
 
-    def prepareGraspingModule(self, target_name):
+    def prepareGraspingModule(self, target_name, force_load=False):
         if not hasattr(self, 'gmodel') or self.gmodel == None:
             self.gmodel = {}
 
         if not target_name in self.gmodel.keys():
             target = self.env.GetKinBody(target_name)
             self.gmodel[target_name] = databases.grasping.GraspingModel(self.robot_rave,target)
-            if not self.gmodel[target_name].load():
+            if force_load or not self.gmodel[target_name].load():
                 print 'generating grasping model (one time computation)'
                 self.gmodel[target_name].init(friction=1.0,avoidlinks=[])
-                approachrays = self.gmodel[target_name].computeBoxApproachRays(delta=0.05,normalanglerange=0.0)#201, directiondelta=0.2)
-                print len(approachrays)
+                approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03,normalanglerange=0.0) #201, directiondelta=0.2)
+#                print approachrays.shape
+#                approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03, normalanglerange=15.0/180.0*math.pi, directiondelta=14.0/180.0*math.pi)
+#                approachrays3 = np.concatenate((approachrays, approachrays2), axis=0)
+                print approachrays3.shape
 # possible arguments for generate:
 # preshapes=None, standoffs=None, rolls=None, approachrays=None, graspingnoise=None, forceclosure=True, forceclosurethreshold=1.0000000000000001e-09, checkgraspfn=None, manipulatordirections=None, translationstepmult=None, finestep=None, friction=None, avoidlinks=None, plannername=None, boxdelta=None, spheredelta=None, normalanglerange=None
 # http://openrave.org/docs/latest_stable/openravepy/databases.grasping/#openravepy.databases.grasping.GraspingModel.generatepcg
 #                self.gmodel[target_name].generate(approachrays=approachrays, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
-                self.gmodel[target_name].generate(approachrays=approachrays, forceclosure=False, standoffs=[0.05, 0.06, 0.07])
+                self.gmodel[target_name].generate(approachrays=approachrays3, forceclosure=False, standoffs=[0.05, 0.06, 0.07])
                 self.gmodel[target_name].save()
 
     def getGraspsCount(self, target_name):
@@ -1184,5 +1187,23 @@ class OpenraveInstance:
                 print report.numCols
         else:
             print "no collisions"
+
+    def checkGripperCollision(self, target_name, grasp_idx):
+        collision = False
+        grasp = self.gmodel[target_name].grasps[grasp_idx]
+        self.robot_rave_update_lock.acquire()
+        with self.robot_rave.CreateRobotStateSaver():
+            with self.gmodel[target_name].GripperVisibility(self.gmodel[target_name].manip):
+                with self.env:
+                    self.gmodel[target_name].setPreshape(grasp)
+                    Tgrasp = self.gmodel[target_name].getGlobalGraspTransform(grasp,collisionfree=False)
+                    Tdelta = np.dot(Tgrasp,np.linalg.inv(self.gmodel[target_name].manip.GetEndEffectorTransform()))
+                    for link in self.gmodel[target_name].manip.GetChildLinks():
+                        link.SetTransform(np.dot(Tdelta,link.GetTransform()))
+                    report = CollisionReport()
+                    if self.env.CheckCollision(self.robot_rave, report):
+                        collision = True
+        self.robot_rave_update_lock.release()
+        return collision
 
 

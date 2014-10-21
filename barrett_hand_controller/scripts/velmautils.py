@@ -742,6 +742,74 @@ def updateComUnitTest(openrave, pub_marker, object_name):
                     m_id = pub_marker.publishSinglePointMarker(com[idx], m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=T_B_O)
                 rospy.sleep(0.01)
 
+def alignRotationToVerticalAxis(T_B_T):
+#            # get the current tool transformation
+#            rx = random.uniform(-math.pi, math.pi)
+#            ry = random.uniform(-math.pi, math.pi)
+#            rz = random.uniform(-math.pi, math.pi)
+#            T_B_T = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz), PyKDL.Vector(random.uniform(0,1), random.uniform(0,1), random.uniform(0,2)))
+
+            # get the current tool rotation
+            R_B_T = PyKDL.Frame(copy.deepcopy(T_B_T.M))
+            # get the two most horizontal axes
+            sq_root_2 = math.sqrt(2.0)/2.0
+            if abs((R_B_T * PyKDL.Vector(1,0,0)).z()) >= abs((R_B_T * PyKDL.Vector(0,1,0)).z()) and abs((R_B_T * PyKDL.Vector(1,0,0)).z()) >= abs((R_B_T * PyKDL.Vector(0,0,1)).z()):
+                ax1 = R_B_T * PyKDL.Vector(0,1,0)
+                ax2 = R_B_T * PyKDL.Vector(0,0,1)
+            elif abs((R_B_T * PyKDL.Vector(0,1,0)).z()) >= abs((R_B_T * PyKDL.Vector(1,0,0)).z()) and abs((R_B_T * PyKDL.Vector(0,1,0)).z()) >= abs((R_B_T * PyKDL.Vector(0,0,1)).z()):
+                ax1 = R_B_T * PyKDL.Vector(1,0,0)
+                ax2 = R_B_T * PyKDL.Vector(0,0,1)
+            else:
+                ax1 = R_B_T * PyKDL.Vector(1,0,0)
+                ax2 = R_B_T * PyKDL.Vector(0,1,0)
+
+            ax1 = PyKDL.Vector(ax1.x(), ax1.y(), 0.0)
+            ax2 = PyKDL.Vector(ax2.x(), ax2.y(), 0.0)
+            ax1.Normalize()
+            ax2.Normalize()
+            frames = [
+            [ax1, PyKDL.Vector(0,0,1) * ax1, PyKDL.Vector(0,0,1)],
+            [-ax1, PyKDL.Vector(0,0,1) * (-ax1), PyKDL.Vector(0,0,1)],
+            [ax2, PyKDL.Vector(0,0,1) * ax2, PyKDL.Vector(0,0,1)],
+            [-ax2, PyKDL.Vector(0,0,1) * (-ax2), PyKDL.Vector(0,0,1)],
+            [ax1 * PyKDL.Vector(0,0,1), ax1, PyKDL.Vector(0,0,1)],
+            [(-ax1) * PyKDL.Vector(0,0,1), -ax1, PyKDL.Vector(0,0,1)],
+            [ax2 * PyKDL.Vector(0,0,1), ax2, PyKDL.Vector(0,0,1)],
+            [(-ax2) * PyKDL.Vector(0,0,1), -ax2, PyKDL.Vector(0,0,1)],
+            [ax1, PyKDL.Vector(0,0,-1) * ax1, PyKDL.Vector(0,0,-1)],
+            [-ax1, PyKDL.Vector(0,0,-1) * (-ax1), PyKDL.Vector(0,0,-1)],
+            [ax2, PyKDL.Vector(0,0,-1) * ax2, PyKDL.Vector(0,0,-1)],
+            [-ax2, PyKDL.Vector(0,0,-1) * (-ax2), PyKDL.Vector(0,0,-1)],
+            [ax1 * PyKDL.Vector(0,0,-1), ax1, PyKDL.Vector(0,0,-1)],
+            [(-ax1) * PyKDL.Vector(0,0,-1), -ax1, PyKDL.Vector(0,0,-1)],
+            [ax2 * PyKDL.Vector(0,0,-1), ax2, PyKDL.Vector(0,0,-1)],
+            [(-ax2) * PyKDL.Vector(0,0,-1), -ax2, PyKDL.Vector(0,0,-1)],
+            ]
+            min_diff = None
+            min_fr = None
+            for f in frames:
+                fr = PyKDL.Frame(PyKDL.Rotation(f[0], f[1], f[2]))
+                diff = PyKDL.diff(R_B_T, fr).rot.Norm()
+                if min_diff == None or min_diff > diff:
+                    min_diff = diff
+                    min_fr = fr
+
+                fr = PyKDL.Frame(PyKDL.Rotation(f[2], f[0], f[1]))
+                diff = PyKDL.diff(R_B_T, fr).rot.Norm()
+                if min_diff == None or min_diff > diff:
+                    min_diff = diff
+                    min_fr = fr
+
+                fr = PyKDL.Frame(PyKDL.Rotation(f[1], f[2], f[0]))
+                diff = PyKDL.diff(R_B_T, fr).rot.Norm()
+                if min_diff == None or min_diff > diff:
+                    min_diff = diff
+                    min_fr = fr
+#            m_id = 0
+#            m_id = self.pub_marker.publishFrameMarker(min_fr, m_id, scale=0.1, frame='world', namespace='default')
+#            m_id = self.pub_marker.publishFrameMarker(R_B_T, m_id, scale=0.1, frame='world', namespace='default')
+#            exit(0)
+            return PyKDL.Frame(copy.deepcopy(min_fr.M), copy.deepcopy(T_B_T.p))
 
 class WristCollisionAvoidance:
 

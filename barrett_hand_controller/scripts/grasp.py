@@ -126,16 +126,9 @@ Class for grasp learning.
             return T_B_Tbb
         elif marker_id == 19:
             return T_B_Tm * T_Tm_Bm * T_Bm_Gm
+        elif marker_id == 35:
+            return T_B_Tm * T_Tm_Bm * T_Bm_Gm
         return None
-
-#    def getObjectPose(self, obj):
-#        for marker in obj.markers:
-#            T_Br_M = self.getMarkerPose(marker[0], wait = False, timeBack = 0.3)
-#            if T_Br_M != None:
-#                T_Co_M = marker[1]
-#                T_Br_Co = T_Br_M * T_Co_M.Inverse()
-#                obj.updatePose(T_Br_Co)
-        
 
     def poseUpdaterThread(self, args, *args2):
         index = 0
@@ -379,6 +372,91 @@ Class for grasp learning.
         k_pregrasp = Wrench(Vector3(1000.0, 1000.0, 1000.0), Vector3(300.0, 300.0, 300.0))
         k_grasp = Wrench(Vector3(500.0, 500.0, 500.0), Vector3(150.0, 150.0, 150.0))
 
+
+        if False:
+            # get the current tool transformation
+            rx = random.uniform(-math.pi, math.pi)
+            ry = random.uniform(-math.pi, math.pi)
+            rz = random.uniform(-math.pi, math.pi)
+            T_B_T = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz), PyKDL.Vector(random.uniform(0,1), random.uniform(0,1), random.uniform(0,2)))
+
+            # get the current tool rotation
+            R_B_T = PyKDL.Frame(copy.deepcopy(T_B_T.M))
+            # get the two most horizontal axes
+            sq_root_2 = math.sqrt(2.0)/2.0
+            if abs((R_B_T * PyKDL.Vector(1,0,0)).z()) >= abs((R_B_T * PyKDL.Vector(0,1,0)).z()) and abs((R_B_T * PyKDL.Vector(1,0,0)).z()) >= abs((R_B_T * PyKDL.Vector(0,0,1)).z()):
+                print "chosen y,z"
+                ax1 = R_B_T * PyKDL.Vector(0,1,0)
+                ax2 = R_B_T * PyKDL.Vector(0,0,1)
+            elif abs((R_B_T * PyKDL.Vector(0,1,0)).z()) >= abs((R_B_T * PyKDL.Vector(1,0,0)).z()) and abs((R_B_T * PyKDL.Vector(0,1,0)).z()) >= abs((R_B_T * PyKDL.Vector(0,0,1)).z()):
+                print "chosen x,z"
+                ax1 = R_B_T * PyKDL.Vector(1,0,0)
+                ax2 = R_B_T * PyKDL.Vector(0,0,1)
+            else:
+                print "chosen x,y"
+                ax1 = R_B_T * PyKDL.Vector(1,0,0)
+                ax2 = R_B_T * PyKDL.Vector(0,1,0)
+
+            ax1 = PyKDL.Vector(ax1.x(), ax1.y(), 0.0)
+            ax2 = PyKDL.Vector(ax2.x(), ax2.y(), 0.0)
+            print "ax1: %s  ax2: %s"%(ax1, ax2)
+            ax1.Normalize()
+            ax2.Normalize()
+#x*y=z   y*z=x   z*x=y
+            frames = [
+            [ax1, PyKDL.Vector(0,0,1) * ax1, PyKDL.Vector(0,0,1)],
+            [-ax1, PyKDL.Vector(0,0,1) * (-ax1), PyKDL.Vector(0,0,1)],
+            [ax2, PyKDL.Vector(0,0,1) * ax2, PyKDL.Vector(0,0,1)],
+            [-ax2, PyKDL.Vector(0,0,1) * (-ax2), PyKDL.Vector(0,0,1)],
+            [ax1 * PyKDL.Vector(0,0,1), ax1, PyKDL.Vector(0,0,1)],
+            [(-ax1) * PyKDL.Vector(0,0,1), -ax1, PyKDL.Vector(0,0,1)],
+            [ax2 * PyKDL.Vector(0,0,1), ax2, PyKDL.Vector(0,0,1)],
+            [(-ax2) * PyKDL.Vector(0,0,1), -ax2, PyKDL.Vector(0,0,1)],
+            [ax1, PyKDL.Vector(0,0,-1) * ax1, PyKDL.Vector(0,0,-1)],
+            [-ax1, PyKDL.Vector(0,0,-1) * (-ax1), PyKDL.Vector(0,0,-1)],
+            [ax2, PyKDL.Vector(0,0,-1) * ax2, PyKDL.Vector(0,0,-1)],
+            [-ax2, PyKDL.Vector(0,0,-1) * (-ax2), PyKDL.Vector(0,0,-1)],
+            [ax1 * PyKDL.Vector(0,0,-1), ax1, PyKDL.Vector(0,0,-1)],
+            [(-ax1) * PyKDL.Vector(0,0,-1), -ax1, PyKDL.Vector(0,0,-1)],
+            [ax2 * PyKDL.Vector(0,0,-1), ax2, PyKDL.Vector(0,0,-1)],
+            [(-ax2) * PyKDL.Vector(0,0,-1), -ax2, PyKDL.Vector(0,0,-1)],
+            ]
+            min_diff = None
+            min_fr = None
+            for f in frames:
+                fr = PyKDL.Frame(PyKDL.Rotation(f[0], f[1], f[2]))
+                diff = PyKDL.diff(R_B_T, fr).rot.Norm()
+                if min_diff == None or min_diff > diff:
+                    min_diff = diff
+                    min_fr = fr
+
+                fr = PyKDL.Frame(PyKDL.Rotation(f[2], f[0], f[1]))
+                diff = PyKDL.diff(R_B_T, fr).rot.Norm()
+                if min_diff == None or min_diff > diff:
+                    min_diff = diff
+                    min_fr = fr
+
+                fr = PyKDL.Frame(PyKDL.Rotation(f[1], f[2], f[0]))
+                diff = PyKDL.diff(R_B_T, fr).rot.Norm()
+                if min_diff == None or min_diff > diff:
+                    min_diff = diff
+                    min_fr = fr
+
+
+
+            print "min_diff: %s"%(min_diff)
+            m_id = 0
+            m_id = self.pub_marker.publishFrameMarker(min_fr, m_id, scale=0.1, frame='world', namespace='default')
+            m_id = self.pub_marker.publishFrameMarker(R_B_T, m_id, scale=0.1, frame='world', namespace='default')
+
+            exit(0)
+
+
+
+
+
+
+
         if True:
             # reset the gripper
             velma.resetFingers()
@@ -425,6 +503,8 @@ Class for grasp learning.
         com_pt = velmautils.generateComSamples(vertices, faces, 2000)
         obj_grasp.addComPoints(com_pt)
 
+        self.openrave.prepareGraspingModule("object", force_load=True)
+
         try:
             print "trying to read grasping data from file"
             with open('sim_grips_' + obj_model + '.txt', 'r') as f:
@@ -451,6 +531,8 @@ Class for grasp learning.
             valid_grasps = 0
             grips = []
             for idx in range(0, self.openrave.getGraspsCount("object")):
+                if idx % 100 == 0:
+                    print "index: %s"%(idx)
                 sim_grips.append(None)
                 grasp = self.openrave.getGrasp("object", idx)
                 q, contacts = self.openrave.getFinalConfig("object", grasp)
@@ -485,6 +567,9 @@ Class for grasp learning.
                             if dist < 0.02:
                                 checked_contacts.append(c_idx)
                                 contacts_groups[-1].append(c_idx)
+
+                if len(contacts_groups) < 3:
+                    continue
 
                 centers = []
                 for g in contacts_groups:
@@ -545,6 +630,8 @@ Class for grasp learning.
         ################
         # the main loop
         ################
+        T_W_T_orig = copy.deepcopy(velma.T_W_T)
+        T_W_T_new = copy.deepcopy(velma.T_W_T)
         base_qar = copy.deepcopy(velma.qar)
         T_B_O_prev = None
         checked_grasps_idx = []
@@ -552,7 +639,23 @@ Class for grasp learning.
         while True:
 
             self.allowUpdateObjects()
-            rospy.sleep(1.0)
+
+            self.switchToJoint(velma)
+
+            velma.updateTransformations()
+            velma.updateAndMoveToolOnly(T_W_T_orig, 0.5)
+            if velma.checkStopCondition(0.5):
+                exit(0)
+#            raw_input("Press Enter to set impedance to bigger value...")
+            print "setting stiffness to bigger value"
+            velma.moveImpedance(k_pregrasp, 0.5)
+            if velma.checkStopCondition(0.5):
+                exit(0)
+
+#            rospy.sleep(1.0)
+            dur = rospy.Time.now() - obj_grasp.pose_update_time
+            print "pose of the object is from %s seconds ago"%(dur.to_sec())
+
             # move to base pose
             dist = 0.0
             for q_idx in range(0,7):
@@ -593,12 +696,12 @@ Class for grasp learning.
             T_B_O = self.openrave.getPose("object")
             if T_B_O_prev != None:
                 T_B_O_diff = PyKDL.diff(T_B_O_prev, T_B_O)
-                if T_B_O_diff.vel.Norm() < 0.01 and T_B_O_diff.rot.Norm() < 3.0/180.0*math.pi:
+                if T_B_O_diff.vel.Norm() < 0.02 and T_B_O_diff.rot.Norm() < 5.0/180.0*math.pi:
                     generate_new_grasps = False
             T_B_O_prev = T_B_O
             if generate_new_grasps:
                 # get the possible grasps for the current scene
-                indices = self.openrave.generateGrasps("object")
+                indices = self.openrave.generateGrasps("object", checkcollision=False, checkgrasper=False)
 
             if len(indices) == 0:
                 print "FATAL ERROR: could not generate any grasps for current configuration"
@@ -615,6 +718,7 @@ Class for grasp learning.
             max_idx = None
             # TODO
             first_ok_idx = None
+            indices_scored = []
             # iterate through all available grasps
             for idx in indices:
                 if sim_grips[idx] == None:
@@ -674,24 +778,29 @@ Class for grasp learning.
 
                     score += penalty_no_contact + penalty_too_little_contacts + penalty_unstable - reward_stable
 
-                if min_score == None or min_score > score:
-                    min_score = score
-                    max_idx = idx
+                indices_scored.append( [score, idx] )
+#                if min_score == None or min_score > score:
+                    # check collisions
+#                    if not self.openrave.checkGripperCollision("object", idx):
+#                        min_score = score
+#                        max_idx = idx
 
-#                min_dist = None
-#                # iterate through all checked grasps - find the closest grasp in checked grasps set
-#                for idx_2 in range(0, self.openrave.getGraspsCount("object")):
-#                    if sim_grips[idx_2] == None:
-#                        continue
-#                    if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0:
-#                        continue
-#                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist2(sim_grips[idx], sim_grips[idx_2])
-#                    if min_dist == None or dist < min_dist:
-#                        min_dist = dist
-#                if min_dist != None and min_dist > max_dist:
-#                    max_dist = min_dist
-#                    max_idx = idx
-#            print "found grasp that is the most distant from all checked grasps: %s"%(max_dist)
+            indices_scored_sorted = sorted(indices_scored, key=operator.itemgetter(0))
+            for score_idx in indices_scored_sorted:
+                score, idx = score_idx
+                if self.openrave.checkGripperCollision("object", idx):
+                    sim_grips[idx].setPlanningFailure(obj_grasp.T_Br_Co)
+                else:
+                    grasp = copy.deepcopy(self.openrave.getGrasp("object", idx))
+                    T_B_Ed = self.openrave.getGraspTransform("object", grasp)#, collisionfree=True)
+                    traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
+                    if traj == None:
+                        sim_grips[idx].setPlanningFailure(obj_grasp.T_Br_Co)
+                    else:
+                        min_score = score
+                        max_idx = idx
+                        break
+
             print "found grasp that has the best score: %s"%(min_score)
 
             if max_idx != None:
@@ -707,17 +816,17 @@ Class for grasp learning.
             print "choosed grasp no. %s"%(grasp_idx)
 
             print "found grasp"
-            grasp = copy.deepcopy(self.openrave.getGrasp("object", grasp_idx))
+            
 
-            T_B_Ed = self.openrave.getGraspTransform("object", grasp, collisionfree=True)
+#            T_B_Ed = self.openrave.getGraspTransform("object", grasp, collisionfree=True)
             self.openrave.showGrasp("object", grasp)
 
             T_Br_O_init = obj_grasp.T_Br_Co
-            traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
-            if traj == None:
-                print "colud not plan trajectory"
-                current_sim_grip.setPlanningFailure(obj_grasp.T_Br_Co)
-                continue
+#            traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
+#            if traj == None:
+#                print "colud not plan trajectory"
+#                current_sim_grip.setPlanningFailure(obj_grasp.T_Br_Co)
+#                continue
 
             final_config, contacts = self.openrave.getFinalConfig("object", grasp)
             if final_config == None:
@@ -775,7 +884,7 @@ Class for grasp learning.
 
             # close the fingers
             ad2 = 20.0/180.0*math.pi
-            velma.move_hand_client([final_config[0]+ad2, final_config[1]+ad2, final_config[2]+ad2, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(2500.0, 2500.0, 2500.0, 2500.0))
+            velma.move_hand_client([final_config[0]+ad2, final_config[1]+ad2, final_config[2]+ad2, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(2000.0, 2000.0, 2000.0, 2000.0))
             if velma.checkStopCondition(3.0):
                 break
 
@@ -817,6 +926,13 @@ Class for grasp learning.
                 continue
 
             self.allowUpdateObjects()
+
+            # start with very low stiffness
+            print "setting stiffness to very low value"
+            velma.moveImpedance(velma.k_error, 0.5)
+            if velma.checkStopCondition(0.5):
+                exit(0)
+
             print "checking the object pose after grip..."
             rospy.sleep(1.0)
 
@@ -825,23 +941,46 @@ Class for grasp learning.
 
             pose_tolerance = [0.02, 5.0/180.0*math.pi]
             # check the object pose before lift-up
-            dur = rospy.Time.now() - obj_grasp.pose_update_time
-            if abs(dur.to_sec()) < 1.0:
-                print "fresh pose available: %s"%(dur.to_sec())
-                fresh_pose = True
-                T_Br_Co_sim = self.openrave.getPose("object")
-                pose_diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_Co_sim)
-                if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
-                    print "object pose is different after the grip - diff: %s > %s     %s > %s deg. but it is okay..."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
-#                    current_sim_grip.setMovedOnGrip()
-#                    self.openrave.release("object")
-#                    velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
-#                    if velma.checkStopCondition(3.0):
-#                        break
-#                    continue
+#            dur = rospy.Time.now() - obj_grasp.pose_update_time
+#            if abs(dur.to_sec()) < 1.0:
+#                print "fresh pose available: %s"%(dur.to_sec())
+#                fresh_pose = True
+#                T_Br_Co_sim = self.openrave.getPose("object")
+#                pose_diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_Co_sim)
+#                if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
+#                    print "object pose is different after the grip - diff: %s > %s     %s > %s deg. but it is okay..."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
+#            else:
+#                print "fresh pose not available: %s"%(dur.to_sec())
+#                fresh_pose = False
+
+
+            # set the new orientation of tool
+            velma.updateTransformations()
+
+            # get the current tool transformation
+            T_B_T = velma.T_B_W * T_W_T_orig
+
+            T_B_T_new = velmautils.alignRotationToVerticalAxis(T_B_T)
+            R_B_T_new = PyKDL.Frame(copy.deepcopy(T_B_T_new.M))
+            T_W_T_new = velma.T_B_W.Inverse() * T_B_T_new
+            velma.updateAndMoveTool(T_W_T_new, 10.0)
+
+            if abs((R_B_T_new * PyKDL.Vector(1,0,0)).z()) > 0.9:
+                k_lift = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(2.0, 200.0, 200.0))
+                k_move = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(200.0, 200.0, 200.0))
+            elif abs((R_B_T_new * PyKDL.Vector(0,1,0)).z()) > 0.9:
+                k_lift = Wrench(Vector3(5.0, 800.0, 5.0), Vector3(200.0, 2.0, 200.0))
+                k_move = Wrench(Vector3(5.0, 800.0, 5.0), Vector3(200.0, 200.0, 200.0))
             else:
-                print "fresh pose not available: %s"%(dur.to_sec())
-                fresh_pose = False
+                k_lift = Wrench(Vector3(5.0, 5.0, 800.0), Vector3(200.0, 200.0, 2.0))
+                k_move = Wrench(Vector3(5.0, 5.0, 800.0), Vector3(200.0, 200.0, 200.0))
+            print "new impedance:"
+            print k_lift
+            raw_input("Press Enter to set impedance to bigger value...")
+            print "setting stiffness to bigger value"
+            velma.moveImpedance(k_lift, 3.0)
+            if velma.checkStopCondition(3.0):
+                exit(0)
 
             # lift the object up
             velma.updateTransformations()
@@ -886,14 +1025,22 @@ Class for grasp learning.
                 velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
                 if velma.checkStopCondition(3.0):
                     break
+                T_B_Wd = T_B_Ebeforelift * velma.T_E_W
+                duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
+                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+                if velma.checkStopCondition():
+                    exit(0)
+                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+                if velma.checkStopCondition(duration):
+                    break
                 continue
 
             self.allowUpdateObjects()
             print "checking the object pose after the lift-up..."
-            rospy.sleep(1.0)
-            # check the object pose before lift-up
+            rospy.sleep(3.0)
+            # check the object pose after lift-up
             dur = rospy.Time.now() - obj_grasp.pose_update_time
-            if abs(dur.to_sec()) < 1.0:
+            if abs(dur.to_sec()) < 3.0 + duration * 0.3:
                 print "fresh pose available: %s"%(dur.to_sec())
                 fresh_pose = True
                 T_Br_Co_sim = self.openrave.getPose("object")
@@ -937,6 +1084,14 @@ Class for grasp learning.
                     velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
                     if velma.checkStopCondition(3.0):
                         break
+                    T_B_Wd = T_B_Ebeforelift * velma.T_E_W
+                    duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
+                    raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+                    if velma.checkStopCondition():
+                        exit(0)
+                    velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+                    if velma.checkStopCondition(duration):
+                        break
                     continue
             else:
                 print "fresh pose not available: %s"%(dur.to_sec())
@@ -946,13 +1101,58 @@ Class for grasp learning.
                 velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
                 if velma.checkStopCondition(3.0):
                     break
+                T_B_Wd = T_B_Ebeforelift * velma.T_E_W
+                duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
+                raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+                if velma.checkStopCondition():
+                    exit(0)
+                velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+                if velma.checkStopCondition(duration):
+                    break
                 continue
+
+
+#            print k_lift
+#            raw_input("Press Enter to set impedance to bigger value...")
+#            print "setting stiffness to bigger value"
+#            velma.moveImpedance(k_lift, 3.0)
+#            if velma.checkStopCondition(3.0):
+#                exit(0)
+
+            # lift the object up
+#            velma.updateTransformations()
+
+#            T_B_Ebeforelift = velma.T_B_W * velma.T_W_E
+#            T_B_Wd = PyKDL.Frame(PyKDL.Vector(0,0,0.08)) * velma.T_B_W
+#            # save the initial position after lift up
+#            T_B_Eafterlift = T_B_Wd * velma.T_W_E
+
+#            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
+#            raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+#            if velma.checkStopCondition():
+#                exit(0)
+#            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+#            if velma.checkStopCondition(duration):
+#                break
+
+
+
+
+
 
             print "success"
             current_sim_grip.setStable()
             self.openrave.release("object")
             velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
             if velma.checkStopCondition(3.0):
+                break
+            T_B_Wd = T_B_Ebeforelift * velma.T_E_W
+            duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
+            raw_input("Press Enter to move the robot in " + str(duration) + " s...")
+            if velma.checkStopCondition():
+                exit(0)
+            velma.moveWrist(T_B_Wd, duration, Wrench(Vector3(20,20,20), Vector3(4,4,4)), abort_on_q5_singularity=True, abort_on_q5_q6_self_collision=True)
+            if velma.checkStopCondition(duration):
                 break
             rospy.sleep(1.0)
 
