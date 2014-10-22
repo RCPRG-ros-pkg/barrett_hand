@@ -509,29 +509,55 @@ def sampleMeshUnitTest(vertices, indices, pub_marker):
     m_id = pub_marker.publishFrameMarker(fr, m_id)
     rospy.sleep(1.0)
 
-def meanOrientation(T):
+def meanOrientation(T, weights=None):
     R = []
     for t in T:
-        R.append( copy.deepcopy( PyKDL.Frame(t.M) ) )
+        R.append( PyKDL.Frame(copy.deepcopy(t.M)) )
+
+    if weights == None:
+        wg = list( np.ones(len(T)) )
+    else:
+        wg = weights
+
+    wg_sum = sum(wg)
 
     def calc_R(rx, ry, rz):
         R_mean = PyKDL.Frame(PyKDL.Rotation.EulerZYX(rx, ry, rz))
         diff = []
         for r in R:
             diff.append(PyKDL.diff( R_mean, r ))
-        ret = [math.fabs(d.rot.x()) for d in diff] + [math.fabs(d.rot.y()) for d in diff] + [math.fabs(d.rot.z()) for d in diff]
+        ret = []
+        for idx in range(0, len(diff)):
+            rot_err = diff[idx].rot.Norm()
+            ret.append(rot_err * wg[idx] / wg_sum)
+        #ret = [math.fabs(d.rot.x()) for d in diff] + [math.fabs(d.rot.y()) for d in diff] + [math.fabs(d.rot.z()) for d in diff]
         return ret
     def f_2(c):
         """ calculate the algebraic distance between each contact point and jar surface pt """
         Di = calc_R(*c)
         return Di
+    def sumf_2(p):
+        return math.fsum(np.array(f_2(p))**2)
     angle_estimate = R[0].M.GetEulerZYX()
-    angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+#    angle_2, ier = optimize.leastsq(f_2, angle_estimate, maxfev = 10000)
+    # least squares with constraints
+    angle_2 = optimize.fmin_slsqp(sumf_2, angle_estimate, bounds=[(-math.pi, math.pi),(-math.pi, math.pi),(-math.pi, math.pi)], iprint=0)
     score = calc_R(angle_2[0],angle_2[1],angle_2[2])
     score_v = 0.0
     for s in score:
         score_v += s*s
     return [score_v, PyKDL.Frame(PyKDL.Rotation.EulerZYX(angle_2[0],angle_2[1],angle_2[2]))]
+
+def meanPosition(T, weights=None):
+    if weights == None:
+        wg = list( np.ones(len(T)) )
+    else:
+        wg = weights
+    wg_sum = sum(wg)
+    mean_p = PyKDL.Vector()
+    for idx in range(0, len(T)):
+        mean_p += T[idx].p * wg[idx] / wg_sum
+    return mean_p
 
 # determine if a point is inside a given polygon or not
 # Polygon is a list of (x,y) pairs.

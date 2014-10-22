@@ -56,7 +56,6 @@ from numpy import *
 import numpy as np
 import copy
 import thread
-from scipy import optimize
 import velmautils
 import itertools
 import dijkstra
@@ -72,8 +71,14 @@ Class for marker localization.
             min_z = math.cos(max_angle)
             print "min_z: %s"%(min_z)
 
+            # big_box
 #            marker_list = [18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
-            marker_list = [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45]
+
+            # small_box
+#            marker_list = [32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45]
+
+            # table
+            marker_list = [3,4,5,6]
             mtrans_matrix = []
             for i in range(0, len(marker_list)):
                 mtrans_matrix.append([])
@@ -138,10 +143,11 @@ Class for marker localization.
                     else:
                         score, R_M1_M2 = velmautils.meanOrientation(mtrans_matrix[i][j])
                         print "%s with %s:  %s, score: %s"%(marker_list[i], marker_list[j], len(mtrans_matrix[i][j]), score)
-                        P_M1_M2 = PyKDL.Vector()
-                        for k in range(0, len(mtrans_matrix[i][j])):
-                            P_M1_M2 += mtrans_matrix[i][j][k].p
-                        P_M1_M2 = P_M1_M2 * (1.0/len(mtrans_matrix[i][j]))
+                        P_M1_M2 = velmautils.meanPosition(mtrans_matrix[i][j])
+#                        P_M1_M2 = PyKDL.Vector()
+#                        for k in range(0, len(mtrans_matrix[i][j])):
+#                            P_M1_M2 += mtrans_matrix[i][j][k].p
+#                        P_M1_M2 = P_M1_M2 * (1.0/len(mtrans_matrix[i][j]))
                         print "P_M1_M2: %s"%(P_M1_M2)
                         mtrans_matrix[i][j] = PyKDL.Frame(copy.deepcopy(R_M1_M2.M), P_M1_M2)
                         neighbours = G.get(marker_list[i], {})

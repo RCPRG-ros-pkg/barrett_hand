@@ -55,7 +55,6 @@ import math
 import numpy as np
 import copy
 import thread
-from scipy import optimize
 from openravepy import *
 from optparse import OptionParser
 from openravepy.misc import OpenRAVEGlobalArguments
@@ -936,11 +935,12 @@ class OpenraveInstance:
                     except planning_error,e:
                         pass
 
-            print "goals count: %s"%(len(goals))
-            print "goals:"
-            print goals
+#            print "goals count: %s"%(len(goals))
+#            print "goals:"
+#            print goals
             traj = self.planMoveThroughGoals(goals, goal0_wrist_only=goal0_wrist_only)
             if traj == None:
+                print "error: planMoveThroughGoals"
                 continue
 
             # verify the trajectory
@@ -961,7 +961,6 @@ class OpenraveInstance:
                 # TODO: better handle the q5-q6 collision
                 print "q5q6 collision"
 #                continue
-
             break
 
         self.robot_rave_update_lock.release()
