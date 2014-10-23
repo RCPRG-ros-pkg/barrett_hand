@@ -97,6 +97,11 @@ class OpenraveInstance:
         self.env.Add(body,True)
 
     def addCBeam(self, name, w, h, l, t):
+#          h
+#       _______
+#    w  |
+#       |______
+#        
         body = RaveCreateKinBody(self.env,'')
         body.SetName(name)
         body.InitFromBoxes(numpy.array([
@@ -385,11 +390,14 @@ class OpenraveInstance:
             if force_load or not self.gmodel[target_name].load():
                 print 'generating grasping model (one time computation)'
                 self.gmodel[target_name].init(friction=1.0,avoidlinks=[])
+                print 'grasping model initialised'
+                print 'computing approach rays...'
                 approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03,normalanglerange=0.0) #201, directiondelta=0.2)
 #                print approachrays.shape
 #                approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03, normalanglerange=15.0/180.0*math.pi, directiondelta=14.0/180.0*math.pi)
 #                approachrays3 = np.concatenate((approachrays, approachrays2), axis=0)
                 print approachrays3.shape
+                print 'generating grasps...'
 # possible arguments for generate:
 # preshapes=None, standoffs=None, rolls=None, approachrays=None, graspingnoise=None, forceclosure=True, forceclosurethreshold=1.0000000000000001e-09, checkgraspfn=None, manipulatordirections=None, translationstepmult=None, finestep=None, friction=None, avoidlinks=None, plannername=None, boxdelta=None, spheredelta=None, normalanglerange=None
 # http://openrave.org/docs/latest_stable/openravepy/databases.grasping/#openravepy.databases.grasping.GraspingModel.generatepcg
@@ -406,11 +414,6 @@ class OpenraveInstance:
         return self.gmodel[target_name].grasps[grasp_idx]
 
     def generateGrasps(self, target_name, show=False, checkcollision=True, checkik=True, checkgrasper=True):
-#        target = self.env.GetKinBody(target_name)
-#        if target == None:
-#            print "target body <%s> not found"%(target_name)
-#            return False
-
         self.prepareGraspingModule(target_name)
 
         validgrasps,validindices = self.gmodel[target_name].computeValidGrasps(checkcollision=checkcollision, checkik=checkik, checkgrasper=checkgrasper)
@@ -418,7 +421,6 @@ class OpenraveInstance:
 
         print "done."
         return validindices
-#        return validgrasps,validindices
 
     def getGraspTransform(self, target_name, grasp, collisionfree=False):
         return self.T_World_Br.Inverse()*self.OpenraveToKDL( self.gmodel[target_name].getGlobalGraspTransform(grasp,collisionfree=collisionfree) )
@@ -522,10 +524,8 @@ class OpenraveInstance:
 
     def grab(self, name):
         body = self.env.GetKinBody(name)
-#        self.robot_rave.Grab(body)
         self.robot_rave_update_lock.acquire()
         with self.env:
-#            self.robot_rave.Grab( self.env.GetKinBody(name), self.right_palm_links_indices )
             self.robot_rave.Grab( self.env.GetKinBody(name))
         self.robot_rave_update_lock.release()
 
@@ -534,16 +534,6 @@ class OpenraveInstance:
         with self.env:
             self.robot_rave.ReleaseAllGrabbed()
         self.robot_rave_update_lock.release()
-
-#        self.robot_rave.RegrabAll()
-#        body = self.env.GetKinBody(name)
-#        self.env.Remove(body)
-#        self.env.Add(body)
-
-#        self.robot_rave.ResetGrabbed()
-#        self.robot_rave.Grab( self.env.GetKinBody(name))
-#        self.robot_rave.ReleaseAllGrabbed()
-#        self.robot_rave.Release( self.env.GetKinBody(name))
 
     def getVisibility(self, name, T_Br_C, qt=None, qar=None, qal=None, qhr=None, qhl=None, pub_marker=None, fov_x=None, fov_y=None, min_dist=0.01):
         # remove the head sphere from environment
@@ -644,18 +634,13 @@ class OpenraveInstance:
         return float(hits)/float(len(points))
 
     def findIkSolution(self, T_Br_E):
-#        return self.ikmodel.manip.FindIKSolution(IkParameterization(self.KDLToOpenrave(self.T_World_Br * T_Br_E),IkParameterizationType.Transform6D), 0)#IkFilterOptions.CheckEnvCollisions)
         return self.ikmodel.manip.FindIKSolution(self.KDLToOpenrave(self.T_World_Br * T_Br_E), IkFilterOptions.CheckEnvCollisions)
 
     def findIkSolutions(self, T_Br_E):
-#        return self.ikmodel.manip.FindIKSolutions(IkParameterization(self.KDLToOpenrave(self.T_World_Br * T_Br_E),IkParameterizationType.Transform6D), 0)#IkFilterOptions.CheckEnvCollisions)
         return self.ikmodel.manip.FindIKSolutions(self.KDLToOpenrave(self.T_World_Br * T_Br_E), IkFilterOptions.CheckEnvCollisions)
 
     def findIkSolutionsTranslation3D(self, T_Br_E):
-#        return self.ikmodel.manip.FindIKSolutions(IkParameterization(self.KDLToOpenrave(self.T_World_Br * T_Br_E),IkParameterizationType.Transform6D), 0)#IkFilterOptions.CheckEnvCollisions)
         return self.ikmodel_translation3D.manip.FindIKSolutions(self.KDLToOpenrave(self.T_World_Br * T_Br_E), IkFilterOptions.CheckEnvCollisions)
-
-
 
     def getBestFinalConfigs(self, T_Br_E):
         q_list = self.findIkSolutions(T_Br_E)
@@ -972,130 +957,6 @@ class OpenraveInstance:
         if q5q6_collision:
             print "planMoveForRightArm: q5-q6 collision: %s / %s"%(first_q5q6_collision, traj.GetDuration())
 #            return None
-
-        if verbose_print:
-            print "all groups:"
-            for gr in conf.GetGroups():
-                print gr.name
-
-        def printGroup(gr):
-            print "offset: %s   dof: %s   name: %s   interpolation: %s"%(gr.offset, gr.dof, gr.name, gr.interpolation)
-
-        try:
-            gr_tim = conf.GetGroupFromName("deltatime")
-            tim = []
-            if verbose_print:
-                print "gr_tim:"
-                printGroup(gr_pos)
-        except openrave_exception:
-            gr_tim = None
-            tim = None
-            if verbose_print:
-                print "gr_tim == None"
-        try:
-            gr_pos = conf.GetGroupFromName("joint_values")
-            pos = []
-            if verbose_print:
-                print "gr_pos:"
-                printGroup(gr_pos)
-        except openrave_exception:
-            gr_pos = None
-            pos = None
-            if verbose_print:
-                print "gr_pos == None"
-        try:
-            gr_vel = conf.GetGroupFromName("joint_velocities")
-            vel = []
-            if verbose_print:
-                print "gr_vel:"
-                printGroup(gr_vel)
-        except openrave_exception:
-            gr_vel = None
-            vel = None
-            if verbose_print:
-                print "gr_vel == None"
-        try:
-            gr_acc = conf.GetGroupFromName("joint_accelerations")
-            acc = []
-            if verbose_print:
-                print "gr_acc:"
-                printGroup(gr_acc)
-        except openrave_exception:
-            gr_acc = None
-            acc = None
-            if verbose_print:
-                print "gr_acc == None"
-
-        if verbose_print:
-            print "waypoints: %s"%(traj.GetNumWaypoints())
-
-        for idx in range(0, traj.GetNumWaypoints()):
-            w = traj.GetWaypoint(idx)
-            if pos != None:
-                pos.append( [w[gr_pos.offset], w[gr_pos.offset + 1], w[gr_pos.offset + 2], w[gr_pos.offset + 3], w[gr_pos.offset + 4], w[gr_pos.offset + 5], w[gr_pos.offset + 6]] )
-            if vel != None:
-               vel.append( [w[gr_vel.offset], w[gr_vel.offset + 1], w[gr_vel.offset + 2], w[gr_vel.offset + 3], w[gr_vel.offset + 4], w[gr_vel.offset + 5], w[gr_vel.offset + 6]] )
-            if acc != None:
-               acc.append( [w[gr_acc.offset], w[gr_acc.offset + 1], w[gr_acc.offset + 2], w[gr_acc.offset + 3], w[gr_acc.offset + 4], w[gr_acc.offset + 5], w[gr_acc.offset + 6]] )
-            if tim != None:
-               tim.append( w[gr_tim.offset] )
-
-        if verbose_print:
-            print "pos"
-            print pos
-            print "tim"
-            print tim
-            if tim != None:
-                print "tim sum: %s"%(math.fsum(tim))
-            print "duration: %s"%(traj.GetDuration())
-        return pos, vel, acc, tim, q_traj, q5q6_collision
-
-    def planMoveInJoints(self, q_dest):
-        print "planMoveInJoints: ERROR"
-        return
-        # check for q5-q6 collision
-        if not hasattr(self, 'wrist_collision_avoidance') or self.wrist_collision_avoidance == None:
-            self.wrist_collision_avoidance = velmautils.WristCollisionAvoidance("right", None, 5.0/180.0*math.pi)
-
-        for i in range(0, 10):
-            traj = None
-            self.robot_rave_update_lock.acquire()
-            with self.robot_rave:
-                try:
-                    self.robot_rave.SetActiveDOFs(self.right_arm_dof_indices)
-                    #traj = self.basemanip.MoveToHandPosition(matrices=[self.KDLToOpenrave(self.T_World_Br * T_Br_E)],maxiter=maxiter,maxtries=1,seedik=i,execute=False,outputtrajobj=True)
-                    traj = self.basemanip.MoveActiveJoints(goal=q_dest,execute=False,outputtrajobj=True)
-                except planning_error,e:
-                    pass
-            self.robot_rave_update_lock.release()
-
-            if traj == None:
-                continue
-
-            conf = traj.GetConfigurationSpecification()
-            q_traj = []
-            steps2 = max(2, int(traj.GetDuration()*200.0))
-            q5q6_collision = False
-            first_q5q6_collision = None
-            for t in np.linspace(0.0, traj.GetDuration(), steps2):
-                q = conf.ExtractJointValues(traj.Sample(t), self.robot_rave, self.right_arm_dof_indices)
-                q_traj.append(list(q))
-                if len(self.wrist_collision_avoidance.getQ5Q6SpaceSectors(q[5], q[6])) == 0:
-                    if first_q5q6_collision == None:
-                        first_q5q6_collision = t
-                    q5q6_collision = True
-
-            if not q5q6_collision:
-                break
-
-        if traj == None:
-            print "planMoveForRightArm: planning error"
-            return None
-
-        if q5q6_collision:
-            print "planMoveForRightArm: q5-q6 collision: %s / %s"%(first_q5q6_collision, traj.GetDuration())
-            return None
-
 
         if verbose_print:
             print "all groups:"

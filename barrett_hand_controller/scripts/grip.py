@@ -145,8 +145,6 @@ class Grip:
             line += ' ' + str(c.p.x()) + ' ' + str(c.p.y()) + ' ' + str(c.p.z())
             line += ' ' + str(q[0]) + ' ' + str(q[1]) + ' ' + str(q[2]) + ' ' + str(q[3])
         return line
-#        with open('filemane', 'a') as f:
-#                read_data = f.write(line)
 
     def fromStr(self, line):
         tab = line.split()

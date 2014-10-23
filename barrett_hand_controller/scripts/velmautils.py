@@ -655,7 +655,6 @@ def comSamplesUnitTest(openrave, pub_marker, object_name):
         rospy.sleep(0.01)
 
 def updateCom(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights, m_id=0, pub_marker=None):
-#    diff_B = T_B_O * PyKDL.diff(T_B_O, T_B_O_2)
     diff_B = PyKDL.diff(T_B_O, T_B_O_2)
     up_v_B = PyKDL.Vector(0,0,1)
     n_v_B = diff_B.rot * up_v_B
@@ -688,11 +687,9 @@ def updateCom(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights, m_id=0, pub_marke
 
 def updateCom2(T_B_O, T_B_O_2, contacts_O, com_pt, com_weights):
     diff = PyKDL.diff(T_B_O, T_B_O_2)
-#    m_id = self.pub_marker.publishVectorMarker(PyKDL.Vector(), diff.rot, m_id, r=0, g=1, b=0, frame='world', namespace='default', scale=0.01)
 
     up_v = PyKDL.Vector(0,0,1)
     n_v = diff.rot * up_v
-#    m_id = self.pub_marker.publishVectorMarker(PyKDL.Vector(), n_v, m_id, r=1, g=1, b=1, frame='world', namespace='default', scale=0.01)
 
     n_O = T_B_O.Inverse() * n_v
     n_O_2 = T_B_O_2.Inverse() * n_v
@@ -1224,34 +1221,9 @@ class VelmaIkSolver:
                 if q_end == None:
                     cost += 10000.0
                     return cost
-#                T_B_Ei = PyKDL.addDelta(T_B_Eprev, T_B_E_diff, d)
-#                T_T2_Ei = self.T_T2_B * T_B_Ei
-#                status = self.ik_solver.CartToJnt(q_init, T_T2_Ei, q_out)
-#                if status != 0:
-#                    print "c"
-#                    cost += 10000.0
-#                    return cost
-#                q5abs = math.fabs(q_out[5])
-#                singularity = q5abs < self.abort_on_q5_singularity_angle + 5.0/180.0*math.pi
-#                if allow_q5_singularity_before_end:
-#                    pass
-#                else:
-#                    # punish for singularity
-#                    if singularity:
-#                        print "b"
-#                        cost += 10000.0
-#                        return cost
                 for j in range(0, 7):
                     cost += (q_end[j] - q_init[j])*(q_end[j] - q_init[j])
                     q_init[j] = q_end[j]
-#        if not allow_q5_singularity_on_end and singularity:
-#            print "a"
-#            cost += 10000.0
-#            return cost
-
-#        if q_end != None:
-#            for i in range(0, 7):
-#                q_end[i] = q_out[i]
         return cost
 
     def getAllDistinctConfigurations(self, T_B_Ed, T_T2_B):

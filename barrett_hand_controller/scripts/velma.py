@@ -911,11 +911,15 @@ Class for velma robot.
         self.current_max_wrench = max_wrench
         self.action_right_trajectory_client.send_goal(action_trajectory_goal)
 
-    def moveTool(self, wrist_frame, t):
+    def moveTool(self, wrist_frame, t, stamp=None):
         wrist_pose = pm.toMsg(wrist_frame)
 
         action_tool_goal = CartesianTrajectoryGoal()
-        action_tool_goal.trajectory.header.stamp = rospy.Time.now()
+        if stamp != None:
+            action_tool_goal.trajectory.header.stamp = stamp
+        else:
+            action_tool_goal.trajectory.header.stamp = rospy.Time.now() + rospy.Duration(0.01)
+#        action_tool_goal.trajectory.header.stamp = rospy.Time.now()
         action_tool_goal.trajectory.points.append(CartesianTrajectoryPoint(
         rospy.Duration(t),
         wrist_pose,
@@ -1264,9 +1268,10 @@ Class for velma robot.
         # move both tool position and wrist position - the gripper holds its position
         print "moving wrist"
         # we assume that during the initialization there are no contact forces, so we limit the wrench
-        self.moveWrist( self.T_B_W, duration, Wrench(Vector3(10, 10, 10), Vector3(2, 2, 2)) )
-        print "moving tool"
-        self.moveTool( self.T_W_T, duration )
+        stamp = rospy.Time.now() + rospy.Duration(1.0)
+        self.moveWrist( self.T_B_W, duration, Wrench(Vector3(10, 10, 10), Vector3(2, 2, 2)), stamp=stamp)
+#        print "moving tool"
+        self.moveTool( self.T_W_T, duration, stamp=stamp )
 
     def updateAndMoveToolOnly(self, tool, duration):
         self.T_W_T = copy.deepcopy(tool)    # tool transformation

@@ -131,7 +131,7 @@ Class for grasp learning.
 
     def poseUpdaterThread(self, args, *args2):
         index = 0
-        z_limit = 0.6
+        z_limit = 0.3
         while not rospy.is_shutdown():
             rospy.sleep(0.1)
             if self.allow_update_objects_pose == None or not self.allow_update_objects_pose:
@@ -140,6 +140,7 @@ Class for grasp learning.
                 visible_markers_Br_Co = []
                 visible_markers_weights_ori = []
                 visible_markers_weights_pos = []
+                visible_markers_idx = []
                 for marker in obj.markers:
                     T_Br_M = self.getMarkerPose(marker[0], wait = False, timeBack = 0.3)
                     if T_Br_M != None and self.velma != None:
@@ -157,15 +158,36 @@ Class for grasp learning.
                         visible_markers_Br_Co.append(T_Br_Co)
                         visible_markers_weights_ori.append(1.0-weight)
                         visible_markers_weights_pos.append(weight)
+                        visible_markers_idx.append(marker[0])
                 if len(visible_markers_Br_Co) > 0:
-                    R_B_Co = velmautils.meanOrientation(visible_markers_Br_Co, weights=visible_markers_weights_ori)[1]
-                    p_B_Co = velmautils.meanPosition(visible_markers_Br_Co, weights=visible_markers_weights_pos)
-#                    p_B_Co = PyKDL.Vector()
-#                    for T_B_Co in visible_markers_Br_Co:
-#                        p_B_Co += T_B_Co.p
-#                    p_B_Co *= 1.0/float(len(visible_markers_Br_Co))
-                    obj.updatePose( PyKDL.Frame(copy.deepcopy(R_B_Co.M), copy.deepcopy(p_B_Co)) )
-                    self.openrave.updatePose(obj.name, T_Br_Co)
+#                    if obj.name == "object":
+#                        print "vis: %s"%(visible_markers_idx)
+#                        print "w_o: %s"%(visible_markers_weights_ori)
+#                        print "w_p: %s"%(visible_markers_weights_pos)
+
+                    # first calculate mean pose without weights
+                    R_B_Co = velmautils.meanOrientation(visible_markers_Br_Co)[1]
+                    p_B_Co = velmautils.meanPosition(visible_markers_Br_Co)
+                    T_B_Co = PyKDL.Frame(copy.deepcopy(R_B_Co.M), copy.deepcopy(p_B_Co))
+                    distances = []
+                    for m_idx in range(0, len(visible_markers_Br_Co)):
+                        diff = PyKDL.diff(T_B_Co, visible_markers_Br_Co[m_idx])
+                        distances.append( [diff, m_idx] )
+                    Br_Co_list = []
+                    weights_ori = []
+                    weights_pos = []
+                    for d in distances:
+                        if d[0].vel.Norm() > 0.04 or d[0].rot.Norm() > 15.0/180.0*math.pi:
+                            continue
+                        Br_Co_list.append( visible_markers_Br_Co[d[1]] )
+                        weights_ori.append( visible_markers_weights_ori[d[1]] )
+                        weights_pos.append( visible_markers_weights_pos[d[1]] )
+
+                    if len(Br_Co_list) > 0:
+                        R_B_Co = velmautils.meanOrientation(Br_Co_list, weights=weights_ori)[1]
+                        p_B_Co = velmautils.meanPosition(Br_Co_list, weights=weights_pos)
+                        obj.updatePose( PyKDL.Frame(copy.deepcopy(R_B_Co.M), copy.deepcopy(p_B_Co)) )
+                        self.openrave.updatePose(obj.name, T_Br_Co)
 
             index += 1
             if index >= 100:
@@ -257,10 +279,11 @@ Class for grasp learning.
         obj_wall_right = grip.GraspableObject("wall_right", "box", [3.0,0.2,3.0])
         obj_ceiling = grip.GraspableObject("ceiling", "box", [3.0,3.0,0.2])
 
-        obj_cbeam = grip.GraspableObject("cbeam", "cbeam", [0.1, 0.1, 0.2, 0.02])
+#        obj_cbeam = grip.GraspableObject("cbeam", "cbeam", [0.1, 0.1, 0.2, 0.02])
 
-        obj_model = "small_box"
+#        obj_model = "small_box"
 #        obj_model = "big_box"
+        obj_model = "cbeam"
         if obj_model == "small_box":
             obj_grasp = grip.GraspableObject("object", "box", [0.213, 0.056, 0.063])
             obj_grasp_frames = [
@@ -286,7 +309,6 @@ Class for grasp learning.
             for marker in obj_grasp_frames:
                 T_M32_Mi = marker[1]
                 obj_grasp.addMarker(marker[0], T_Co_M32 * T_M32_Mi)
-
         elif obj_model == "big_box":
             obj_grasp = grip.GraspableObject("object", "box", [0.354, 0.060, 0.060])
             obj_grasp_frames = [
@@ -312,8 +334,27 @@ Class for grasp learning.
             for marker in obj_grasp_frames:
                 T_M18_Mi = marker[1]
                 obj_grasp.addMarker(marker[0], T_Co_M18 * T_M18_Mi)
+        elif obj_model == "cbeam":
+            obj_grasp = grip.GraspableObject("object", "cbeam", [0.197, 0.151, 0.065, 0.018])
+            obj_grasp_frames = [
+            [46, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0))],
+            [47, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00211977224419,0.00133104595822,-0.00433238039783,0.999987482603),PyKDL.Vector(-0.0995553679408,-0.000651966932258,0.000444468330964))],
+            [48, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.705539374795,0.00129956423061,-0.708394191186,0.0197527628665),PyKDL.Vector(0.0433256677966,0.00212664651843,-0.116482343501))],
+            [49, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.704707757517,-0.00628228374428,-0.709255128279,0.0174548680028),PyKDL.Vector(0.0412709849952,0.000494665961165,-0.0338667341872))],
+            [50, PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0117276773848,0.706312439798,0.00558379104701,0.707781053891),PyKDL.Vector(-0.131246837996,-0.00469319026484,-0.0943814089463))],
+            [51, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.710112841604,0.00963407546503,-0.703895468304,0.013345653983),PyKDL.Vector(-0.149984963191,-0.00300459973807,-0.0370193446712))],
+            [52, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.704691425649,0.00497982940017,-0.709159595229,0.0218601100464),PyKDL.Vector(-0.15277553848,-0.00431480401095,-0.120995842686))],
+            [53, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00984066000086,-0.999945658681,0.00299307949816,0.00169781765667),PyKDL.Vector(-0.0132269965227,-0.00110379001368,-0.0274175040768))],
+            [54, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.00154140261629,0.999633307109,-0.00751679824708,0.0259686953912),PyKDL.Vector(-0.0974091549673,-0.000670004842722,-0.0319416169884))],
+            [55, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0195903374145,-0.713404165076,0.00273342374532,0.700473585745),PyKDL.Vector(0.0250633176495,-0.00356911439713,-0.0811403242495))],
+            ]
+            T_M46_Co = PyKDL.Frame(PyKDL.Vector(-0.057,0,-0.151/2.0)) * PyKDL.Frame(PyKDL.Rotation.RotX(-90.0/180.0*math.pi)) * PyKDL.Frame(PyKDL.Rotation.RotZ(90.0/180.0*math.pi))
+            T_Co_M46 = T_M46_Co.Inverse()
+            for marker in obj_grasp_frames:
+                T_M46_Mi = marker[1]
+                obj_grasp.addMarker(marker[0], T_Co_M46 * T_M46_Mi)
 
-        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]#, obj_cbeam]
+        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]
 
         if False:
             grip.gripUnitTest(obj_grasp)
@@ -365,9 +406,6 @@ Class for grasp learning.
             velmautils.sampleMeshUnitTest(vertices, indices, self.pub_marker)
 
         self.velma = None
-        self.allowUpdateObjects()
-        # start thread for updating objects' positions in openrave
-        thread.start_new_thread(self.poseUpdaterThread, (None,1))
 
         if simulation_only:
             # create the robot interface for simulation
@@ -377,6 +415,11 @@ Class for grasp learning.
             velma = Velma()
 
         self.velma = velma
+
+        self.allowUpdateObjects()
+        # start thread for updating objects' positions in openrave
+        thread.start_new_thread(self.poseUpdaterThread, (None,1))
+
         self.openrave.addRobotInterface(velma)
 
         velma.updateTransformations()
@@ -500,7 +543,7 @@ Class for grasp learning.
 
             velma.updateTransformations()
             velma.updateAndMoveTool( velma.T_W_E, 1.0 )
-            if velma.checkStopCondition(1.0):
+            if velma.checkStopCondition(2.0):
                 exit(0)
 
             raw_input("Press Enter to continue...")
@@ -518,6 +561,8 @@ Class for grasp learning.
             rospy.sleep(1.0)
 
         sim_grips = []
+
+        self.disallowUpdateObjects()
 
         vertices, faces = self.openrave.getMesh("object")
         com_pt = velmautils.generateComSamples(vertices, faces, 2000)
@@ -953,10 +998,10 @@ Class for grasp learning.
             self.allowUpdateObjects()
 
             # start with very low stiffness
-            print "setting stiffness to very low value"
-            velma.moveImpedance(velma.k_error, 0.5)
-            if velma.checkStopCondition(0.5):
-                exit(0)
+#            print "setting stiffness to very low value"
+#            velma.moveImpedance(velma.k_error, 0.5)
+#            if velma.checkStopCondition(0.5):
+#                exit(0)
 
             print "checking the object pose after grip..."
             rospy.sleep(1.0)
@@ -978,6 +1023,7 @@ Class for grasp learning.
 #                print "fresh pose not available: %s"%(dur.to_sec())
 #                fresh_pose = False
 
+            self.switchToJoint(velma)
 
             # set the new orientation of tool
             velma.updateTransformations()
@@ -988,7 +1034,7 @@ Class for grasp learning.
             T_B_T_new = velmautils.alignRotationToVerticalAxis(T_B_T)
             R_B_T_new = PyKDL.Frame(copy.deepcopy(T_B_T_new.M))
             T_W_T_new = velma.T_B_W.Inverse() * T_B_T_new
-            velma.updateAndMoveTool(T_W_T_new, 10.0)
+            velma.updateAndMoveToolOnly(T_W_T_new, 1.0)
 
             if abs((R_B_T_new * PyKDL.Vector(1,0,0)).z()) > 0.9:
                 k_lift = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(2.0, 200.0, 200.0))
@@ -1014,6 +1060,8 @@ Class for grasp learning.
             T_B_Wd = PyKDL.Frame(PyKDL.Vector(0,0,0.08)) * velma.T_B_W
             # save the initial position after lift up
             T_B_Eafterlift = T_B_Wd * velma.T_W_E
+
+            self.switchToCartesian(velma)
 
             duration = velma.getMovementTime(T_B_Wd, max_v_l=0.02, max_v_r=0.04)
             raw_input("Press Enter to move the robot in " + str(duration) + " s...")
