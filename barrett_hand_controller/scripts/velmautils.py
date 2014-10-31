@@ -143,6 +143,31 @@ class MarkerPublisher:
         self.publishVectorMarker(T*PyKDL.Vector(), T*PyKDL.Vector(0,0,scale), base_id+2, 0, 0, 1, frame, namespace)
         return base_id+3
 
+    def publishMeshMarker(self, mesh, base_id, r=1, g=0, b=0, scale=0.1, frame_id='torso_base', namespace='default', T=None):
+        m = MarkerArray()
+        marker = Marker()
+        marker.header.frame_id = frame_id
+        marker.header.stamp = rospy.Time.now()
+        marker.ns = namespace
+        marker.id = base_id
+        marker.type = Marker.TRIANGLE_LIST
+        marker.action = Marker.ADD
+        for f in mesh[1]:
+            marker.points.append(Point(mesh[0][f[0]][0], mesh[0][f[0]][1], mesh[0][f[0]][2]))
+            marker.points.append(Point(mesh[0][f[1]][0], mesh[0][f[1]][1], mesh[0][f[1]][2]))
+            marker.points.append(Point(mesh[0][f[2]][0], mesh[0][f[2]][1], mesh[0][f[2]][2]))
+        if T != None:
+            point = T.p
+            q = T.M.GetQuaternion()
+            marker.pose = Pose( Point(point.x(),point.y(),point.z()), Quaternion(q[0],q[1],q[2],q[3]) )
+        else:
+            marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
+        marker.scale = Vector3(1.0, 1.0, 1.0)
+        marker.color = ColorRGBA(r,g,b,0.5)
+        m.markers.append(marker)
+        self.pub_marker.publish(m)
+        return base_id+1
+
 def getAngle(v1, v2):
     return math.atan2((v1*v2).Norm(), PyKDL.dot(v1,v2))
 
@@ -582,7 +607,6 @@ def getQHull(points):
     for p in points:
         stdin_str += str(p[0]) + " " + str(p[1]) + " " + str(p[2]) + "\n"
 
-#    print "calling qconvex"
     p = Popen(['qconvex', 'Qt', 'i'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
     stdout_str = p.communicate(input=stdin_str)[0]
 
@@ -594,7 +618,26 @@ def getQHull(points):
     for idx in range(1, len(values), 3):
         faces.append([int(values[idx+0]), int(values[idx+1]), int(values[idx+2])])
 
-    return points, faces
+    # reduce the vertices set and remap indices
+    v_map = {}
+    v_idx = 0
+    vertices = []
+    faces_new = []
+    for f in faces:
+        face_new = []
+        for i in range(0, 3):
+            if f[i] in v_map:
+                face_new.append(v_map[f[i]])
+            else:
+                v_map[f[i]] = v_idx
+                vertices.append(points[f[i]])
+                face_new.append(v_map[f[i]])
+                v_idx += 1
+        faces_new.append(face_new)
+    return vertices, faces_new
+
+def qhullDist(mesh1, mesh2):
+    return None
 
 def pointInMesh(vertices, faces, point):
     pos = 0

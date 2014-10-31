@@ -36,25 +36,66 @@
     <xacro:macro name="palm" params="prefix parent *origin">
 
         <link name="${prefix}_HandPalmLink" >
-        <inertial>
+          <inertial>
             <origin xyz="0.00035500 -0.00499005 0.04864979" />
             <mass value="0.63352875" />
             <inertia  ixx="0.00102103" ixy="0.00000775"  ixz="-0.00001230"
                                        iyy="0.00080944"  iyz="-0.00014417"
                                                          izz="0.00068788" />
-        </inertial>
-        <visual>
+          </inertial>
+          <visual>
             <origin xyz="0 0 0" rpy="${PI} 0 0" />
             <geometry>
                     <mesh filename="${homeDirectory}/meshes/HandPalmLink.dae"/>
             </geometry>
-        </visual>
-            <collision>
+          </visual>
+          <collision>
             <origin xyz="0 0 0" rpy="0 0 0" />
             <geometry>
-                    <mesh filename="${homeDirectory}/meshes/palm.stl"/>
+              <mesh filename="${homeDirectory}/meshes/palm.stl"/>
             </geometry>
-            </collision>
+          </collision>
+
+          <self_collision_checking>
+            <origin xyz="0 0 0.03" rpy="0 0 0"/>
+            <geometry>
+              <capsule radius="0.05" length="0.06"/>
+            </geometry>
+          </self_collision_checking>
+
+          <self_collision_checking>
+            <origin xyz="-0.05 0 -0.05" rpy="0 0.785375 0"/>
+            <geometry>
+              <capsule radius="0.05" length="0.06"/>
+            </geometry>
+          </self_collision_checking>
+
+          <self_collision_checking>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+            <geometry>
+              <convex>
+                <!-- fingers' base links -->
+                <point xyz="0.06 0 0" frame="${prefix}_HandFingerOneKnuckleOneLink"/>
+                <point xyz="0.06 0 0" frame="${prefix}_HandFingerTwoKnuckleOneLink"/>
+                <point xyz="0 -0.06 0.06" frame="${prefix}_HandPalmLink"/>
+
+                <!-- proximal fingers' links -->
+<!--                <point xyz="0 0 0" frame="${prefix}_HandFingerOneKnuckleTwoLink"/>
+                <point xyz="0 0 0" frame="${prefix}_HandFingerTwoKnuckleTwoLink"/>
+                <point xyz="0 0 0" frame="${prefix}_HandFingerThreeKnuckleTwoLink"/>
+-->
+                <!-- distal fingers' links -->
+                <point xyz="0 0 0" frame="${prefix}_HandFingerOneKnuckleThreeLink"/>
+                <point xyz="0 0 0" frame="${prefix}_HandFingerTwoKnuckleThreeLink"/>
+                <point xyz="0 0 0" frame="${prefix}_HandFingerThreeKnuckleThreeLink"/>
+
+                <point xyz="0.06 0 0" frame="${prefix}_HandFingerOneKnuckleThreeLink"/>
+                <point xyz="0.06 0 0" frame="${prefix}_HandFingerTwoKnuckleThreeLink"/>
+                <point xyz="0.06 0 0" frame="${prefix}_HandFingerThreeKnuckleThreeLink"/>
+              </convex>
+            </geometry>
+          </self_collision_checking>
+
         </link>
 
         <gazebo reference="${prefix}_HandPalmLink">
