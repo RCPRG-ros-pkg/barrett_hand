@@ -1,5 +1,0 @@
-<?xml version="1.0"?>
-<launch>
-  <!-- send two_lwr.urdf.xml to param server -->
-  <param name="robot_description" command="$(find xacro)/xacro.py '$(find barrett_hand_defs)/robots/barrett_hand.urdf.xml'" />
-</launch>
