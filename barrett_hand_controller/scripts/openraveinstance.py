@@ -497,20 +497,54 @@ class OpenraveInstance:
         col = link.GetCollisionData()
         return col.vertices, col.indices
 
-    def getFinalConfig(self, target_name, grasp):
+    def getFinalConfig(self, target_name, grasp, show=False):
         hand_config = None
         contacts = None
         self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
-            with self.env:
+            with self.gmodel[target_name].GripperVisibility(self.robot_rave.GetActiveManipulator()):
+#            with self.env:
                 try:
+#                    self.gmodel[target_name].setPreshape(grasp)
+#                    Tgrasp = self.gmodel[target_name].getGlobalGraspTransform(grasp,collisionfree=False)
+#                    Tdelta = np.dot(Tgrasp,np.linalg.inv(self.robot_rave.GetActiveManipulator().GetEndEffectorTransform()))
+#                    for link in self.robot_rave.GetActiveManipulator().GetChildLinks():
+#                        link.SetTransform(np.dot(Tdelta,link.GetTransform()))
+
                     contacts,finalconfig,mindist,volume = self.gmodel[target_name].runGraspFromTrans(grasp)
+#                    contacts,finalconfig,mindist,volume = self.gmodel[target_name].runGrasp(grasp)
                     hand_config = [
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerTwoKnuckleTwoJoint")],
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerThreeKnuckleTwoJoint")],
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleOneJoint")],
                     ]
+
+                    ind = self.robot_rave.GetActiveManipulator().GetGripperIndices()
+                    hand_config2 = [
+                    finalconfig[0][ind[0]],
+                    finalconfig[0][ind[1]],
+                    finalconfig[0][ind[2]],
+                    finalconfig[0][ind[3]],
+                    ]
+
+                    if show:
+                        self.robot_rave.SetTransform(np.dot(self.gmodel[target_name].getGlobalGraspTransform(grasp),np.dot(np.linalg.inv(self.robot_rave.GetActiveManipulator().GetEndEffectorTransform()),self.robot_rave.GetTransform())))
+
+#                        self.robot_rave.SetDOFValues([hand_config[3], hand_config[0], hand_config[1], hand_config[2]],self.robot_rave.GetActiveManipulator().GetGripperIndices())
+                        self.robot_rave.SetDOFValues([hand_config2[0], hand_config2[1], hand_config2[2], hand_config2[3]],self.robot_rave.GetActiveManipulator().GetGripperIndices())
+#                        self.robot_rave.SetDOFValues(grasp[self.graspindices.get('igrasppreshape')],self.manip.GetGripperIndices())
+
+                        self.env.UpdatePublishedBodies()
+                        raw_input('press any key to continue: ')
+
+#Tgrasp = self.getGlobalGraspTransform(grasp,collisionfree=collisionfree)
+#Tdelta = dot(Tgrasp,linalg.inv(self.manip.GetEndEffectorTransform())) for link in self.manip.GetChildLinks(): link.SetTransform(dot(Tdelta,link.GetTransform())) self.env.UpdatePublishedBodies() # wait while environment is locked? if delay is None: raw_input('press any key to continue: ') elif delay > 0: time.sleep(delay)
+
+
+
+
+
                 except planning_error,e:
                     print "getFinalConfig: planning error"
         self.robot_rave_update_lock.release()

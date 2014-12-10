@@ -38,6 +38,7 @@ import velmautils
 import itertools
 import dijkstra
 import operator
+import random
 
 class GraspableObject:
     def __init__(self, name, obj_type, size):
@@ -59,6 +60,11 @@ class GraspableObject:
 
     def isCBeam(self):
         if self.obj_type == "cbeam":
+            return True
+        return False
+
+    def isSphere(self):
+        if self.obj_type == "sphere":
             return True
         return False
 
@@ -266,6 +272,7 @@ def gripDist2(a, b):
             min_angles = angles
     return min_score, min_angles, None, None, None, None, None, None, None
 
+# this works
 def gripDist3(a, b):
     def estTransform(l1, l2):
         pos1_list = []
@@ -334,6 +341,223 @@ def gripDist3(a, b):
     score, angles = estTransform(fr_0, fr_1)
 
     return score, angles, None, None, None, None, None, None, None
+
+def gripDist4(a, b):
+    def estTransform(l1, l2):
+        pos1_list = []
+        n1_list = []
+        for f in l1:
+            pos1_list.append( f * PyKDL.Vector() )
+            n1_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        pos2_list = []
+        n2_list = []
+        for f in l2:
+            pos2_list.append( f * PyKDL.Vector() )
+            n2_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        pos2rot_list = []
+        n2rot_list = []
+        for f in l2:
+            pos2rot_list.append( f * PyKDL.Vector() )
+            n2rot_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+
+        torques1 = []
+        forces1 = []
+        for i in range(0, len(l1)):
+            n1_list[i].Normalize()
+            torques1.append(pos1_list[i] * n1_list[i])
+#            forces1.append(PyKDL.dot(pos1_list[i], n1_list[i]) / pos1_list[i].Norm() * pos1_list[i])
+#            forces1.append(PyKDL.dot(pos1_list[i], n1_list[i]) * pos1_list[i])
+            forces1.append(pos1_list[i])
+
+        torques2 = []
+        forces2 = []
+        for i in range(0, len(l2)):
+            n2_list[i].Normalize()
+            torques2.append(pos2_list[i] * n2_list[i])
+#            forces2.append(PyKDL.dot(pos2_list[i], n2_list[i]) / pos2_list[i].Norm() * pos2_list[i])
+#            forces2.append(PyKDL.dot(pos2_list[i], n2_list[i]) * pos2_list[i])
+            forces2.append(pos2_list[i])
+
+#        def getMinScore(p, p_list, n, n_list):
+        def getMinScore(t, t_list, f, f_list):
+            min_score = None
+            for i in range(0, len(f_list)):
+                t2 = t_list[i]
+                f2 = f_list[i]
+#                print "%s   %s"%((t-t2).Norm(), (f-f2).Norm())
+                score = 0.0*(t-t2).Norm() + 20.0*(f-f2).Norm()
+#                angle_score = 2.0*velmautils.getAngle(n,n2)/math.pi
+#                pos_score = 10.0*(p-p2).Norm()
+#                score = angle_score * angle_score + pos_score * pos_score
+#                score = pos_score + angle_score
+                if min_score == None or min_score > score:
+                    min_score = score
+            return math.sqrt(min_score)
+
+        def calc_R(xa, ya, za):
+            ret = []
+            t = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Frame(PyKDL.Rotation.RotX(za))
+
+            for i in range(0, len(l2)):
+                pos2rot_list[i] = t * pos2_list[i]
+                n2rot_list[i] = t * n2_list[i]
+
+            for i in range(0, len(l2)):
+                n2rot_list[i].Normalize()
+                torques2[i] = pos2rot_list[i] * n2rot_list[i]
+#                forces2[i] = PyKDL.dot(pos2rot_list[i], n2rot_list[i]) / pos2rot_list[i].Norm() * pos2rot_list[i]
+#                forces2[i] = PyKDL.dot(pos2rot_list[i], n2rot_list[i]) * pos2rot_list[i]
+                forces2[i] = pos2rot_list[i]
+
+            for i in range(0, len(l1)):
+                score = getMinScore(torques1[i], torques2, forces1[i], forces2)
+#                score = getMinScore(pos1_list[i], pos2rot_list, n1_list[i], n2rot_list)
+                ret.append(score)
+
+            for i in range(0, len(l2)):
+                score = getMinScore(torques2[i], torques1, forces2[i], forces1)
+#                score = getMinScore(pos2rot_list[i], pos1_list, n2rot_list[i], n1_list)
+                ret.append(score)
+
+            return np.array(ret)
+        def f_2(c):
+            Di = calc_R(*c)
+            return Di
+        def sumf_2(p):
+            return math.fsum(f_2(p)**2)
+
+#        angles_estimate = random.uniform(-math.pi*0.9, math.pi*0.9), random.uniform(-math.pi*0.9, math.pi*0.9), random.uniform(-math.pi*0.9, math.pi*0.9)
+        angles_estimate = 0.0, 0.0, 0.0
+        # least squares with constraints
+
+#        angles_2 = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0)
+
+        angles_2, fx, its, imode, smode = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0, full_output=True)
+        if imode != 0:
+            print smode
+
+        # least squares without constraints
+#        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
+
+#        return sumf_2(angles_2), angles_2
+        return fx, angles_2
+
+    fr_a = []
+    T_O_Com = PyKDL.Frame(a.grasped_object.com)
+    T_Com_O = T_O_Com.Inverse()
+    for T_O_C in a.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_a.append( T_Com_C )
+
+    fr_b = []
+    for T_O_C in b.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_b.append( T_Com_C )
+
+    score_min = None
+    angles_min = None
+
+    for i in range(0,1):
+        score, angles = estTransform(fr_a, fr_b)
+
+        if score_min == None or score_min < score:
+            score_min = score
+            angles_min = angles
+
+    return score_min, angles_min, None, None, None, None, None, None, None
+
+def gripDist5(a, b):
+    def estTransform(l1, l2):
+        pos1_list = []
+        n1_list = []
+        for f in l1:
+            pos1_list.append( f * PyKDL.Vector() )
+            n1_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        pos2_list = []
+        n2_list = []
+        for f in l2:
+            pos2_list.append( f * PyKDL.Vector() )
+            n2_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        pos2rot_list = []
+        n2rot_list = []
+        for f in l2:
+            pos2rot_list.append( f * PyKDL.Vector() )
+            n2rot_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+
+        def getMinScore(p, p_list, n, n_list):
+            min_score = None
+            for i in range(0, len(p_list)):
+                p2 = p_list[i]
+                n2 = n_list[i]
+#                print " %s  %s"%((p-p2).Norm(), 0.5*(n - n2).Norm()*(p.Norm()+p2.Norm()))
+#                score = 4.0*((p-p2).Norm()**2) + (((p.Norm() * n) - (p2.Norm() * n2)).Norm()**2)
+                score = 8.0*((p-p2).Norm()**2) + ((0.5*(n - n2).Norm()*(p.Norm()+p2.Norm()))**2)
+                if min_score == None or min_score > score:
+                    min_score = score
+            return math.sqrt(min_score)
+
+        def calc_R(xa, ya, za):
+            ret = []
+            t = PyKDL.Frame(PyKDL.Rotation.RotX(xa)) * PyKDL.Frame(PyKDL.Rotation.RotY(ya)) * PyKDL.Frame(PyKDL.Rotation.RotX(za))
+
+            for i in range(0, len(l2)):
+                pos2rot_list[i] = t * pos2_list[i]
+                n2rot_list[i] = t * n2_list[i]
+
+            for i in range(0, len(l1)):
+                score = getMinScore(pos1_list[i], pos2rot_list, n1_list[i], n2rot_list)
+                ret.append(score)
+
+            for i in range(0, len(l2)):
+                score = getMinScore(pos2rot_list[i], pos1_list, n2rot_list[i], n1_list)
+                ret.append(score)
+
+            return np.array(ret)
+        def f_2(c):
+            Di = calc_R(*c)
+            return Di
+        def sumf_2(p):
+            return math.fsum(f_2(p))#**2)
+
+        angles_estimate = random.uniform(-math.pi*0.9, math.pi*0.9), random.uniform(-math.pi*0.9, math.pi*0.9), random.uniform(-math.pi*0.9, math.pi*0.9)
+#        angles_estimate = 0.0, 0.0, 0.0
+        # least squares with constraints
+
+#        angles_2 = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0)
+
+        angles_2, fx, its, imode, smode = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0, full_output=True)
+        if imode != 0:
+            print smode
+
+        # least squares without constraints
+#        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
+
+#        return sumf_2(angles_2), angles_2
+        return fx, angles_2
+
+    fr_a = []
+    T_O_Com = PyKDL.Frame(a.grasped_object.com)
+    T_Com_O = T_O_Com.Inverse()
+    for T_O_C in a.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_a.append( T_Com_C )
+
+    fr_b = []
+    for T_O_C in b.contacts:
+        T_Com_C = T_Com_O * T_O_C
+        fr_b.append( T_Com_C )
+
+    score_min = None
+    angles_min = None
+
+    for i in range(0,5):
+        score, angles = estTransform(fr_a, fr_b)
+
+        if score_min == None or score_min < score:
+            score_min = score
+            angles_min = angles
+
+    return score_min, angles_min, None, None, None, None, None, None, None
 
 def gripUnitTestVisual(sim_grips, openrave, object_name):
     for idx in range(0, len(sim_grips), 10):
