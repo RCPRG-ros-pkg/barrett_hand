@@ -130,8 +130,8 @@ class Grip:
         self.count_visibility_problem = 0
         self.visibility_problem_poses.append(T_Br_O)
 
-    def addContact(self, T_O_Co):
-        self.contacts.append(copy.deepcopy(T_O_Co))
+    def addContact(self, T_O_Co, finger_idx):
+        self.contacts.append([finger_idx, copy.deepcopy(T_O_Co)])
 
     def success(self):
         self.successful = True
@@ -139,16 +139,16 @@ class Grip:
     def serializePrint(self):
         print "grips_db.append( Grip(obj_grasp) )"
         for c in self.contacts:
-            q = c.M.GetQuaternion()
-            print "grips_db[-1].addContact( PyKDL.Frame(PyKDL.Rotation.Quaternion(%s,%s,%s,%s),PyKDL.Vector(%s,%s,%s)) )"%(q[0], q[1], q[2], q[3], c.p.x(), c.p.y(), c.p.z())
+            q = c[1].M.GetQuaternion()
+            print "grips_db[-1].addContact( PyKDL.Frame(PyKDL.Rotation.Quaternion(%s,%s,%s,%s),PyKDL.Vector(%s,%s,%s)) )"%(q[0], q[1], q[2], q[3], c[1].p.x(), c[1].p.y(), c[1].p.z())
         if self.successful:
             print "grips_db[-1].success()"
 
     def toStr(self):
         line = str(self.successful) + ' ' + str(len(self.contacts))
         for c in self.contacts:
-            q = c.M.GetQuaternion()
-            line += ' ' + str(c.p.x()) + ' ' + str(c.p.y()) + ' ' + str(c.p.z())
+            q = c[1].M.GetQuaternion()
+            line += ' ' + str(c[0]) + ' ' + str(c[1].p.x()) + ' ' + str(c[1].p.y()) + ' ' + str(c[1].p.z())
             line += ' ' + str(q[0]) + ' ' + str(q[1]) + ' ' + str(q[2]) + ' ' + str(q[3])
         return line
 
@@ -158,14 +158,15 @@ class Grip:
         contacts_count = int(tab[1])
         self.contacts = []
         for idx in range(0, contacts_count):
-            px = float(tab[2 + idx*7 + 0])
-            py = float(tab[2 + idx*7 + 1])
-            pz = float(tab[2 + idx*7 + 2])
-            qx = float(tab[2 + idx*7 + 3])
-            qy = float(tab[2 + idx*7 + 4])
-            qz = float(tab[2 + idx*7 + 5])
-            qw = float(tab[2 + idx*7 + 6])
-            self.contacts.append(PyKDL.Frame(PyKDL.Rotation.Quaternion(qx, qy, qz, qw), PyKDL.Vector(px,py,pz)))
+            f_idx = int(tab[2 + idx*8 + 0])
+            px = float(tab[2 + idx*8 + 1])
+            py = float(tab[2 + idx*8 + 2])
+            pz = float(tab[2 + idx*8 + 3])
+            qx = float(tab[2 + idx*8 + 4])
+            qy = float(tab[2 + idx*8 + 5])
+            qz = float(tab[2 + idx*8 + 6])
+            qw = float(tab[2 + idx*8 + 7])
+            self.contacts.append([f_idx, PyKDL.Frame(PyKDL.Rotation.Quaternion(qx, qy, qz, qw), PyKDL.Vector(px,py,pz))])
 
 def gripDist_new(a, b):
     fr_a = []
@@ -484,17 +485,13 @@ def gripDist5(a, b):
             pos2rot_list.append( f * PyKDL.Vector() )
             n2rot_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
 
-        def getMinScore(p, p_list, n, n_list):
+        def getScore(p1, p2, n1, n2):
             min_score = None
-            for i in range(0, len(p_list)):
-                p2 = p_list[i]
-                n2 = n_list[i]
-#                print " %s  %s"%((p-p2).Norm(), 0.5*(n - n2).Norm()*(p.Norm()+p2.Norm()))
-#                score = 4.0*((p-p2).Norm()**2) + (((p.Norm() * n) - (p2.Norm() * n2)).Norm()**2)
-                score = 8.0*((p-p2).Norm()**2) + ((0.5*(n - n2).Norm()*(p.Norm()+p2.Norm()))**2)
-                if min_score == None or min_score > score:
-                    min_score = score
-            return math.sqrt(min_score)
+#            score = velmautils.getAngle(n1,n2)/math.pi + velmautils.getAngle(p1 * n1, p2 * n2)/math.pi
+           
+#            score = ((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)
+            score = 4*((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)
+            return score
 
         def calc_R(xa, ya, za):
             ret = []
@@ -505,12 +502,12 @@ def gripDist5(a, b):
                 n2rot_list[i] = t * n2_list[i]
 
             for i in range(0, len(l1)):
-                score = getMinScore(pos1_list[i], pos2rot_list, n1_list[i], n2rot_list)
+                score = getScore(pos1_list[i], pos2rot_list[i], n1_list[i], n2rot_list[i])
                 ret.append(score)
 
-            for i in range(0, len(l2)):
-                score = getMinScore(pos2rot_list[i], pos1_list, n2rot_list[i], n1_list)
-                ret.append(score)
+#            for i in range(0, len(l2)):
+#                score = getMinScore(pos2rot_list[i], pos1_list, n2rot_list[i], n1_list)
+#                ret.append(score)
 
             return np.array(ret)
         def f_2(c):
@@ -535,22 +532,24 @@ def gripDist5(a, b):
 #        return sumf_2(angles_2), angles_2
         return fx, angles_2
 
-    fr_a = []
+    fr_a = [None, None, None]
     T_O_Com = PyKDL.Frame(a.grasped_object.com)
     T_Com_O = T_O_Com.Inverse()
-    for T_O_C in a.contacts:
+    for c in a.contacts:
+        T_O_C = c[1]
         T_Com_C = T_Com_O * T_O_C
-        fr_a.append( T_Com_C )
+        fr_a[c[0]] = T_Com_C
 
-    fr_b = []
-    for T_O_C in b.contacts:
+    fr_b = [None, None, None]
+    for c in b.contacts:
+        T_O_C = c[1]
         T_Com_C = T_Com_O * T_O_C
-        fr_b.append( T_Com_C )
+        fr_b[c[0]] = T_Com_C
 
     score_min = None
     angles_min = None
 
-    for i in range(0,5):
+    for i in range(0,1):
         score, angles = estTransform(fr_a, fr_b)
 
         if score_min == None or score_min < score:

@@ -475,6 +475,7 @@ def sampleMesh_old(vertices, indices, sample_dist, pt_list, radius):
         return points_ret
 
 def estPlane(points_in):
+#    print "estPlane: %s"%(len(points_in))
     mean_pt = PyKDL.Vector()
     for p in points_in:
         mean_pt += p

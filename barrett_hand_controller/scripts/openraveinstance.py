@@ -347,11 +347,14 @@ class OpenraveInstance:
             self.basemanip.prob.SendCommand('SetMinimumGoalPaths %d'%self.minimumgoalpaths)
 
             # add torso
-            self.addBox("torso_box", 0.3, 1.0, 0.25)
-            self.obj_torso_box = self.env.GetKinBody("torso_box")
+#            self.addBox("torso_box", 0.3, 1.0, 0.25)
+#            self.obj_torso_box = self.env.GetKinBody("torso_box")
+            self.obj_torso_box = None
             # add head
-            self.addSphere("head_sphere", 0.4)
-            self.obj_head_sphere = self.env.GetKinBody("head_sphere")
+#            self.addSphere("head_sphere", 0.4)
+#            self.obj_head_sphere = self.env.GetKinBody("head_sphere")
+            self.obj_head_sphere = None
+
             while not rospy.is_shutdown():
                 self.rolling = True
                 if self.robot != None:
@@ -362,8 +365,10 @@ class OpenraveInstance:
 
                     # update head and torso
                     T_World_T2 = self.getLinkPose("torso_link2")
-                    self.obj_torso_box.SetTransform(self.KDLToOpenrave(T_World_T2 * PyKDL.Frame(PyKDL.Vector(0, -0.40, 0))))
-                    self.obj_head_sphere.SetTransform(self.KDLToOpenrave(T_World_T2 * PyKDL.Frame(PyKDL.Vector(0.1, 0.57, 0))))
+                    if self.obj_torso_box != None:
+                        self.obj_torso_box.SetTransform(self.KDLToOpenrave(T_World_T2 * PyKDL.Frame(PyKDL.Vector(0, -0.40, 0))))
+                    if self.obj_head_sphere != None:
+                        self.obj_head_sphere.SetTransform(self.KDLToOpenrave(T_World_T2 * PyKDL.Frame(PyKDL.Vector(0.1, 0.57, 0))))
                 rospy.sleep(0.1)
         finally:
             self.rolling = False
@@ -389,20 +394,22 @@ class OpenraveInstance:
             self.gmodel[target_name] = databases.grasping.GraspingModel(self.robot_rave,target)
             if force_load or not self.gmodel[target_name].load():
                 print 'generating grasping model (one time computation)'
-                self.gmodel[target_name].init(friction=1.0,avoidlinks=[])
+                self.gmodel[target_name].init(friction=0.9,avoidlinks=[])
                 print 'grasping model initialised'
                 print 'computing approach rays...'
                 approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03,normalanglerange=0.0) #201, directiondelta=0.2)
-#                print approachrays.shape
+#                print approachrays3.shape
+#                print approachrays3[0]
+#                exit(0)
 #                approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03, normalanglerange=15.0/180.0*math.pi, directiondelta=14.0/180.0*math.pi)
 #                approachrays3 = np.concatenate((approachrays, approachrays2), axis=0)
-                print approachrays3.shape
+#                print approachrays3.shape
                 print 'generating grasps...'
 # possible arguments for generate:
 # preshapes=None, standoffs=None, rolls=None, approachrays=None, graspingnoise=None, forceclosure=True, forceclosurethreshold=1.0000000000000001e-09, checkgraspfn=None, manipulatordirections=None, translationstepmult=None, finestep=None, friction=None, avoidlinks=None, plannername=None, boxdelta=None, spheredelta=None, normalanglerange=None
 # http://openrave.org/docs/latest_stable/openravepy/databases.grasping/#openravepy.databases.grasping.GraspingModel.generatepcg
-#                self.gmodel[target_name].generate(approachrays=approachrays, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
-                self.gmodel[target_name].generate(approachrays=approachrays3, forceclosure=False, standoffs=[0.05, 0.06, 0.07])
+#                self.gmodel[target_name].generate(approachrays=approachrays3, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
+                self.gmodel[target_name].generate(approachrays=approachrays3, friction=0.9, forceclosure=True, standoffs=[0.04, 0.06, 0.07])
                 self.gmodel[target_name].save()
 
     def getGraspsCount(self, target_name):
@@ -546,7 +553,8 @@ class OpenraveInstance:
 
 
                 except planning_error,e:
-                    print "getFinalConfig: planning error"
+                    print "getFinalConfig: planning error:"
+                    print e
         self.robot_rave_update_lock.release()
         if contacts == None:
             contacts_ret = None

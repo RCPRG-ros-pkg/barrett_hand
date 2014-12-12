@@ -31,8 +31,8 @@ roslib.load_manifest('barrett_hand_controller')
 import rospy
 import tf
 
-import ar_track_alvar.msg
-from ar_track_alvar.msg import *
+#import ar_track_alvar.msg
+#from ar_track_alvar.msg import *
 from std_msgs.msg import *
 from sensor_msgs.msg import *
 from geometry_msgs.msg import *
@@ -75,7 +75,7 @@ from multiprocessing import Process, Queue, Lock
 # N - the end point of finger's nail
 # J - jar marker frame (jar cap)
 
-def publishSinglePointMarker(pt, i, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), orientation=Quaternion(0,0,0,1)):
+def publishSinglePointMarker(pt, i, r=1, g=0, b=0, a=0.5, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), orientation=Quaternion(0,0,0,1)):
     m = MarkerArray()
     marker = Marker()
     marker.header.frame_id = frame_id
@@ -86,7 +86,7 @@ def publishSinglePointMarker(pt, i, r=1, g=0, b=0, namespace='default', frame_id
     marker.action = 0
     marker.pose = Pose( Point(pt.x(),pt.y(),pt.z()), orientation )
     marker.scale = scale
-    marker.color = ColorRGBA(r,g,b,0.5)
+    marker.color = ColorRGBA(r,g,b,a)
     m.markers.append(marker)
     pub_marker.publish(m)
 
@@ -468,19 +468,44 @@ if __name__ == '__main__':
 
     # test: draw the workspace
     if True:
+        print "ok 1"
         rospy.init_node('velma_ik_draw_workspace')
         global pub_marker
         pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
         rospy.sleep(1)
 
-        velma = Velma()
-        velma.updateTransformations()
-        T_T2_L2 = velma.T_T2_B * velma.T_B_L2
+        r = 147.0/256.0
+        g = 80.0/256.0
+        b = 0.0/256.0
+        table_pos = PyKDL.Vector(0.7,0,0.8)
+        i = 0
+        publishSinglePointMarker(table_pos, i, r=r, g=g, b=b, a=1, namespace='default', frame_id="world", m_type=Marker.CUBE, scale=Vector3(0.8, 1.4, 0.05))
+        i += 1
+        publishSinglePointMarker(table_pos+PyKDL.Vector(0.35,0.65,-0.4), i, r=r, g=g, b=b, a=1, namespace='default', frame_id="world", m_type=Marker.CUBE, scale=Vector3(0.05, 0.05, 0.75))
+        i += 1
+        publishSinglePointMarker(table_pos+PyKDL.Vector(-0.35,0.65,-0.4), i, r=r, g=g, b=b, a=1, namespace='default', frame_id="world", m_type=Marker.CUBE, scale=Vector3(0.05, 0.05, 0.75))
+        i += 1
+        publishSinglePointMarker(table_pos+PyKDL.Vector(-0.35,-0.65,-0.4), i, r=r, g=g, b=b, a=1, namespace='default', frame_id="world", m_type=Marker.CUBE, scale=Vector3(0.05, 0.05, 0.75))
+        i += 1
+        publishSinglePointMarker(table_pos+PyKDL.Vector(0.35,-0.65,-0.4), i, r=r, g=g, b=b, a=1, namespace='default', frame_id="world", m_type=Marker.CUBE, scale=Vector3(0.05, 0.05, 0.75))
+        i += 1
+
+        print "ok 2"
+
+        listener = tf.TransformListener();
+        rospy.sleep(1)
+
+        pose = listener.lookupTransform('torso_base', 'torso_link2', rospy.Time(0))
+        T_B_T2 = pm.fromTf(pose)
+
+        pose = listener.lookupTransform('torso_link2', 'right_arm_2_link', rospy.Time(0))
+        T_T2_L2 = pm.fromTf(pose)
+
         pt_c_in_T2 = T_T2_L2 * PyKDL.Vector()
         max_dist = 0.0
         min_dist = 10000.0
-        i = 0
         x_i = 0
+        print "len: %s %s %s"%(len(plut.x_set), len(plut.y_set), len(plut.z_set))
         for x in plut.x_set:
             if rospy.is_shutdown():
                 break
@@ -490,6 +515,9 @@ if __name__ == '__main__':
                     break
                 z_i = 0
                 for z in plut.z_set:
+                    pt_B = T_B_T2 * PyKDL.Vector(x,y,z)
+                    if pt_B.z() > 1.2:
+                        continue
                     l = len(plut.lookup_table[x_i][y_i][z_i])
                     if l > 0:
                         dist = (pt_c_in_T2.x()-x)*(pt_c_in_T2.x()-x) + (pt_c_in_T2.y()-y)*(pt_c_in_T2.y()-y) + (pt_c_in_T2.z()-z)*(pt_c_in_T2.z()-z)
@@ -497,8 +525,10 @@ if __name__ == '__main__':
                             max_dist = dist
                         if dist < min_dist:
                             min_dist = dist
-                        size = float(l)/60.0
-                        publishSinglePointMarker(PyKDL.Vector(x,y,z), i, r=1.0, g=1*size, b=1*size, namespace='default', frame_id="torso_link2", m_type=Marker.SPHERE, scale=Vector3(0.05*size, 0.05*size, 0.05*size))#, scale=Vector3(0.05*size, 0.05*size, 0.05*size))
+                        size = float(l)/40.0
+                        publishSinglePointMarker(PyKDL.Vector(x,y,z), i, r=1.0, g=1*size, b=1*size, a=1, namespace='default', frame_id="torso_link2", m_type=Marker.SPHERE, scale=Vector3(0.05*size, 0.05*size, 0.05*size))#, scale=Vector3(0.05*size, 0.05*size, 0.05*size))
+                        i += 1
+                        publishSinglePointMarker(PyKDL.Vector(x,y,-z), i, r=1.0, g=1*size, b=1*size, a=1, namespace='default', frame_id="torso_link2", m_type=Marker.SPHERE, scale=Vector3(0.05*size, 0.05*size, 0.05*size))#, scale=Vector3(0.05*size, 0.05*size, 0.05*size))
                         i += 1
                     z_i += 1
                 y_i += 1
@@ -514,7 +544,7 @@ if __name__ == '__main__':
     if False:
         rospy.init_node('velma_ik_test3')
         global pub_marker
-        pub_marker = rospy.Publisher('/door_markers', MarkerArray)
+        pub_marker = rospy.Publisher('/velma_markers', MarkerArray)
         rospy.sleep(1)
 
         velma = Velma()
@@ -541,7 +571,7 @@ if __name__ == '__main__':
         exit(0)
 
     # discretize the space
-    if True:
+    if False:
         rospy.init_node('velma_ik_solver')
         global pub_marker
         pub_marker = rospy.Publisher('/door_markers', MarkerArray)

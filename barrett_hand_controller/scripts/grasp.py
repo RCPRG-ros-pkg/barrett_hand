@@ -247,7 +247,7 @@ Class for grasp learning.
             rospy.sleep(1)
             exit(0)
 
-        simulation_only = False
+        simulation_only = True
         if simulation_only:
             time_mult = 5.0
         else:
@@ -283,7 +283,7 @@ Class for grasp learning.
 
 #        obj_model = "small_box"
 #        obj_model = "big_box"
-        obj_model = "cbeam"
+        obj_model = "big_box"
         if obj_model == "small_box":
             obj_grasp = grip.GraspableObject("object", "box", [0.213, 0.056, 0.063])
             obj_grasp_frames = [
