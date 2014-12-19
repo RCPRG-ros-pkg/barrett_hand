@@ -284,10 +284,12 @@ Class for grasp learning.
 
 #        obj_cbeam = grip.GraspableObject("cbeam", "cbeam", [0.1, 0.1, 0.2, 0.02])
 
-        obj_model = "bigger_box"
+#        obj_model = "bigger_box"
 #        obj_model = "small_box"
-#        obj_model = "big_box"
+        obj_model = "big_box"
 #        obj_model = "sphere"
+#        obj_model = "cbeam"
+#        obj_model = "cbeam2"
         if obj_model == "small_box":
             obj_grasp = grip.GraspableObject("object", "box", [0.213, 0.056, 0.063])
             obj_grasp_frames = [
@@ -363,6 +365,9 @@ Class for grasp learning.
             for marker in obj_grasp_frames:
                 T_M46_Mi = marker[1]
                 obj_grasp.addMarker(marker[0], T_Co_M46 * T_M46_Mi)
+        elif obj_model == "cbeam2":
+            obj_grasp = grip.GraspableObject("object", "cbeam", [0.2, 0.2, 0.1, 0.04])
+            obj_grasp.addMarker(19, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0)))
 
 #        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]
         self.objects = [obj_grasp]
@@ -606,7 +611,7 @@ Class for grasp learning.
                     print "index: %s"%(idx)
                 sim_grips.append(None)
                 grasp = self.openrave.getGrasp("object", idx)
-                q, contacts = self.openrave.getFinalConfig("object", grasp)
+                q, contacts, normals = self.openrave.getFinalConfig("object", grasp)
                 if contacts == None:
                     contacts = []
 #                print "grasp_idx: %s   contacts: %s"%(idx, len(contacts))
@@ -643,12 +648,44 @@ Class for grasp learning.
                     continue
 
                 centers = []
+#                center_normals = []
                 for g in contacts_groups:
                     center = PyKDL.Vector()
+#                    normal = PyKDL.Vector()
                     for c in g:
                         center += T_B_O.Inverse() * contacts[c]
+#                        normal += T_B_O.Inverse() * normals[c]
                     center *= 1.0/len(g)
                     centers.append(center)
+#                    normal.Normalize()
+#                    center_normals.append(normal)
+
+#                for i in range(0, len(centers)):
+#                        c = centers[i]
+#                        nz = center_normals[i]
+#                        # create frame for contact
+#                        if abs(nz.z()) < 0.8:
+#                            nx = PyKDL.Vector(0,0,1)
+#                        elif abs(nz.y()) < 0.8:
+#                            nx = PyKDL.Vector(0,1,0)
+#                        else:
+#                            nx = PyKDL.Vector(1,0,0)
+#                        ny = nz * nx
+#                        nx = ny * nz
+#                        fr = PyKDL.Frame( PyKDL.Rotation(nx, ny, nz), c)
+#                        # get the finger in contact index
+#                        P_F = PyKDL.Vector(0.0510813, -0.0071884, 0.0)
+#                        finger_idx_min = -1
+#                        d_min = 1000000.0
+#                        fr_B_p = T_B_O * fr * PyKDL.Vector(0,0,0)
+#                        for finger_idx in range(0,3):
+#                            pt_B = T_B_E * velma.get_T_E_Fd( finger_idx, q[finger_idx], q[3]) * P_F
+#                            d = (fr_B_p - pt_B).Norm()
+#                            if d < d_min:
+#                                d_min = d
+#                                finger_idx_min = finger_idx
+#                        gr.addContact(fr, finger_idx_min)
+                    
 
                 for c in centers:
                         points = velmautils.sampleMesh(vertices, faces, 0.003, [c], 0.005)
@@ -669,14 +706,11 @@ Class for grasp learning.
                             if d < d_min:
                                 d_min = d
                                 finger_idx_min = finger_idx
-#                        print "finger_idx_min: %s"%(finger_idx_min)
                         n_B = PyKDL.Frame( copy.deepcopy((T_B_E * velma.get_T_E_Fd( finger_idx_min, q[finger_idx_min], q[3])).M) ) * PyKDL.Vector(1,-1,0)
                         if PyKDL.dot(n_B, fr_B_z) < 0:
                             fr = fr * PyKDL.Frame(PyKDL.Rotation.RotX(math.pi))
                         # add the contact to the grip description
                         gr.addContact(fr, finger_idx_min)
-
-#                print "%s"%(idx)
 
                 valid_grasps += 1
                 if len(gr.contacts) == 3:

@@ -394,7 +394,7 @@ class OpenraveInstance:
             self.gmodel[target_name] = databases.grasping.GraspingModel(self.robot_rave,target)
             if force_load or not self.gmodel[target_name].load():
                 print 'generating grasping model (one time computation)'
-                self.gmodel[target_name].init(friction=0.9,avoidlinks=[])
+                self.gmodel[target_name].init(friction=0.6,avoidlinks=[])
                 print 'grasping model initialised'
                 print 'computing approach rays...'
                 approachrays3 = self.gmodel[target_name].computeBoxApproachRays(delta=0.03,normalanglerange=0.0) #201, directiondelta=0.2)
@@ -409,7 +409,7 @@ class OpenraveInstance:
 # preshapes=None, standoffs=None, rolls=None, approachrays=None, graspingnoise=None, forceclosure=True, forceclosurethreshold=1.0000000000000001e-09, checkgraspfn=None, manipulatordirections=None, translationstepmult=None, finestep=None, friction=None, avoidlinks=None, plannername=None, boxdelta=None, spheredelta=None, normalanglerange=None
 # http://openrave.org/docs/latest_stable/openravepy/databases.grasping/#openravepy.databases.grasping.GraspingModel.generatepcg
 #                self.gmodel[target_name].generate(approachrays=approachrays3, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
-                self.gmodel[target_name].generate(approachrays=approachrays3, friction=0.9, forceclosure=True, standoffs=[0.04, 0.06, 0.07])
+                self.gmodel[target_name].generate(approachrays=approachrays3, friction=0.6, forceclosure=True, standoffs=[0.04, 0.06, 0.07])
                 self.gmodel[target_name].save()
 
     def getGraspsCount(self, target_name):
@@ -507,6 +507,7 @@ class OpenraveInstance:
     def getFinalConfig(self, target_name, grasp, show=False):
         hand_config = None
         contacts = None
+        normals = None
         self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
             with self.gmodel[target_name].GripperVisibility(self.robot_rave.GetActiveManipulator()):
@@ -542,8 +543,11 @@ class OpenraveInstance:
                         self.robot_rave.SetDOFValues([hand_config2[0], hand_config2[1], hand_config2[2], hand_config2[3]],self.robot_rave.GetActiveManipulator().GetGripperIndices())
 #                        self.robot_rave.SetDOFValues(grasp[self.graspindices.get('igrasppreshape')],self.manip.GetGripperIndices())
 
+                        self.gmodel[target_name].contactgraph = self.gmodel[target_name].drawContacts(contacts)
                         self.env.UpdatePublishedBodies()
                         raw_input('press any key to continue: ')
+
+                        self.gmodel[target_name].contactgraph = None
 
 #Tgrasp = self.getGlobalGraspTransform(grasp,collisionfree=collisionfree)
 #Tdelta = dot(Tgrasp,linalg.inv(self.manip.GetEndEffectorTransform())) for link in self.manip.GetChildLinks(): link.SetTransform(dot(Tdelta,link.GetTransform())) self.env.UpdatePublishedBodies() # wait while environment is locked? if delay is None: raw_input('press any key to continue: ') elif delay > 0: time.sleep(delay)
@@ -560,9 +564,11 @@ class OpenraveInstance:
             contacts_ret = None
         else:
             contacts_ret = []
+            normals = []
             for c in contacts:
                 contacts_ret.append(self.T_World_Br.Inverse() * PyKDL.Vector(c[0], c[1], c[2]))
-        return hand_config, contacts_ret
+                normals.append(PyKDL.Frame(self.T_World_Br.Inverse().M) * PyKDL.Vector(c[3], c[4], c[5]))
+        return hand_config, contacts_ret, normals
 
     def grab(self, name):
         body = self.env.GetKinBody(name)

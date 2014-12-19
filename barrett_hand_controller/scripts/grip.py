@@ -488,9 +488,12 @@ def gripDist5(a, b):
         def getScore(p1, p2, n1, n2):
             min_score = None
 #            score = velmautils.getAngle(n1,n2)/math.pi + velmautils.getAngle(p1 * n1, p2 * n2)/math.pi
+
+#            score = (n1-n2).Norm() * (p1.Norm()+p2.Norm())*0.5 + ((p1 * n1) - (p2 * n2)).Norm()
            
 #            score = ((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)
-            score = 4*((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)
+#            score = 4*((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)    # this works
+            score = 4*((p1-p2).Norm()) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm())))    # this works
             return score
 
         def calc_R(xa, ya, za):
