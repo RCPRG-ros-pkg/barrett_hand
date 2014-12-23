@@ -116,7 +116,8 @@ Class for grasp learning.
         return pm.fromTf(T_B_C_tf)
 
     def getMarkerPoseFake(self, marker_id, wait = True, timeBack = None):
-        T_B_Tm = PyKDL.Frame( PyKDL.Rotation.EulerZYZ(0.1, -0.1, 0.0), PyKDL.Vector(0.55,-0.4,0.9) )
+#        T_B_Tm = PyKDL.Frame( PyKDL.Rotation.EulerZYZ(0.1, -0.1, 0.0), PyKDL.Vector(0.55,-0.4,0.9) )
+        T_B_Tm = PyKDL.Frame( PyKDL.Rotation.RotZ(90.0/180.0*math.pi), PyKDL.Vector(0.55,-0.2,0.9) )
         T_B_Tbb = PyKDL.Frame( PyKDL.Vector(0.5,-0.8,2.0) )
         T_Tm_Bm = PyKDL.Frame( PyKDL.Vector(-0.06, 0.3, 0.135) )
         T_Bm_Gm = PyKDL.Frame( PyKDL.Rotation.RotZ(-30.0/180.*math.pi), PyKDL.Vector(0.1,-0.1,0.06) )
@@ -127,7 +128,8 @@ Class for grasp learning.
         elif marker_id == 8:
             return T_B_Tbb
         elif marker_id == 19:
-            return T_B_Tm * T_Tm_Bm * T_Bm_Gm
+#            return T_B_Tm * T_Tm_Bm * T_Bm_Gm
+            return T_B_Tm * T_Bm_Gm
         elif marker_id == 35:
             return T_B_Tm * T_Tm_Bm * T_Bm_Gm
         return None
@@ -370,7 +372,7 @@ Class for grasp learning.
             obj_grasp.addMarker(19, PyKDL.Frame(PyKDL.Rotation.Quaternion(0.0,0.0,0.0,1.0),PyKDL.Vector(-0.0,-0.0,-0.0)))
 
 #        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]
-        self.objects = [obj_grasp]
+        self.objects = [obj_grasp, obj_table]
 
         if False:
             grip.gripUnitTest(obj_grasp)
@@ -756,7 +758,15 @@ Class for grasp learning.
 #                    self.openrave.getFinalConfig("object", grasp, show=True)
                     continue
 
-            max_valid_grasps = 100
+
+            valid_indices = self.openrave.generateGrasps("object", show=False, checkcollision=True, checkik=False, checkgrasper=True)
+            print "valid grasps: %s"%(len(valid_indices))
+
+            for i in range(0, len(sim_grips)):
+                if not i in valid_indices:
+                    sim_grips[i] = None
+
+            max_valid_grasps = 300
             valid_grasps = 0
             for i in range(0, len(sim_grips)):
                 if sim_grips[i] != None:
@@ -782,18 +792,30 @@ Class for grasp learning.
                     sim_grips_valid_idx.append(i)
             print "valid grasps: %d"%(valid_grasps)
 
-            idx = -1
+            print "showing 10 random grips"
+            random_idx = -1
+            random_grasps = []
             # get random grasp
             while True:
-                idx = random.randint(0, len(sim_grips_valid)-1)
-                if sim_grips_valid[idx] != None:
+                random_idx = random.randint(0, len(sim_grips_valid)-1)
+                if sim_grips_valid[random_idx] != None:
+                    grasp = self.openrave.getGrasp("object", sim_grips_valid_idx[random_idx])
+                    random_grasps.append(grasp)
+                    self.openrave.getFinalConfig("object", grasp, show=True)
+                if len(random_grasps) >= 10:
                     break
 
-#            idx = 1520
-            print "random grasp: %s"%(idx)
-            grasp = self.openrave.getGrasp("object", idx)
-            self.openrave.getFinalConfig("object", grasp, show=True)
-#            self.openrave.showGrasp("object", grasp)
+#            print "random grasp: %s"%(random_idx)
+#            grasp = self.openrave.getGrasp("object", random_idx)
+#            self.openrave.getFinalConfig("object", grasp, show=True)
+
+#            self.openrave.showFinalConfigs("object", random_grasps)
+#            exit(0)
+
+
+
+
+
 
             print "searching for grasps..."
             checked_idx = []
@@ -802,6 +824,11 @@ Class for grasp learning.
             for i in range(0, len(sim_grips_valid)):
                 for j in range(0, len(sim_grips_valid)):
                     dist_cache[i][j] = -1.0
+
+            axis_B = PyKDL.Vector(0,0,1)
+            T_B_O = self.openrave.getPose("object")
+            T_O_B = T_B_O.Inverse()
+            axis_O = PyKDL.Frame(T_O_B.M) * axis_B
 
             max_dist = None
             # calculate distance between all grips
@@ -815,7 +842,8 @@ Class for grasp learning.
                     if i == j:
                         dist_cache[j][i] = 0.0
                     elif dist_cache[i][j] < 0.0:
-                        dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist5(sim_grips_valid[i], sim_grips_valid[j])
+#                        dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist5(sim_grips_valid[i], sim_grips_valid[j])
+                        dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist6(sim_grips_valid[i], sim_grips_valid[j], axis_O)
                         dist_cache[i][j] = dist
                         dist_cache[j][i] = dist
                         if max_dist == None or dist > max_dist:
@@ -835,23 +863,33 @@ Class for grasp learning.
             n_clusters = 5
             print "dist_cache shape:"
             print dist_cache.shape
-            clustering = AgglomerativeClustering(linkage='average', affinity='precomputed', n_clusters=n_clusters)
+            clustering = AgglomerativeClustering(linkage='average', affinity='precomputed', n_clusters=n_clusters, compute_full_tree=True)
             clustering.fit(dist_cache)
 
+            print "clustering.n_leaves_: %s"%(clustering.n_leaves_)
+            print "clustering.n_components_: %s"%(clustering.n_components_)
+            index = 0
             for lab in clustering.labels_:
-                print lab
+                print "%s:  %s"%(index, lab)
+                index += 1
 
-            for cl in range(0, n_clusters):
-                print "showing cluster %s"%(cl)
-                for i in range(0, len(clustering.labels_)):
-                    if clustering.labels_[i] == cl:
-                        grasp = self.openrave.getGrasp("object", sim_grips_valid_idx[i])
-                        self.openrave.getFinalConfig("object", grasp, show=True)
+            index = 0
+            for ch in clustering.children_:
+                print "%s:  %s"%(index, ch)
+                index += 1
 
-            print "end"
+#            for cl in range(0, n_clusters):
+#                print "showing cluster %s"%(cl)
+#                grasps = []
+#                for i in range(0, len(clustering.labels_)):
+#                    if clustering.labels_[i] == cl:
+#                        grasp = self.openrave.getGrasp("object", sim_grips_valid_idx[i])
+#                        grasps.append(grasp)
+#                print "number of grasps: %s"%(len(grasps))
+#                self.openrave.showFinalConfigs("object", grasps)
+#            print "end"
 
-
-            exit(0)
+#            exit(0)
 
 
 
@@ -874,27 +912,31 @@ Class for grasp learning.
 #                grasp = self.openrave.getGrasp("object", i)
 #                self.openrave.getFinalConfig("object", grasp, show=True)
 
+            idx = random_idx
+            grasp = self.openrave.getGrasp("object", sim_grips_valid_idx[idx])
+            self.openrave.getFinalConfig("object", grasp, show=True)
+
             for tries in range(0, 10):
                 checked_idx.append(idx)
                 next_idx = None
                 max_dist = None
-                for i in range(0, len(sim_grips)):
-                    if sim_grips[i] == None:
+                for i in range(0, len(sim_grips_valid)):
+                    if sim_grips_valid[i] == None:
                         continue
                     if i in checked_idx:
                         continue
                     min_dist = None
                     for c_idx in checked_idx:
-                        if dist_cache[c_idx][i] < 0.0:
-                            dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist5(sim_grips[c_idx], sim_grips[i])
-                            dist_cache[c_idx][i] = dist
-                            dist_cache[i][c_idx] = dist
+#                        if dist_cache[c_idx][i] < 0.0:
+#                            dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist5(sim_grips_valid[c_idx], sim_grips_valid[i])
+#                            dist_cache[c_idx][i] = dist
+#                            dist_cache[i][c_idx] = dist
 
-                            dist2, angles2, all_scores3, all_angles2, all_scores4, n1_s_list2, pos1_s_list2, n2_s_list2, pos2_s_list2 = grip.gripDist5(sim_grips[i], sim_grips[c_idx])
-                            if abs(dist-dist2) > 0.01:
-                                print "%s %s:  %s  %s"%(idx, i, dist, dist2)
-                        else:
-                            dist = dist_cache[c_idx][i]
+#                            dist2, angles2, all_scores3, all_angles2, all_scores4, n1_s_list2, pos1_s_list2, n2_s_list2, pos2_s_list2 = grip.gripDist5(sim_grips_valid[i], sim_grips_valid[c_idx])
+#                            if abs(dist-dist2) > 0.01:
+#                                print "%s %s:  %s  %s"%(idx, i, dist, dist2)
+#                        else:
+                        dist = dist_cache[c_idx][i]
 
                         if min_dist == None or dist < min_dist:
                             min_dist = dist
@@ -905,7 +947,7 @@ Class for grasp learning.
 
                 print "next grip: %s  dist: %s"%(next_idx, max_dist)
 
-                grasp = self.openrave.getGrasp("object", next_idx)
+                grasp = self.openrave.getGrasp("object", sim_grips_valid_idx[next_idx])
                 self.openrave.getFinalConfig("object", grasp, show=True)
 #                self.openrave.showGrasp("object", grasp)
                 idx = next_idx

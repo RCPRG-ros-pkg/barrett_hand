@@ -493,6 +493,7 @@ def gripDist5(a, b):
            
 #            score = ((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)
 #            score = 4*((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)    # this works
+#            score = 4*((p1-p2).Norm()) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm())))    # this works
             score = 4*((p1-p2).Norm()) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm())))    # this works
             return score
 
@@ -526,6 +527,103 @@ def gripDist5(a, b):
 #        angles_2 = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0)
 
         angles_2, fx, its, imode, smode = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0, full_output=True)
+        if imode != 0:
+            print smode
+
+        # least squares without constraints
+#        angles_2, ier = optimize.leastsq(f_2, angles_estimate, maxfev = 1000)
+
+#        return sumf_2(angles_2), angles_2
+        return fx, angles_2
+
+    fr_a = [None, None, None]
+    T_O_Com = PyKDL.Frame(a.grasped_object.com)
+    T_Com_O = T_O_Com.Inverse()
+    for c in a.contacts:
+        T_O_C = c[1]
+        T_Com_C = T_Com_O * T_O_C
+        fr_a[c[0]] = T_Com_C
+
+    fr_b = [None, None, None]
+    for c in b.contacts:
+        T_O_C = c[1]
+        T_Com_C = T_Com_O * T_O_C
+        fr_b[c[0]] = T_Com_C
+
+    score_min = None
+    angles_min = None
+
+    for i in range(0,1):
+        score, angles = estTransform(fr_a, fr_b)
+
+        if score_min == None or score_min < score:
+            score_min = score
+            angles_min = angles
+
+    return score_min, angles_min, None, None, None, None, None, None, None
+
+def gripDist6(a, b, axis):
+    def estTransform(l1, l2):
+        pos1_list = []
+        n1_list = []
+        for f in l1:
+            pos1_list.append( f * PyKDL.Vector() )
+            n1_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        pos2_list = []
+        n2_list = []
+        for f in l2:
+            pos2_list.append( f * PyKDL.Vector() )
+            n2_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+        pos2rot_list = []
+        n2rot_list = []
+        for f in l2:
+            pos2rot_list.append( f * PyKDL.Vector() )
+            n2rot_list.append( PyKDL.Frame(f.M) * PyKDL.Vector(0,0,1) )
+
+        def getScore(p1, p2, n1, n2):
+            min_score = None
+
+#            score = velmautils.getAngle(n1,n2)/math.pi + velmautils.getAngle(p1, p2)/math.pi
+#            score = velmautils.getAngle(n1,n2)/math.pi + velmautils.getAngle(p1 * n1, p2 * n2)/math.pi
+
+#            score = (n1-n2).Norm() * (p1.Norm()+p2.Norm())*0.5 + ((p1 * n1) - (p2 * n2)).Norm()
+           
+#            score = ((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)
+            score = 4*((p1-p2).Norm()**2) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm()))**2)    # this works
+#            score = 4*((p1-p2).Norm()) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm())))    # this works
+#            score = 4*((p1-p2).Norm()) + ((0.5*(n1 - n2).Norm()*(p1.Norm()+p2.Norm())))    # this works
+            return score
+
+        def calc_R(xa):
+            ret = []
+            t = PyKDL.Frame(PyKDL.Rotation.Rot(axis, xa))
+
+            for i in range(0, len(l2)):
+                pos2rot_list[i] = t * pos2_list[i]
+                n2rot_list[i] = t * n2_list[i]
+
+            for i in range(0, len(l1)):
+                score = getScore(pos1_list[i], pos2rot_list[i], n1_list[i], n2rot_list[i])
+                ret.append(score)
+
+#            for i in range(0, len(l2)):
+#                score = getMinScore(pos2rot_list[i], pos1_list, n2rot_list[i], n1_list)
+#                ret.append(score)
+
+            return np.array(ret)
+        def f_2(c):
+            Di = calc_R(*c)
+            return Di
+        def sumf_2(p):
+            return math.fsum(f_2(p))#**2)
+
+        angles_estimate = [random.uniform(-math.pi*0.9, math.pi*0.9)]
+#        angles_estimate = 0.0, 0.0, 0.0
+        # least squares with constraints
+
+#        angles_2 = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1),(-math.pi*1.1, math.pi*1.1)], iprint=0)
+
+        angles_2, fx, its, imode, smode = optimize.fmin_slsqp(sumf_2, angles_estimate, bounds=[(-math.pi*1.1, math.pi*1.1)], iprint=0, full_output=True)
         if imode != 0:
             print smode
 

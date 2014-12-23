@@ -600,7 +600,7 @@ Class for grasp learning.
                     print "index: %s"%(idx)
                 sim_grips.append(None)
                 grasp = self.openrave.getGrasp("object", idx)
-                q, contacts = self.openrave.getFinalConfig("object", grasp)
+                q, contacts, ns = self.openrave.getFinalConfig("object", grasp)
                 if contacts == None:
                     contacts = []
 #                print "grasp_idx: %s   contacts: %s"%(idx, len(contacts))
@@ -766,7 +766,8 @@ Class for grasp learning.
             T_B_O_prev = T_B_O
             if generate_new_grasps:
                 # get the possible grasps for the current scene
-                indices = self.openrave.generateGrasps("object", checkcollision=False, checkgrasper=False)
+#                indices = self.openrave.generateGrasps("object", checkcollision=False, checkgrasper=False)
+                indices = self.openrave.generateGrasps("object", checkcollision=True, checkgrasper=True)
 
             if len(indices) == 0:
                 print "FATAL ERROR: could not generate any grasps for current configuration"
@@ -777,6 +778,11 @@ Class for grasp learning.
             # show all possible grasps
 #            for idx in indices:
 #                self.openrave.showGrasp("object", self.openrave.getGrasp("object", idx))
+
+            axis_B = PyKDL.Vector(0,0,1)
+            T_B_O = self.openrave.getPose("object")
+            T_O_B = T_B_O.Inverse()
+            axis_O = PyKDL.Frame(T_O_B.M) * axis_B
 
             max_dist = -1000000.0
             min_score = None
@@ -834,7 +840,7 @@ Class for grasp learning.
                     sc_mul = 1.0
                     if sim_grips[idx_2].count_no_contact == 0 and sim_grips[idx_2].count_too_little_contacts == 0 and sim_grips[idx_2].count_unstable == 0 and sim_grips[idx_2].count_stable == 0:
                         continue
-                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist3(sim_grips[idx], sim_grips[idx_2])
+                    dist, angles, all_scores, all_angles, all_scores2, n1_s_list, pos1_s_list, n2_s_list, pos2_s_list = grip.gripDist5(sim_grips[idx], sim_grips[idx_2])#, axis_O)
 
                     penalty_no_contact = 4.0 * sim_grips[idx_2].count_no_contact * max(5.0-dist, 0.0)
                     penalty_too_little_contacts = 4.0 * sim_grips[idx_2].count_too_little_contacts * max(5.0-dist, 0.0)
@@ -863,7 +869,7 @@ Class for grasp learning.
                     if traj == None:
                         sim_grips[idx].setPlanningFailure(obj_grasp.T_Br_Co)
                     else:
-                        final_config, contacts = self.openrave.getFinalConfig("object", grasp)
+                        final_config, contacts, normals = self.openrave.getFinalConfig("object", grasp)
                         if final_config == None:
                             sim_grips[idx].setPlanningFailure(obj_grasp.T_Br_Co)
                         else:
@@ -961,22 +967,22 @@ Class for grasp learning.
             if not simulation_only:
                 # get contact points and forces for each finger
                 velma.updateTransformations()
-                contacts = [[],[],[]]
+                contacts_barrett = [[],[],[]]
                 forces = [[],[],[]]
-                contacts[0], forces[0] = velma.getContactPoints(100, f1=True, f2=False, f3=False, palm=False)
-                contacts[1], forces[1] = velma.getContactPoints(100, f1=False, f2=True, f3=False, palm=False)
-                contacts[2], forces[2] = velma.getContactPoints(100, f1=False, f2=False, f3=True, palm=False)
+                contacts_barrett[0], forces[0] = velma.getContactPoints(100, f1=True, f2=False, f3=False, palm=False)
+                contacts_barrett[1], forces[1] = velma.getContactPoints(100, f1=False, f2=True, f3=False, palm=False)
+                contacts_barrett[2], forces[2] = velma.getContactPoints(100, f1=False, f2=False, f3=True, palm=False)
                 fingers_in_contact = 0
-                print "f1: %s   %s    %s"%((final_config[0]+ad2), velma.qhr[1], len(contacts[0]))
-                print "f2: %s   %s    %s"%((final_config[1]+ad2), velma.qhr[2], len(contacts[1]))
-                print "f3: %s   %s    %s"%((final_config[2]+ad2), velma.qhr[3], len(contacts[2]))
-                if abs((final_config[0]+ad2) - velma.qhr[1]) > 1.0/180.0*math.pi or len(contacts[0]) > 0:
+                print "f1: %s   %s    %s"%((final_config[0]+ad2), velma.qhr[1], len(contacts_barrett[0]))
+                print "f2: %s   %s    %s"%((final_config[1]+ad2), velma.qhr[2], len(contacts_barrett[1]))
+                print "f3: %s   %s    %s"%((final_config[2]+ad2), velma.qhr[3], len(contacts_barrett[2]))
+                if abs((final_config[0]+ad2) - velma.qhr[1]) > 1.0/180.0*math.pi or len(contacts_barrett[0]) > 0:
                     fingers_in_contact += 1
                     f1_contact = True
-                if abs((final_config[1]+ad2) - velma.qhr[2]) > 1.0/180.0*math.pi or len(contacts[1]) > 0:
+                if abs((final_config[1]+ad2) - velma.qhr[2]) > 1.0/180.0*math.pi or len(contacts_barrett[1]) > 0:
                     fingers_in_contact += 1
                     f2_contact = True
-                if abs((final_config[3]+ad2) - velma.qhr[3]) > 1.0/180.0*math.pi or len(contacts[2]) > 0:
+                if abs((final_config[3]+ad2) - velma.qhr[3]) > 1.0/180.0*math.pi or len(contacts_barrett[2]) > 0:
                     fingers_in_contact += 1
                     f3_contact = True
             else:
@@ -1023,35 +1029,35 @@ Class for grasp learning.
 #                print "fresh pose not available: %s"%(dur.to_sec())
 #                fresh_pose = False
 
-            self.switchToJoint(velma)
+#            self.switchToJoint(velma)
 
             # set the new orientation of tool
-            velma.updateTransformations()
+#            velma.updateTransformations()
 
             # get the current tool transformation
-            T_B_T = velma.T_B_W * T_W_T_orig
+#            T_B_T = velma.T_B_W * T_W_T_orig
 
-            T_B_T_new = velmautils.alignRotationToVerticalAxis(T_B_T)
-            R_B_T_new = PyKDL.Frame(copy.deepcopy(T_B_T_new.M))
-            T_W_T_new = velma.T_B_W.Inverse() * T_B_T_new
-            velma.updateAndMoveToolOnly(T_W_T_new, 1.0)
+#            T_B_T_new = velmautils.alignRotationToVerticalAxis(T_B_T)
+#            R_B_T_new = PyKDL.Frame(copy.deepcopy(T_B_T_new.M))
+#            T_W_T_new = velma.T_B_W.Inverse() * T_B_T_new
+#            velma.updateAndMoveToolOnly(T_W_T_new, 1.0)
 
-            if abs((R_B_T_new * PyKDL.Vector(1,0,0)).z()) > 0.9:
-                k_lift = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(2.0, 200.0, 200.0))
-                k_move = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(200.0, 200.0, 200.0))
-            elif abs((R_B_T_new * PyKDL.Vector(0,1,0)).z()) > 0.9:
-                k_lift = Wrench(Vector3(5.0, 800.0, 5.0), Vector3(200.0, 2.0, 200.0))
-                k_move = Wrench(Vector3(5.0, 800.0, 5.0), Vector3(200.0, 200.0, 200.0))
-            else:
-                k_lift = Wrench(Vector3(5.0, 5.0, 800.0), Vector3(200.0, 200.0, 2.0))
-                k_move = Wrench(Vector3(5.0, 5.0, 800.0), Vector3(200.0, 200.0, 200.0))
-            print "new impedance:"
-            print k_lift
-            raw_input("Press Enter to set impedance to bigger value...")
-            print "setting stiffness to bigger value"
-            velma.moveImpedance(k_lift, 3.0)
-            if velma.checkStopCondition(3.0):
-                exit(0)
+#            if abs((R_B_T_new * PyKDL.Vector(1,0,0)).z()) > 0.9:
+#                k_lift = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(2.0, 200.0, 200.0))
+#                k_move = Wrench(Vector3(800.0, 5.0, 5.0), Vector3(200.0, 200.0, 200.0))
+#            elif abs((R_B_T_new * PyKDL.Vector(0,1,0)).z()) > 0.9:
+#                k_lift = Wrench(Vector3(5.0, 800.0, 5.0), Vector3(200.0, 2.0, 200.0))
+#                k_move = Wrench(Vector3(5.0, 800.0, 5.0), Vector3(200.0, 200.0, 200.0))
+#            else:
+#                k_lift = Wrench(Vector3(5.0, 5.0, 800.0), Vector3(200.0, 200.0, 2.0))
+#                k_move = Wrench(Vector3(5.0, 5.0, 800.0), Vector3(200.0, 200.0, 200.0))
+#            print "new impedance:"
+#            print k_lift
+#            raw_input("Press Enter to set impedance to bigger value...")
+#            print "setting stiffness to bigger value"
+#            velma.moveImpedance(k_lift, 3.0)
+#            if velma.checkStopCondition(3.0):
+#                exit(0)
 
             # lift the object up
             velma.updateTransformations()
@@ -1076,17 +1082,17 @@ Class for grasp learning.
             # get contact points and forces for each finger
             if not simulation_only:
                 velma.updateTransformations()
-                contacts = [[],[],[]]
+                contacts_barrett = [[],[],[]]
                 forces = [[],[],[]]
-                contacts[0], forces[0] = velma.getContactPoints(100, f1=True, f2=False, f3=False, palm=False)
-                contacts[1], forces[1] = velma.getContactPoints(100, f1=False, f2=True, f3=False, palm=False)
-                contacts[2], forces[2] = velma.getContactPoints(100, f1=False, f2=False, f3=True, palm=False)
+                contacts_barrett[0], forces[0] = velma.getContactPoints(100, f1=True, f2=False, f3=False, palm=False)
+                contacts_barrett[1], forces[1] = velma.getContactPoints(100, f1=False, f2=True, f3=False, palm=False)
+                contacts_barrett[2], forces[2] = velma.getContactPoints(100, f1=False, f2=False, f3=True, palm=False)
                 fingers_in_contact = 0
-                if len(contacts[0]) > 0:
+                if len(contacts_barrett[0]) > 0:
                     fingers_in_contact += 1
-                if len(contacts[1]) > 0:
+                if len(contacts_barrett[1]) > 0:
                     fingers_in_contact += 1
-                if len(contacts[2]) > 0:
+                if len(contacts_barrett[2]) > 0:
                     fingers_in_contact += 1
             else:
                 fingers_in_contact = 3
@@ -1150,44 +1156,46 @@ Class for grasp learning.
 
             # check the object pose after lift-up
             dur = rospy.Time.now() - obj_grasp.pose_update_time
-            if abs(dur.to_sec()) < 2.0:
+            if abs(dur.to_sec()) < 2.0 and not simulation_only:
                 print "fresh pose available: %s"%(dur.to_sec())
                 fresh_pose = True
                 T_Br_Co_sim = self.openrave.getPose("object")
                 pose_diff = PyKDL.diff(obj_grasp.T_Br_Co, T_Br_Co_sim)
                 if pose_diff.vel.Norm() > pose_tolerance[0] or pose_diff.rot.Norm() > pose_tolerance[1]:
                     print "object pose is different after the lift-up - diff: %s > %s     %s > %s deg."%(pose_diff.vel.Norm(), pose_tolerance[0], pose_diff.rot.Norm()/math.pi*180.0, pose_tolerance[1]/math.pi*180.0)
-                    print "adding experience for determination of COM"
-                    # calculate the contacts in object frame
-                    contacts_O = []
-                    for c in list(contacts[0]) + list(contacts[1]) + list(contacts[2]):
-                        contacts_O.append(obj_grasp.T_Br_Co.Inverse() * c)
 
-                    m_id = 0
-                    T_B_O = T_Br_O_init
-                    m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
-                    m_id = self.pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O)
+                    if False:
+                        print "adding experience for determination of COM"
+                        # calculate the contacts in object frame
+                        contacts_O = []
+                        for c in list(contacts_barrett[0]) + list(contacts_barrett[1]) + list(contacts_barrett[2]):
+                            contacts_O.append(obj_grasp.T_Br_Co.Inverse() * c)
 
-                    T_B_O_2 = obj_grasp.T_Br_Co
-                    m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O_2)
-                    m_id = self.pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O_2)
+                        m_id = 0
+                        T_B_O = T_Br_O_init
+                        m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O)
+                        m_id = self.pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O)
 
-                    m_id = obj_grasp.updateCom(T_Br_O_init ,obj_grasp.T_Br_Co, contacts_O, m_id=m_id, pub_marker=self.pub_marker)
-                    # get max value
-                    max_com = None
-                    for com_value in obj_grasp.com_weights:
-                        if max_com == None or max_com < com_value:
-                            max_com = com_value
-                    good_com_count = 0
-                    for idx in range(0, len(obj_grasp.com_pt)):
-                        if obj_grasp.com_weights[idx] == max_com:
-                            good_com_count += 1
-                            m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=0, g=1, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
-                        else:
-                            m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
-                        if idx % 10 == 0:
-                            rospy.sleep(0.01)
-                    print "COM estimation: %s  com: %s"%(float(good_com_count)/float(len(obj_grasp.com_pt)), obj_grasp.com)
+                        T_B_O_2 = obj_grasp.T_Br_Co
+                        m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(), m_id, r=0, g=0, b=1, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.354, 0.060, 0.060), T=T_B_O_2)
+                        m_id = self.pub_marker.publishMultiPointsMarker(contacts_O, m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_B_O_2)
+
+                        m_id = obj_grasp.updateCom(T_Br_O_init ,obj_grasp.T_Br_Co, contacts_O, m_id=m_id, pub_marker=self.pub_marker)
+                        # get max value
+                        max_com = None
+                        for com_value in obj_grasp.com_weights:
+                            if max_com == None or max_com < com_value:
+                                max_com = com_value
+                        good_com_count = 0
+                        for idx in range(0, len(obj_grasp.com_pt)):
+                            if obj_grasp.com_weights[idx] == max_com:
+                                good_com_count += 1
+                                m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=0, g=1, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
+                            else:
+                                m_id = pub_marker.publishSinglePointMarker(obj_grasp.com_pt[idx], m_id, r=1, g=0, b=0, namespace='default', frame_id='torso_base', m_type=Marker.CUBE, scale=Vector3(0.005, 0.005, 0.005), T=obj_grasp.T_Br_Co)
+                            if idx % 10 == 0:
+                                rospy.sleep(0.01)
+                        print "COM estimation: %s  com: %s"%(float(good_com_count)/float(len(obj_grasp.com_pt)), obj_grasp.com)
 
                     current_sim_grip.setUnstable()
                     self.openrave.release("object")
@@ -1206,7 +1214,10 @@ Class for grasp learning.
             else:
                 print "fresh pose not available: %s"%(dur.to_sec())
                 fresh_pose = False
-                current_sim_grip.setVisibilityProblem(T_Br_O_init)
+
+                current_sim_grip.setUnstable()
+#                current_sim_grip.setVisibilityProblem(T_Br_O_init)
+
                 self.openrave.release("object")
                 velma.move_hand_client([0, 0, 0, final_config[3]], v=(1.2, 1.2, 1.2, 1.2), t=(3000.0, 3000.0, 3000.0, 3000.0))
                 if velma.checkStopCondition(3.0):
@@ -1252,7 +1263,6 @@ Class for grasp learning.
 
 #            raw_input("Press Enter to exit...")
 #            exit(0)
-
 
             print "checking the orientation of the object..."
             # TODO
