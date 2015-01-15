@@ -51,6 +51,7 @@ import math
 import numpy as np
 import copy
 from scipy import optimize
+import scipy
 
 from urdf_parser_py.urdf import URDF
 from pykdl_utils.kdl_parser import kdl_tree_from_urdf_model
@@ -170,6 +171,79 @@ class MarkerPublisher:
 
 def getAngle(v1, v2):
     return math.atan2((v1*v2).Norm(), PyKDL.dot(v1,v2))
+
+
+#% by Tolga Birdal
+#% Q is an Mx4 matrix of quaternions. Qavg is the average quaternion
+#% Based on 
+#% Markley, F. Landis, Yang Cheng, John Lucas Crassidis, and Yaakov Oshman. 
+#% "Averaging quaternions." Journal of Guidance, Control, and Dynamics 30, 
+#% no. 4 (2007): 1193-1197.
+#function [Qavg]=avg_quaternion_markley(Q)
+
+#% Form the symmetric accumulator matrix
+#A = zeros(4,4);
+#M = size(Q,1);
+
+#for i=1:M
+#    q = Q(i,:)';
+#    A = q*q'+A; % rank 1 update
+#end
+
+#% scale
+#A=(1.0/M)*A;
+
+#% Get the eigenvector corresponding to largest eigen value
+#[Qavg, Eval] = eigs(A,1);
+
+#end
+
+# from http://www.mathworks.com/matlabcentral/fileexchange/40098-tolgabirdal-averaging-quaternions
+# by Tolga Birdal
+# Q is an Mx4 matrix of quaternions. Qavg is the average quaternion
+# Based on 
+# Markley, F. Landis, Yang Cheng, John Lucas Crassidis, and Yaakov Oshman. 
+# "Averaging quaternions." Journal of Guidance, Control, and Dynamics 30, 
+# no. 4 (2007): 1193-1197.
+
+# Q.shape == (M, 4)
+#function [Qavg]=avg_quaternion_markley(Q)
+def avg_quaternion_markley(Q):
+
+    #% Form the symmetric accumulator matrix
+    #A = zeros(4,4);
+    A = np.zeros((4,4))
+    #M = size(Q,1);
+    M = Q.shape[0]
+
+    #for i=1:M
+    for i in range(0,M):
+    #    q = Q(i,:)';
+        q = np.transpose(Q[i])
+    #    A = q*q'+A; % rank 1 update
+#        print "q*np.transpose(q)"
+#        print q*np.transpose(q)
+        A = q*np.transpose(q) + A; # rank 1 update
+#        print "q=%s"%(q)
+#        print "shape(q*qT)=%s"%((q*np.transpose(q)).shape)
+#        print "q*qT=%s"%(q*np.transpose(q))
+#        print "A=%s"%(A)
+    #end
+
+#    print "M=%s"%(M)
+    #% scale
+    #A=(1.0/M)*A;
+    A=(1.0/M)*A
+
+#    print "A"
+    print A
+    #% Get the eigenvector corresponding to largest eigen value
+    #[Qavg, Eval] = eigs(A,1);
+#    ei = numpy.linalg.eig(A)
+    ei = scipy.sparse.linalg.eigsh(A,1)
+
+    return ei
+
 
 def generateNormalsSphere(angle, x_positive=None, y_positive=None, z_positive=None):
     if angle <= 0:
@@ -878,6 +952,22 @@ def alignRotationToVerticalAxis(T_B_T):
 #            exit(0)
             return PyKDL.Frame(copy.deepcopy(min_fr.M), copy.deepcopy(T_B_T.p))
 
+def projectPointToPlaneAlongVector(p, v, n, d, positive_only=True):
+    pa = np.array(p)
+    va = np.array(v)
+    na = np.array(n)
+
+    va_na = np.dot(va,-na)
+
+    if abs(va_na) < 0.0000000001:
+        return None
+
+    if positive_only and va_na < 0:
+        return None
+
+    r = pa + ( va * ( (np.dot(na,pa)+d)/va_na ) )
+    return r
+
 class WristCollisionAvoidance:
 
     def getSectorWithMargin(self, sector):
@@ -1210,6 +1300,87 @@ class VelmaIkSolver:
                     self.wrist_collision_avoidance.append(WristCollisionAvoidance("right", q5_lim[0]+q5_lim[1] > 0, 5.0/180.0*math.pi))
 
         self.ik_solver = PyKDL.ChainIkSolverPos_NR_JL(self.chain, self.q_min, self.q_max, self.fk_solver, self.vel_ik_solver, 100)
+
+        self.jac_solver = PyKDL.ChainJntToJacSolver(self.chain)
+
+    def getManipulability(self, q):
+        dof = 7
+        q_arr = PyKDL.JntArray(dof)
+        for i in range(0, dof):
+            q_arr[i] = q[i]
+        jac = PyKDL.Jacobian(dof)
+        self.jac_solver.JntToJac(q_arr, jac)
+
+        jac_arr = numpy.empty(shape=(6,7))
+        for i in range(0, dof):
+            col = jac.getColumn(i)
+            for j in range(0, 6):
+                jac_arr[j][i] = col[j]
+
+#        print np.matrix(jac_arr)
+#        print np.matrix(jac_arr).transpose()
+
+        jac_mx = np.matrix(copy.deepcopy(jac_arr))
+#        print jac_mx
+
+#        mx = numpy.zeros(shape=(6,6))
+#        for x in range(0,6):
+#            for y in range(0,6):
+#                for i in range(0, dof):
+#                    mx[y][x] += jac_arr[x][i] * jac_arr[y][i]
+#        jac_jac = np.matrix(mx)
+
+        jac_mx_t = copy.deepcopy(jac_mx.transpose())
+        jac_jac = jac_mx * jac_mx_t
+
+#        print "jac_jac"
+#        print jac_jac
+#        print "mx"
+#        print mx
+        jac_det = numpy.linalg.det(jac_jac)
+        print "jac_det: %s"%(jac_det)
+        if jac_det < 0:
+            jac_det = -jac_det
+#        print math.sqrt(numpy.linalg.det(jac_jac))
+
+        return math.sqrt(jac_det)
+
+    def getManipulability2(self, q):
+        dof = 7
+        q_arr = PyKDL.JntArray(dof)
+        for i in range(0, dof):
+            q_arr[i] = q[i]
+        jac = PyKDL.Jacobian(dof)
+        self.jac_solver.JntToJac(q_arr, jac)
+
+        dof_ens = [
+        [1,2,3,4,5],
+        [0,2,3,4,5],
+        [0,1,3,4,5],
+        [0,1,2,4,5],
+        [0,1,2,3,5],
+        [0,1,2,3,4],
+        ]
+        ret = []
+        for dof_en in dof_ens:
+            jac_arr = numpy.empty(shape=(5,7))
+            for i in range(0, dof):
+                col = jac.getColumn(i)
+                j_idx = 0
+                for j in dof_en:
+                    jac_arr[j_idx][i] = col[j]
+                    j_idx += 1
+
+#            print jac
+
+            jac_mx = np.matrix(jac_arr)
+            jac_jac = jac_mx * jac_mx.transpose()
+            jac_det = numpy.linalg.det(jac_jac)
+#            print "jac_det: %s"%(jac_det)
+            if jac_det < 0:
+                jac_det = -jac_det
+            ret.append(math.sqrt(jac_det))
+        return ret
 
     def simulateTrajectory(self, T_B_Einit, T_B_Ed, progress, q_start, T_T2_B, ik_solver=None):
         if progress < 0.0 or progress > 1.0:

@@ -709,7 +709,7 @@ Class for velma robot.
 
         self.joint_impedance_active = False
         self.cartesian_impedance_active = False
-        self.qar = [-90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, 0, -90.0/180.0*math.pi, 0]
+        self.qar = [-90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, 0.0/180.0*math.pi, -90.0/180.0*math.pi, 0]
         self.qal = [-90.0/180.0*math.pi, -90.0/180.0*math.pi, 90.0/180.0*math.pi, -90.0/180.0*math.pi, 0, 90.0/180.0*math.pi, 0]
         self.qhr = [0.0, 0.0, 0.0, 0.0]
         self.qhl = [0.0, 0.0, 0.0, 0.0]

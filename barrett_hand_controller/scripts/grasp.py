@@ -124,7 +124,7 @@ Class for grasp learning.
         elif marker_id == 8:
             return T_B_Tbb
         elif marker_id == 19:
-            return T_B_Tm * T_Tm_Bm * T_Bm_Gm
+            return PyKDL.Frame(PyKDL.Vector(0,0,3)) * T_B_Tm * T_Tm_Bm * T_Bm_Gm
         elif marker_id == 35:
             return T_B_Tm * T_Tm_Bm * T_Bm_Gm
         return None
@@ -230,6 +230,45 @@ Class for grasp learning.
             exit(0)
 
     def spin(self):
+
+        if False:
+            p = PyKDL.Vector(0,0,0.3)
+            v = PyKDL.Vector(-0.1,0,-0.1)
+            n = PyKDL.Vector(1,0,1)
+            n.Normalize()
+            d = 0
+
+            m_id = 0
+            angle = 0.0
+            while not rospy.is_shutdown():
+                vr = PyKDL.Frame(PyKDL.Rotation.RotZ(angle)) * v
+                r = velmautils.projectPointToPlaneAlongVector([p.x(),p.y(),p.z()], [vr.x(),vr.y(),vr.z()], [n.x(),n.y(),n.z()], d, positive_only=True)
+                if r != None:
+                    m_id = self.pub_marker.publishVectorMarker(p, p+vr, m_id, 1, 0, 0, frame='world')
+                    m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(r[0],r[1],r[2]), m_id, r=0, g=1, b=0, namespace='default', frame_id='world')
+
+                rospy.sleep(0.1)
+                angle += 0.05
+
+            exit(0)
+
+
+        if False:
+            q = []
+            q.append(copy.deepcopy(PyKDL.Rotation.RotX(0.0/180.0*math.pi).GetQuaternion()))
+            q.append(copy.deepcopy(PyKDL.Rotation.RotX(30.0/180.0*math.pi).GetQuaternion()))
+#            Q = np.matrix(np.zeros((len(q),4)))
+#            for i in range(0, len(q)):
+#                Q[i][0] = q[i][0]
+#                Q[i][1] = q[i][1]
+#                Q[i][2] = q[i][2]
+#                Q[i][3] = q[i][3]
+            mean_q = velmautils.avg_quaternion_markley(np.matrix(q))[1]
+            #print mean_q
+            mean_r = PyKDL.Rotation.Quaternion(mean_q[0], mean_q[1], mean_q[2], mean_q[3])
+            print mean_r.GetRotAngle()
+            exit(0)
+
 
         # test joint impedance controll
         if False:
@@ -354,7 +393,9 @@ Class for grasp learning.
                 T_M46_Mi = marker[1]
                 obj_grasp.addMarker(marker[0], T_Co_M46 * T_M46_Mi)
 
-        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]
+#        obj_small = grip.GraspableObject("obj_small", "box", [0.04,0.5,0.04])
+
+        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]#, obj_small]
 
         if False:
             grip.gripUnitTest(obj_grasp)
@@ -387,6 +428,8 @@ Class for grasp learning.
         self.openrave.updatePose("wall_behind", PyKDL.Frame(PyKDL.Vector(-0.5,0,1.5)) )
         self.openrave.updatePose("wall_right", PyKDL.Frame(PyKDL.Vector(0,-1.3,1.5)) )
         self.openrave.updatePose("ceiling", PyKDL.Frame(PyKDL.Vector(0,0,2.3)) )
+
+#        self.openrave.updatePose("obj_small", PyKDL.Frame(PyKDL.Vector(0.5,-0.6,1.15)) )
 
         if False:
             index = 18
@@ -690,6 +733,91 @@ Class for grasp learning.
 
         if False:
             velmautils.updateComUnitTest(self.openrave, self.pub_marker, "object")
+            exit(0)
+
+        if True:
+#            self.openrave.getGraspQHull("object")
+
+            gv_B = PyKDL.Vector(0,1,0)
+            T_B_O = self.openrave.getPose("object")
+            T_O_B = T_B_O.Inverse()
+            gv_O = PyKDL.Frame(T_O_B.M) * gv_B
+            print "gv_O: %s"%(gv_O)
+
+            qs = []
+            for idx in range(0, self.openrave.getGraspsCount("object")):
+                if sim_grips[idx] == None:
+                    continue
+
+                contacts = []
+                for c in sim_grips[idx].contacts:
+                    p = c[1] * PyKDL.Vector()
+                    n = PyKDL.Frame(c[1].M) * PyKDL.Vector(0,0,1)
+                    contacts.append([p.x(),p.y(),p.z(), n.x(),n.y(),n.z()])
+                mindist = self.openrave.getQualituMeasure2("object", contacts, gv_O, com=PyKDL.Vector(0.0,0,0))
+
+                print "index: %s"%(idx)
+#                grasp = self.openrave.getGrasp("object", idx)
+#                q, contacts, ns, mindist = self.openrave.getFinalConfig("object", grasp, show=False, gv=gv_O)
+                if mindist != None:
+                    qs.append([mindist, idx])
+
+            qs_sorted = sorted(qs, key=operator.itemgetter(0), reverse=True)
+
+            for qual in qs_sorted:
+                print "q: %s  i:%s"%(qual[0], qual[1])
+                grasp = self.openrave.getGrasp("object", qual[1])
+                q, contacts, ns, mindist = self.openrave.getFinalConfig("object", grasp, show=True, gv=gv_O)
+
+            exit(0)
+
+            qs = []
+            for idx in range(0, self.openrave.getGraspsCount("object")):
+                grasp = self.openrave.getGrasp("object", idx)
+                quality = self.openrave.getGraspQuality("object", grasp)
+                qs.append([quality, idx])
+
+            qs_sorted = sorted(qs, key=operator.itemgetter(0), reverse=True)
+
+            for qual in qs_sorted:
+                print "q: %s  i:%s"%(qual[0], qual[1])
+                grasp = self.openrave.getGrasp("object", qual[1])
+                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True)
+
+#            for idx in range(0, self.openrave.getGraspsCount("object")):
+#                print "index: %s"%(idx)
+#                grasp = self.openrave.getGrasp("object", idx)
+#                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True)
+
+        if False:
+
+            orig_qar = copy.deepcopy(velma.qar)
+            q5 = -1.0
+            for i in range(0, 20):
+                velma.qar[5] = q5
+#                for j in range(0, 7):
+#                    velma.qar[j] = orig_qar[j] + random.uniform(-0.8, 0.8)
+                print velma_ikr.getManipulability(velma.qar)
+                raw_input("Press Enter to continue...")
+                q5 += 0.1
+                
+            exit(0)
+
+            velma.updateTransformations()
+            T_B_E = velma.T_B_W * velma.T_W_E
+            T_B_Ed = PyKDL.Frame(PyKDL.Vector(0,0,0.2)) * T_B_E
+            traj = self.openrave.planMoveForRightArm(T_B_Ed, None)
+            if traj == None:
+                print "FATAL ERROR: colud not plan trajectory to base pose"
+                return
+
+            duration = math.fsum(traj[3])
+            raw_input("Press Enter to visualize the trajectory...")
+            if velma.checkStopCondition():
+                exit(0)
+            self.openrave.showTrajectory(10.0, qar_list=traj[4])
+
+            raw_input("Press Enter to exit")
             exit(0)
 
         ################
