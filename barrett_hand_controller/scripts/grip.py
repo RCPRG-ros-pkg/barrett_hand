@@ -106,6 +106,7 @@ class Grip:
         self.count_stable = 0
         self.count_visibility_problem = 0
         self.visibility_problem_poses = []
+        self.qhull = None
 
     def setPlanningFailure(self, T_Br_O):
          self.count_planning_failure += 1
@@ -132,6 +133,9 @@ class Grip:
 
     def addContact(self, T_O_Co, finger_idx):
         self.contacts.append([finger_idx, copy.deepcopy(T_O_Co)])
+
+    def setQHull(self, qhull):
+        self.qhull = copy.deepcopy(qhull)
 
     def success(self):
         self.successful = True

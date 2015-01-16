@@ -124,7 +124,7 @@ Class for grasp learning.
         elif marker_id == 8:
             return T_B_Tbb
         elif marker_id == 19:
-            return PyKDL.Frame(PyKDL.Vector(0,0,3)) * T_B_Tm * T_Tm_Bm * T_Bm_Gm
+            return PyKDL.Frame(PyKDL.Vector(0,0,5)) * T_B_Tm * T_Tm_Bm * T_Bm_Gm
         elif marker_id == 35:
             return T_B_Tm * T_Tm_Bm * T_Bm_Gm
         return None
@@ -311,9 +311,6 @@ Class for grasp learning.
         obj_box = grip.GraspableObject("box", "box", [0.22,0.24,0.135])
         obj_box.addMarker( 7, PyKDL.Frame(PyKDL.Vector(-0.07, 0.085, 0.065)) )
 
-        obj_big_box = grip.GraspableObject("big_box", "box", [0.20,0.20,2.0])
-        obj_big_box.addMarker( 8, PyKDL.Frame(PyKDL.Vector(0, 0, 1.0)) )
-
         obj_wall_behind = grip.GraspableObject("wall_behind", "box", [0.20,3.0,3.0])
         obj_wall_right = grip.GraspableObject("wall_right", "box", [3.0,0.2,3.0])
         obj_ceiling = grip.GraspableObject("ceiling", "box", [3.0,3.0,0.2])
@@ -395,7 +392,7 @@ Class for grasp learning.
 
 #        obj_small = grip.GraspableObject("obj_small", "box", [0.04,0.5,0.04])
 
-        self.objects = [obj_table, obj_box, obj_grasp, obj_wall_behind, obj_wall_right, obj_ceiling]#, obj_small]
+        self.objects = [obj_table, obj_grasp]#, obj_box, obj_wall_behind, obj_wall_right, obj_ceiling]
 
         if False:
             grip.gripUnitTest(obj_grasp)
@@ -428,6 +425,8 @@ Class for grasp learning.
         self.openrave.updatePose("wall_behind", PyKDL.Frame(PyKDL.Vector(-0.5,0,1.5)) )
         self.openrave.updatePose("wall_right", PyKDL.Frame(PyKDL.Vector(0,-1.3,1.5)) )
         self.openrave.updatePose("ceiling", PyKDL.Frame(PyKDL.Vector(0,0,2.3)) )
+
+        self.openrave.changeColor("object", 1, 0, 0, 0.5 )
 
 #        self.openrave.updatePose("obj_small", PyKDL.Frame(PyKDL.Vector(0.5,-0.6,1.15)) )
 
@@ -711,7 +710,7 @@ Class for grasp learning.
                         if PyKDL.dot(n_B, fr_B_z) < 0:
                             fr = fr * PyKDL.Frame(PyKDL.Rotation.RotX(math.pi))
                         # add the contact to the grip description
-                        gr.addContact(fr)
+                        gr.addContact(fr, finger_idx_min)
 
                 valid_grasps += 1
                 sim_grips[-1] = gr
@@ -727,38 +726,65 @@ Class for grasp learning.
             self.openrave.updatePose("object", T_B_Oorig)
             self.allowUpdateObjects()
 
-        if False:
-            velmautils.comSamplesUnitTest(self.openrave, self.pub_marker, "cbeam")
-            exit(0)
-
-        if False:
-            velmautils.updateComUnitTest(self.openrave, self.pub_marker, "object")
-            exit(0)
-
+        # generate GWS for each grasp
         if True:
-#            self.openrave.getGraspQHull("object")
+            print "generating GWS..."
+            for idx in range(0, self.openrave.getGraspsCount("object")):
+                if idx % 100 == 0:
+                    print "%s / %s"%(idx, self.openrave.getGraspsCount("object"))
+                if sim_grips[idx] == None:
+                    continue
+                contacts = []
+                for c in sim_grips[idx].contacts:
+                    p = c[1] * PyKDL.Vector()
+                    n = PyKDL.Frame(c[1].M) * PyKDL.Vector(0,0,-1)
+                    contacts.append([p.x(),p.y(),p.z(), n.x(),n.y(),n.z()])
+                qhull = self.openrave.generateGWS("object", contacts)
+                sim_grips[idx].setQHull(qhull)
+            print "done."
 
-            gv_B = PyKDL.Vector(0,1,0)
+        # test of the task-oriented quality measure based on GWS
+        if True:
+            gv_B = PyKDL.Vector(0,0,-1)
             T_B_O = self.openrave.getPose("object")
             T_O_B = T_B_O.Inverse()
             gv_O = PyKDL.Frame(T_O_B.M) * gv_B
             print "gv_O: %s"%(gv_O)
+            gv_wr = PyKDL.Wrench(gv_O,PyKDL.Vector())
+            com = PyKDL.Vector(0,0,0)
+            gv_wr = gv_wr.RefPoint(-com)
+
+            self.openrave.addBox("object_com", 0.01, 0.01, 0.01)
+            self.openrave.updatePose("object_com", T_B_O * PyKDL.Frame(com) )
 
             qs = []
-            for idx in range(0, self.openrave.getGraspsCount("object")):
+            for idx in range(550, self.openrave.getGraspsCount("object")):
                 if sim_grips[idx] == None:
                     continue
-
-                contacts = []
-                for c in sim_grips[idx].contacts:
-                    p = c[1] * PyKDL.Vector()
-                    n = PyKDL.Frame(c[1].M) * PyKDL.Vector(0,0,1)
-                    contacts.append([p.x(),p.y(),p.z(), n.x(),n.y(),n.z()])
-                mindist = self.openrave.getQualituMeasure2("object", contacts, gv_O, com=PyKDL.Vector(0.0,0,0))
-
                 print "index: %s"%(idx)
+
+                mindist = self.openrave.getQualituMeasure2(sim_grips[idx].qhull, gv_wr)
+#                print mindist
+
+#                m = [
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(1,0,0),PyKDL.Vector(0,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(-1,0,0),PyKDL.Vector(0,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,1,0),PyKDL.Vector(0,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,-1,0),PyKDL.Vector(0,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,1),PyKDL.Vector(0,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,-1),PyKDL.Vector(0,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(1,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(-1,0,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,1,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,-1,0))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,0,1))),
+#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,0,-1))),
+#                ]
+#                print m
+
 #                grasp = self.openrave.getGrasp("object", idx)
-#                q, contacts, ns, mindist = self.openrave.getFinalConfig("object", grasp, show=False, gv=gv_O)
+#                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True, gv=gv_O)
+
                 if mindist != None:
                     qs.append([mindist, idx])
 
@@ -767,27 +793,7 @@ Class for grasp learning.
             for qual in qs_sorted:
                 print "q: %s  i:%s"%(qual[0], qual[1])
                 grasp = self.openrave.getGrasp("object", qual[1])
-                q, contacts, ns, mindist = self.openrave.getFinalConfig("object", grasp, show=True, gv=gv_O)
-
-            exit(0)
-
-            qs = []
-            for idx in range(0, self.openrave.getGraspsCount("object")):
-                grasp = self.openrave.getGrasp("object", idx)
-                quality = self.openrave.getGraspQuality("object", grasp)
-                qs.append([quality, idx])
-
-            qs_sorted = sorted(qs, key=operator.itemgetter(0), reverse=True)
-
-            for qual in qs_sorted:
-                print "q: %s  i:%s"%(qual[0], qual[1])
-                grasp = self.openrave.getGrasp("object", qual[1])
-                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True)
-
-#            for idx in range(0, self.openrave.getGraspsCount("object")):
-#                print "index: %s"%(idx)
-#                grasp = self.openrave.getGrasp("object", idx)
-#                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True)
+                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True, gv=gv_O)
 
         if False:
 

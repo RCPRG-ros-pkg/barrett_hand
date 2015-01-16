@@ -187,6 +187,14 @@ class OpenraveInstance:
                 return self.T_World_Br.Inverse() * self.OpenraveToKDL(link.GetTransform())
         return None
 
+    def changeColor(self, name, r, g, b, a):
+        body = self.env.GetKinBody(name)
+        if body != None:
+            for link in body.GetLinks():
+                for geom in link.GetGeometries():
+                    geom.SetDiffuseColor([r,g,b])
+                    geom.SetTransparency(a)
+
     def setCamera(self, T_Br_C):
         T_World_C = self.T_World_Br * T_Br_C
         self.env.GetViewer().SetCamera(self.KDLToOpenrave(T_World_C), 1.0)
@@ -302,20 +310,22 @@ class OpenraveInstance:
 
             self.max_robots = 50
 #            robot = self.env.GetRobots()[0]
-            transparency = 0.8
-            self.newrobots = []
-            for ind in range(0, self.max_robots):
-                newrobot = RaveCreateRobot(self.env, self.robot_rave.GetXMLId())
-                newrobot.Clone(self.robot_rave,0)
-                for link in newrobot.GetLinks():
+
+            if False:
+                transparency = 0.8
+                self.newrobots = []
+                for ind in range(0, self.max_robots):
+                    newrobot = RaveCreateRobot(self.env, self.robot_rave.GetXMLId())
+                    newrobot.Clone(self.robot_rave,0)
+                    for link in newrobot.GetLinks():
+                        for geom in link.GetGeometries():
+                            geom.SetTransparency(transparency)
+                    self.newrobots.append(newrobot)
+                for link in self.robot_rave.GetLinks():
                     for geom in link.GetGeometries():
                         geom.SetTransparency(transparency)
-                self.newrobots.append(newrobot)
-            for link in self.robot_rave.GetLinks():
-                for geom in link.GetGeometries():
-                    geom.SetTransparency(transparency)
-
-
+            else:
+                self.newrobots = None
 
             joint = self.robot_rave.GetJoint("right_arm_5_joint")
             lower, upper = joint.GetLimits()
@@ -432,7 +442,8 @@ class OpenraveInstance:
 # preshapes=None, standoffs=None, rolls=None, approachrays=None, graspingnoise=None, forceclosure=True, forceclosurethreshold=1.0000000000000001e-09, checkgraspfn=None, manipulatordirections=None, translationstepmult=None, finestep=None, friction=None, avoidlinks=None, plannername=None, boxdelta=None, spheredelta=None, normalanglerange=None
 # http://openrave.org/docs/latest_stable/openravepy/databases.grasping/#openravepy.databases.grasping.GraspingModel.generatepcg
 #                self.gmodel[target_name].generate(approachrays=approachrays3, forceclosure=False, standoffs=[0.025, 0.05, 0.075])
-                self.gmodel[target_name].generate(approachrays=approachrays3, friction=0.6, forceclosure=True, standoffs=[0.04, 0.06, 0.07])
+#                self.gmodel[target_name].generate(approachrays=approachrays3, friction=0.6, forceclosure=True, standoffs=[0.04, 0.06, 0.07])
+                self.gmodel[target_name].generate(approachrays=approachrays3, friction=0.6, forceclosure=False, standoffs=[0.04, 0.06, 0.07])
                 self.gmodel[target_name].save()
 
     def getGraspsCount(self, target_name):
@@ -539,124 +550,127 @@ class OpenraveInstance:
             return gmodel.grasper.Grasp(transformrobot=False,target=gmodel.target,onlycontacttarget=True, forceclosure=True, execute=False, outputfinal=True,translationstepmult=gmodel.translationstepmult,finestep=gmodel.finestep)
 
     def getGraspQHull(self, target_name, points):
-#        points = np.array([[1,0,0], [0,1,0], [0,0,1], [1,0,1], [0,1,1], [1,1,0]])
-        print "getGraspQHull points: %s"%(len(points))
+#        print "getGraspQHull points: %s"%(len(points))
         try:
             planes, faces, triangles = self.gmodel[target_name].grasper.ConvexHull(np.array(points), returnplanes=True,returnfaces=False,returntriangles=False)
         except:
             return None
-        print "getGraspQHull planes: %s"%(len(planes))
+#        print "getGraspQHull planes: %s"%(len(planes))
         return planes
 
     def getGraspQuality(self, target_name, grasp):
         return grasp[self.gmodel[target_name].graspindices.get('forceclosure')]
 
-    def getQualituMeasure2(self, target_name, contacts, gv_O, com=None):
-                    friction = 1.0
-                    Nconepoints = 8
-                    fdeltaang = 2.0*math.pi/float(Nconepoints)
-                    qhullpoints = []
-                    for c in contacts:
-                        p = PyKDL.Vector(c[0], c[1], c[2])
-                        nz = PyKDL.Vector(c[3], c[4], c[5])
-                        if abs(nz.z()) < 0.7:
-                            nx = PyKDL.Vector(0,0,1)
-                        elif abs(nz.y()) < 0.7:
-                            nx = PyKDL.Vector(0,1,0)
-                        else:
-                            nx = PyKDL.Vector(1,0,0)
-                        ny = nz * nx
-                        nx = ny * nz
-                        ny.Normalize()
-                        nz.Normalize()
-                        R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
-                        fangle = 0.0
-                        for cp in range(Nconepoints):
-                            nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * (PyKDL.Vector(friction,0,1))
-                            fangle += fdeltaang
-                            tr = p * nn
-                            wr = PyKDL.Wrench(nn,tr)
-#                            if com != None:
-#                                wr = wr.RefPoint(com)
-#                            qhullpoints.append([nn.x(), nn.y(), nn.z(), tr.x(), tr.y(), tr.z()])
-                            qhullpoints.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
+    def generateGWS(self, target_name, contacts):
+        friction = 1.0
+        Nconepoints = 8
+        fdeltaang = 2.0*math.pi/float(Nconepoints)
+        qhullpoints = []
+        for c in contacts:
+            p = PyKDL.Vector(c[0], c[1], c[2])
+            nz = PyKDL.Vector(c[3], c[4], c[5])
+            if abs(nz.z()) < 0.7:
+                nx = PyKDL.Vector(0,0,1)
+            elif abs(nz.y()) < 0.7:
+                nx = PyKDL.Vector(0,1,0)
+            else:
+                nx = PyKDL.Vector(1,0,0)
+            ny = nz * nx
+            nx = ny * nz
+            ny.Normalize()
+            nz.Normalize()
+            R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
+            fangle = 0.0
+            for cp in range(Nconepoints):
+                nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * (PyKDL.Vector(friction,0,1))
+                fangle += fdeltaang
+                tr = p * nn
+                wr = PyKDL.Wrench(nn,tr)
+                qhullpoints.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
 
-                    qhullplanes = self.getGraspQHull(target_name, qhullpoints)
-                    if qhullplanes == None:
-                        return None
+        qhullplanes = self.getGraspQHull(target_name, qhullpoints)
+        return qhullplanes
 
-                    wrG = PyKDL.Wrench(gv_O,PyKDL.Vector())
-                    if com != None:
-                        wrG = wrG.RefPoint(com)
+    def getQualituMeasure2(self, qhull, wr):#gv_O, com=None):
+        if qhull == None:
+            return 0.0
 
-                    gv6 = [wrG[0], wrG[1], wrG[2], wrG[3], wrG[4], wrG[5]]
-                    mindist_grav = None
-                    for qp in qhullplanes:
-                        r = velmautils.projectPointToPlaneAlongVector([0.0,0.0,0.0,0.0,0.0,0.0], gv6, [qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]], qp[6], positive_only=False)
-                        if r == None:
-                            continue
-                        dqp = np.dot(r, gv6)
-                        if dqp > 0 and (mindist_grav == None or mindist_grav > dqp):
-                            mindist_grav = dqp
-                    return mindist_grav
-
+        wr6 = [wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]]
+        mindist = None
+        for qp in qhull:
+#            r = velmautils.projectPointToPlaneAlongVector([0.0,0.0,0.0,0.0,0.0,0.0], wr6, [qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]], qp[6], positive_only=False)
+#            if r == None:
+#                continue
+#            dqp = np.dot(r, wr6)
+#            if dqp > 0 and (mindist == None or mindist > dqp):
+#                mindist = dqp
+            n = np.array([qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]])
+            if np.dot(n,n) > 1.00001 or np.dot(n,n) < 0.9999:
+                print "np.dot(n,n): %s"%(np.dot(n,n))
+                exit(0)
+            dot = np.dot(np.array(wr6), n)
+            if dot > 0:
+                dqp = -qp[6]/dot
+                if mindist == None or mindist > dqp:
+                    mindist = dqp
+        return mindist
 
     def getFinalConfig(self, target_name, grasp, show=False, gv=None):
         hand_config = None
         contacts = None
         normals = None
-        mindist_grav = None
+#        mindist_grav = None
         self.robot_rave_update_lock.acquire()
         with self.robot_rave.CreateRobotStateSaver():
             with self.gmodel[target_name].GripperVisibility(self.robot_rave.GetActiveManipulator()):
                 try:
 
-                    contacts,finalconfig,mindist,volume = self.gmodel[target_name].runGraspFromTrans(grasp)
-                    friction = 1.0
-                    Nconepoints = 8
-                    fdeltaang = 2.0*math.pi/float(Nconepoints)
-                    qhullpoints = []
-                    for c in contacts:
-                        p = PyKDL.Vector(c[0], c[1], c[2])
-                        nz = PyKDL.Vector(c[3], c[4], c[5])
-                        if abs(nz.z()) < 0.7:
-                            nx = PyKDL.Vector(0,0,1)
-                        elif abs(nz.y()) < 0.7:
-                            nx = PyKDL.Vector(0,1,0)
-                        else:
-                            nx = PyKDL.Vector(1,0,0)
-                        ny = nz * nx
-                        nx = ny * nz
-                        ny.Normalize()
-                        nz.Normalize()
-                        R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
-                        fangle = 0.0
-                        for cp in range(Nconepoints):
-                            nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * (PyKDL.Vector(friction,0,1))
-                            fangle += fdeltaang
-                            tr = p * nn
-                            qhullpoints.append([nn.x(), nn.y(), nn.z(), tr.x(), tr.y(), tr.z()])
+#                    contacts,finalconfig,mindist,volume = self.gmodel[target_name].runGraspFromTrans(grasp)
+#                    friction = 1.0
+#                    Nconepoints = 8
+#                    fdeltaang = 2.0*math.pi/float(Nconepoints)
+#                    qhullpoints = []
+#                    for c in contacts:
+#                        p = PyKDL.Vector(c[0], c[1], c[2])
+#                        nz = PyKDL.Vector(c[3], c[4], c[5])
+#                        if abs(nz.z()) < 0.7:
+#                            nx = PyKDL.Vector(0,0,1)
+#                        elif abs(nz.y()) < 0.7:
+#                            nx = PyKDL.Vector(0,1,0)
+#                        else:
+#                            nx = PyKDL.Vector(1,0,0)
+#                        ny = nz * nx
+#                        nx = ny * nz
+#                        ny.Normalize()
+#                        nz.Normalize()
+#                        R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
+#                        fangle = 0.0
+#                        for cp in range(Nconepoints):
+#                            nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * (PyKDL.Vector(friction,0,1))
+#                            fangle += fdeltaang
+#                            tr = p * nn
+#                            qhullpoints.append([nn.x(), nn.y(), nn.z(), tr.x(), tr.y(), tr.z()])
+#
+#                    qhullplanes = self.getGraspQHull(target_name, qhullpoints)
+#                    if qhullplanes != None:
+#                        mindist2 = 10000000.0
+#                        for qp in qhullplanes:
+#                            if mindist2 > -qp[6]:
+#                                mindist2 = -qp[6]
+#
+#                        gv6 = [gv.x(),gv.y(),gv.z(),0.0,0.0,0.0]
+#                        mindist_grav = None
+#                        for qp in qhullplanes:
+#                            r = velmautils.projectPointToPlaneAlongVector([0.0,0.0,0.0,0.0,0.0,0.0], gv6, [qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]], qp[6], positive_only=False)
+#                            if r == None:
+#                                continue
+#                            dqp = np.dot(r, gv6)
+#                            if dqp > 0 and (mindist_grav == None or mindist_grav > dqp):
+#                                mindist_grav = dqp
 
-                    qhullplanes = self.getGraspQHull(target_name, qhullpoints)
-                    if qhullplanes != None:
-                        mindist2 = 10000000.0
-                        for qp in qhullplanes:
-                            if mindist2 > -qp[6]:
-                                mindist2 = -qp[6]
+#                        print "quality: %s  %s  %s"%(self.getGraspQuality(target_name, grasp), mindist2, mindist_grav)
 
-                        gv6 = [gv.x(),gv.y(),gv.z(),0.0,0.0,0.0]
-                        mindist_grav = None
-                        for qp in qhullplanes:
-                            r = velmautils.projectPointToPlaneAlongVector([0.0,0.0,0.0,0.0,0.0,0.0], gv6, [qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]], qp[6], positive_only=False)
-                            if r == None:
-                                continue
-                            dqp = np.dot(r, gv6)
-                            if dqp > 0 and (mindist_grav == None or mindist_grav > dqp):
-                                mindist_grav = dqp
-
-                        print "quality: %s  %s  %s"%(self.getGraspQuality(target_name, grasp), mindist2, mindist_grav)
-
-#                    contacts,finalconfig,mindist,volume = self.runGraspFromTrans(self.gmodel[target_name], grasp)
+                    contacts,finalconfig,mindist,volume = self.runGraspFromTrans(self.gmodel[target_name], grasp)
                     hand_config = [
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerTwoKnuckleTwoJoint")],
@@ -696,7 +710,7 @@ class OpenraveInstance:
             for c in contacts:
                 contacts_ret.append(self.T_World_Br.Inverse() * PyKDL.Vector(c[0], c[1], c[2]))
                 normals.append(PyKDL.Frame(self.T_World_Br.Inverse().M) * PyKDL.Vector(c[3], c[4], c[5]))
-        return hand_config, contacts_ret, normals, mindist_grav
+        return hand_config, contacts_ret, normals#, mindist_grav
 
     def showFinalConfigs(self, target_name, grasps):
        self.robot_rave_update_lock.acquire()
@@ -727,7 +741,7 @@ class OpenraveInstance:
                             self.env.UpdatePublishedBodies()
 
 #                            self.gmodel[target_name].contactgraph = None
-                        elif index <= self.max_robots:
+                        elif index <= self.max_robots and self.newrobots != None:
 
                             self.env.Add(self.newrobots[index-1],True)
                             self.newrobots[index-1].SetTransform(np.dot(self.gmodel[target_name].getGlobalGraspTransform(grasps[index]),np.dot(np.linalg.inv(self.newrobots[index-1].GetActiveManipulator().GetEndEffectorTransform()),self.newrobots[index-1].GetTransform())))
