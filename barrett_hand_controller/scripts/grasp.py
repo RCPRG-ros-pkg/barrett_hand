@@ -124,7 +124,9 @@ Class for grasp learning.
         elif marker_id == 8:
             return T_B_Tbb
         elif marker_id == 19:
-            return PyKDL.Frame(PyKDL.Vector(0,0,5)) * T_B_Tm * T_Tm_Bm * T_Bm_Gm
+#            return PyKDL.Frame(PyKDL.Vector(0,0,5)) * T_B_Tm * T_Tm_Bm * T_Bm_Gm
+#            return T_B_Tm * T_Tm_Bm * T_Bm_Gm
+            return T_B_Tm * T_Bm_Gm
         elif marker_id == 35:
             return T_B_Tm * T_Tm_Bm * T_Bm_Gm
         return None
@@ -426,7 +428,9 @@ Class for grasp learning.
         self.openrave.updatePose("wall_right", PyKDL.Frame(PyKDL.Vector(0,-1.3,1.5)) )
         self.openrave.updatePose("ceiling", PyKDL.Frame(PyKDL.Vector(0,0,2.3)) )
 
-        self.openrave.changeColor("object", 1, 0, 0, 0.5 )
+        self.openrave.changeColor("object", 1, 0, 0, 0 )
+
+        self.openrave.changeColor("table", 0.8, 0.8, 0.8, 0 )
 
 #        self.openrave.updatePose("obj_small", PyKDL.Frame(PyKDL.Vector(0.5,-0.6,1.15)) )
 
@@ -764,26 +768,6 @@ Class for grasp learning.
                 print "index: %s"%(idx)
 
                 mindist = self.openrave.getQualituMeasure2(sim_grips[idx].qhull, gv_wr)
-#                print mindist
-
-#                m = [
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(1,0,0),PyKDL.Vector(0,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(-1,0,0),PyKDL.Vector(0,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,1,0),PyKDL.Vector(0,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,-1,0),PyKDL.Vector(0,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,1),PyKDL.Vector(0,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,-1),PyKDL.Vector(0,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(1,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(-1,0,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,1,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,-1,0))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,0,1))),
-#                self.openrave.getQualituMeasure2(sim_grips[idx].qhull, PyKDL.Wrench(PyKDL.Vector(0,0,0),PyKDL.Vector(0,0,-1))),
-#                ]
-#                print m
-
-#                grasp = self.openrave.getGrasp("object", idx)
-#                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True, gv=gv_O)
 
                 if mindist != None:
                     qs.append([mindist, idx])
@@ -793,7 +777,7 @@ Class for grasp learning.
             for qual in qs_sorted:
                 print "q: %s  i:%s"%(qual[0], qual[1])
                 grasp = self.openrave.getGrasp("object", qual[1])
-                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True, gv=gv_O)
+                q, contacts, ns = self.openrave.getFinalConfig("object", grasp, show=True, sim_grip=sim_grips[qual[1]])
 
         if False:
 
@@ -801,8 +785,6 @@ Class for grasp learning.
             q5 = -1.0
             for i in range(0, 20):
                 velma.qar[5] = q5
-#                for j in range(0, 7):
-#                    velma.qar[j] = orig_qar[j] + random.uniform(-0.8, 0.8)
                 print velma_ikr.getManipulability(velma.qar)
                 raw_input("Press Enter to continue...")
                 q5 += 0.1

@@ -208,6 +208,7 @@ class OpenraveInstance:
             self.normals_sphere_5_deg = velmautils.generateNormalsSphere(5.0/180.0*math.pi, x_positive = True, y_positive = False)
             self.env = env
             self.robot_rave = env.ReadRobotXMLFile('robots/velma_col.robot.xml')
+#            self.robot_rave = env.ReadRobotXMLFile('robots/velma2.robot.xml')
 
             # ODE does not support distance measure
             #self.env.GetCollisionChecker().SetCollisionOptions(CollisionOptions.Distance|CollisionOptions.Contacts)
@@ -615,7 +616,7 @@ class OpenraveInstance:
                     mindist = dqp
         return mindist
 
-    def getFinalConfig(self, target_name, grasp, show=False, gv=None):
+    def getFinalConfig(self, target_name, grasp, show=False, sim_grip=None):
         hand_config = None
         contacts = None
         normals = None
@@ -624,52 +625,6 @@ class OpenraveInstance:
         with self.robot_rave.CreateRobotStateSaver():
             with self.gmodel[target_name].GripperVisibility(self.robot_rave.GetActiveManipulator()):
                 try:
-
-#                    contacts,finalconfig,mindist,volume = self.gmodel[target_name].runGraspFromTrans(grasp)
-#                    friction = 1.0
-#                    Nconepoints = 8
-#                    fdeltaang = 2.0*math.pi/float(Nconepoints)
-#                    qhullpoints = []
-#                    for c in contacts:
-#                        p = PyKDL.Vector(c[0], c[1], c[2])
-#                        nz = PyKDL.Vector(c[3], c[4], c[5])
-#                        if abs(nz.z()) < 0.7:
-#                            nx = PyKDL.Vector(0,0,1)
-#                        elif abs(nz.y()) < 0.7:
-#                            nx = PyKDL.Vector(0,1,0)
-#                        else:
-#                            nx = PyKDL.Vector(1,0,0)
-#                        ny = nz * nx
-#                        nx = ny * nz
-#                        ny.Normalize()
-#                        nz.Normalize()
-#                        R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
-#                        fangle = 0.0
-#                        for cp in range(Nconepoints):
-#                            nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * (PyKDL.Vector(friction,0,1))
-#                            fangle += fdeltaang
-#                            tr = p * nn
-#                            qhullpoints.append([nn.x(), nn.y(), nn.z(), tr.x(), tr.y(), tr.z()])
-#
-#                    qhullplanes = self.getGraspQHull(target_name, qhullpoints)
-#                    if qhullplanes != None:
-#                        mindist2 = 10000000.0
-#                        for qp in qhullplanes:
-#                            if mindist2 > -qp[6]:
-#                                mindist2 = -qp[6]
-#
-#                        gv6 = [gv.x(),gv.y(),gv.z(),0.0,0.0,0.0]
-#                        mindist_grav = None
-#                        for qp in qhullplanes:
-#                            r = velmautils.projectPointToPlaneAlongVector([0.0,0.0,0.0,0.0,0.0,0.0], gv6, [qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]], qp[6], positive_only=False)
-#                            if r == None:
-#                                continue
-#                            dqp = np.dot(r, gv6)
-#                            if dqp > 0 and (mindist_grav == None or mindist_grav > dqp):
-#                                mindist_grav = dqp
-
-#                        print "quality: %s  %s  %s"%(self.getGraspQuality(target_name, grasp), mindist2, mindist_grav)
-
                     contacts,finalconfig,mindist,volume = self.runGraspFromTrans(self.gmodel[target_name], grasp)
                     hand_config = [
                     finalconfig[0][self.robot_rave.GetJointIndex("right_HandFingerOneKnuckleTwoJoint")],
@@ -687,10 +642,18 @@ class OpenraveInstance:
                     ]
 
                     if show:
-#                        print "mindist: %s (%s),   volume: %s"%(mindist,grasp[self.gmodel[target_name].graspindices.get('forceclosure')],volume)
                         self.robot_rave.SetTransform(np.dot(self.gmodel[target_name].getGlobalGraspTransform(grasp),np.dot(np.linalg.inv(self.robot_rave.GetActiveManipulator().GetEndEffectorTransform()),self.robot_rave.GetTransform())))
 
                         self.robot_rave.SetDOFValues([hand_config2[0], hand_config2[1], hand_config2[2], hand_config2[3]],self.robot_rave.GetActiveManipulator().GetGripperIndices())
+
+                        if sim_grip != None:
+                            T_B_O = self.getPose(target_name)
+                            contacts = []
+                            for c in sim_grip.contacts:
+                                T_World_C = self.T_World_Br * T_B_O * c[1]
+                                p = T_World_C * PyKDL.Vector()
+                                n = PyKDL.Frame(T_World_C.M) * PyKDL.Vector(0,0,1)
+                                contacts.append([p[0],p[1],p[2],n[0],n[1],n[2]])
 
                         self.gmodel[target_name].contactgraph = self.gmodel[target_name].drawContacts(contacts)
                         self.env.UpdatePublishedBodies()
