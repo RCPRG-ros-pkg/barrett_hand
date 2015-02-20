@@ -503,6 +503,7 @@ Class for grasp learning.
 
     def spin(self):
         m_id = 0
+        self.pub_marker.eraseMarkers(0,1000, frame_id='world')
 
         #
         # Init Openrave
@@ -526,7 +527,6 @@ Class for grasp learning.
             print j
 
         # ODE does not support distance measure
-        #self.env.GetCollisionChecker().SetCollisionOptions(CollisionOptions.Distance|CollisionOptions.Contacts)
         self.env.GetCollisionChecker().SetCollisionOptions(CollisionOptions.Contacts)
 
         self.env.Add(self.openrave_robot)
@@ -559,10 +559,12 @@ Class for grasp learning.
             torque = wr_orig * force
             ext_wrenches.append(PyKDL.Wrench(force, torque))
 
+        #
         # definition of the grasps
+        #
         grasp_id = 0
         if grasp_id == 0:
-            grasp_direction = [0, 1, -1, 1]
+            grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
             grasp_initial_configuration = [60.0/180.0*math.pi, None, None, None]
             self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.174202588426, -0.177472708083, -0.691231954612, 0.678495061771), PyKDL.Vector(0.0, -0.0213436260819, 0.459123969078))
         else:
@@ -586,15 +588,33 @@ Class for grasp learning.
 
         self.pub_js = rospy.Publisher("/joint_states", JointState)
 
+        #
         # PyODE test
+        #
         if True:
+
+            fixed_joints_names_for_fixed_DOF = [
+            ["right_HandFingerOneKnuckleOneJoint", "right_HandFingerTwoKnuckleOneJoint"],          # spread
+            ["right_HandFingerOneKnuckleTwoJoint", "right_HandFingerOneKnuckleThreeJoint"],        # f1
+            ["right_HandFingerThreeKnuckleTwoJoint", "right_HandFingerThreeKnuckleThreeJoint"],    # f3
+            ["right_HandFingerTwoKnuckleTwoJoint", "right_HandFingerTwoKnuckleThreeJoint"],        # f2
+            ]
+            coupled_joint_names_for_fingers = ["right_HandFingerOneKnuckleThreeJoint", "right_HandFingerTwoKnuckleThreeJoint", "right_HandFingerThreeKnuckleThreeJoint"]
+
+            actuated_joints_for_DOF = [
+            ["right_HandFingerOneKnuckleOneJoint", "right_HandFingerTwoKnuckleOneJoint"],  # spread
+            ["right_HandFingerOneKnuckleTwoJoint"],                                        # f1
+            ["right_HandFingerThreeKnuckleTwoJoint"],                                      # f3
+            ["right_HandFingerTwoKnuckleTwoJoint"]]                                        # f2
+
+            ignored_links = ["world", "world_link"]
 
             self.force_W = None
             self.T_W_obj_pose_marker = PyKDL.Frame()
 #            self.insert6DofGlobalMarker(self.T_W_O)
 
             #
-            # calculation of the configuration of the gripper for the given grasp
+            # calculation of the configuration of the gripper for the given grasp using Openrave
             #
             self.basemanip = interfaces.BaseManipulation(self.openrave_robot)
             self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
@@ -614,10 +634,53 @@ Class for grasp learning.
             for link in self.openrave_robot.GetLinks():
                 grasp_links_poses[link.GetName()] = self.OpenraveToKDL(link.GetTransform())
 
+            # visualize the grasp in ROS
+            for i in range(5):
+                m_id = 0
+                # publish the mesh of the object
+                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+
+                # update the gripper visualization in ros
+                js = JointState()
+                js.header.stamp = rospy.Time.now()
+                for jn in joint_map:
+                    js.name.append(joint_map[jn])
+                    js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                self.pub_js.publish(js)
+
+                # draw contacts
+                for c in contacts:
+                    cc = PyKDL.Vector(c[0], c[1], c[2])
+                    cn = PyKDL.Vector(c[3], c[4], c[5])
+                    m_id = self.pub_marker.publishVectorMarker(cc, cc+cn*0.04, m_id, 1, 0, 0, frame='world', namespace='default', scale=0.003)
+
+                rospy.sleep(0.1)
+
+            contacts_reduced = contacts#self.reduceContacts(contacts)
+
+            gws = self.generateGWS(contacts_reduced)
+
+            grasp_quality = None
+            for wr in ext_wrenches:
+                wr_qual = self.getQualituMeasure2(gws, wr)
+                if grasp_quality == None or wr_qual < grasp_quality:
+                    grasp_quality = wr_qual
+
+            grasp_quality_classic = self.getQualituMeasure(gws)
+
+            print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
+
+            raw_input("Press ENTER to continue...")
+
+            # reset the gripper in Openrave
             self.openrave_robot.SetDOFValues([0,0,0,0])
 
-            print "obtained the gripper configuration for the grasp"
+            print "obtained the gripper configuration for the grasp:"
             print finalconfig[0]
+
+            #
+            # simulation in ODE
+            #
 
             # Create a world object
             world = ode.World()
@@ -634,8 +697,7 @@ Class for grasp learning.
             # Create a body inside the world
             body = ode.Body(world)
             M = ode.Mass()
-            M.setCylinder(2500.0, 1, 0.01, 0.09)
-            M.mass = 1.0
+            M.setCylinderTotal(0.02, 1, 0.005, 0.09)
             body.setMass(M)
 
             ode_mesh = ode.TriMeshData()
@@ -645,12 +707,6 @@ Class for grasp learning.
             geom.setBody(body)
 
             self.setOdeBodyPose(geom, self.T_W_O)
-
-            ignored_links = ["world", "world_link",]
-            coupled_joints_names = ["right_HandFingerOneKnuckleThreeJoint", "right_HandFingerTwoKnuckleThreeJoint", "right_HandFingerThreeKnuckleThreeJoint"]
-#            fixed_links = ["right_HandPalmLink"]
-#            "right_HandFingerTwoKnuckleOneLink", "right_HandFingerTwoKnuckleTwoLink", "right_HandFingerTwoKnuckleThreeLink",# "right_HandFingerOneKnuckleOneLink",
-#            "right_HandFingerThreeKnuckleOneLink", "right_HandFingerThreeKnuckleTwoLink", "right_HandFingerThreeKnuckleThreeLink"]#, "right_HandFingerOneKnuckleTwoLink", "right_HandFingerOneKnuckleThreeLink"]
 
             ode_gripper_geoms = {}
             for link in self.openrave_robot.GetLinks():
@@ -672,22 +728,15 @@ Class for grasp learning.
                 ode_mesh_link = ode.TriMeshData()
                 ode_mesh_link.build(vertices, faces)
                 ode_gripper_geoms[link_name] = ode.GeomTriMesh(ode_mesh_link, self.space)
-#                self.setOdeBodyPose(ode_gripper_geoms[link_name], T_W_L)
 
                 if True:
                     body_link = ode.Body(world)
                     M_link = ode.Mass()
-                    M_link.setCylinder(2500.0, 1, 0.01, 0.09)
-                    M_link.mass = 1.0
+                    M_link.setCylinderTotal(0.05, 1, 0.01, 0.09)
                     body_link.setMass(M_link)
                     ode_gripper_geoms[link_name].setBody(body_link)
                     ode_gripper_geoms[link_name].name = link.GetName()
                     self.setOdeBodyPose(body_link, T_W_L)
-
-
-#            print "geoms in space:"
-#            for i in range( self.space.getNumGeoms()):
-#                print self.space.getGeom(i).name
 
             ode_gripper_joints = {}
 
@@ -702,19 +751,19 @@ Class for grasp learning.
                     limits = joint.GetLimits()
                     anchor = joint.GetAnchor()
                     value = joint.GetValue(0)
-                    print joint_name
-                    print "limits: %s %s"%(limits[0], limits[1])
-                    print "axis: %s"%(axis)
-                    print "anchor: %s"%(anchor)
-                    print "value: %s"%(value)
+#                    print joint_name
+#                    print "limits: %s %s"%(limits[0], limits[1])
+#                    print "axis: %s"%(axis)
+#                    print "anchor: %s"%(anchor)
+#                    print "value: %s"%(value)
                     ode_gripper_joints[joint_name].setAxis(-axis)
                     ode_gripper_joints[joint_name].setAnchor(anchor)
                     lim = [limits[0], limits[1]]
                     if limits[0] <= -math.pi:
-                        print "lower joint limit %s <= -PI, setting to -PI+0.01"%(limits[0])
+#                        print "lower joint limit %s <= -PI, setting to -PI+0.01"%(limits[0])
                         lim[0] = -math.pi + 0.01
                     if limits[1] >= math.pi:
-                        print "upper joint limit %s >= PI, setting to PI-0.01"%(limits[1])
+#                        print "upper joint limit %s >= PI, setting to PI-0.01"%(limits[1])
                         lim[1] = math.pi - 0.01
                     ode_gripper_joints[joint_name].setParam(ode.ParamLoStop, lim[0])
                     ode_gripper_joints[joint_name].setParam(ode.ParamHiStop, lim[1])
@@ -734,11 +783,19 @@ Class for grasp learning.
                 T_W_L = grasp_links_poses[link_name]
                 self.setOdeBodyPose(ode_body, T_W_L)
 
+            fixed_joint_names = []
+            fixed_joint_names += coupled_joint_names_for_fingers
+            for dof in range(4):
+                if grasp_direction[dof] == 0.0:
+                    for joint_name in fixed_joints_names_for_fixed_DOF[dof]:
+                        if not joint_name in fixed_joint_names:
+                            fixed_joint_names.append(joint_name)
+
             #
             # change all coupled joints to fixed joints
             #
-            fixed_coupled_joints = {}
-            for joint_name in coupled_joints_names:
+            fixed_joints = {}
+            for joint_name in fixed_joint_names:
                 # save the bodies attached
                 body0 = ode_gripper_joints[joint_name].getBody(0)
                 body1 = ode_gripper_joints[joint_name].getBody(1)
@@ -747,9 +804,9 @@ Class for grasp learning.
                 # detach the joint
                 ode_gripper_joints[joint_name].attach(None, None)
                 del ode_gripper_joints[joint_name]
-                fixed_coupled_joints[joint_name] = [ode.FixedJoint(world), angle]
-                fixed_coupled_joints[joint_name][0].attach(body0, body1)
-                fixed_coupled_joints[joint_name][0].setFixed()
+                fixed_joints[joint_name] = [ode.FixedJoint(world), angle]
+                fixed_joints[joint_name][0].attach(body0, body1)
+                fixed_joints[joint_name][0].setFixed()
 
             # A joint group for the contact joints that are generated whenever
             # two bodies collide
@@ -760,28 +817,21 @@ Class for grasp learning.
 
             # Do the simulation...
             dt = 0.004
-            while not rospy.is_shutdown():
+            total_time = 0.0
+            while total_time < 20.0 and not rospy.is_shutdown():
                 #
                 # ODE simulation
                 #
-#                ode_gripper_joints["right_HandFingerOneKnuckleOneJoint"].addTorque(0.01)
-                ode_gripper_joints["right_HandFingerOneKnuckleTwoJoint"].addTorque(0.1)
-                ode_gripper_joints["right_HandFingerTwoKnuckleTwoJoint"].addTorque(0.1)
-                ode_gripper_joints["right_HandFingerThreeKnuckleTwoJoint"].addTorque(-0.1)
 
-                if self.force_W != None:
-                    force_mult = 1.0#50.0
-                    torque_mult = 1.0#10.0
-                    body.addForce((self.force_W.vel.x()*force_mult, self.force_W.vel.y()*force_mult, self.force_W.vel.z()*force_mult))
-                    body.addTorque((self.force_W.rot.x()*torque_mult, self.force_W.rot.y()*torque_mult, self.force_W.rot.z()*torque_mult))
-#                    print "addForce: %s"%(self.force_W.vel)
-#                    print "addTorce: %s"%(self.force_W.rot)
-#                    self.force_W = None
+                for dof in range(4):
+                    for joint_name in actuated_joints_for_DOF[dof]:
+                        if joint_name in ode_gripper_joints:
+                            ode_gripper_joints[joint_name].addTorque(0.1*grasp_direction[dof])
 
                 self.grasp_contacts = []
                 self.space.collide((world,contactgroup), self.near_callback)
                 world.step(dt)
-
+                total_time += dt
                 contactgroup.empty()
 
                 #
@@ -790,13 +840,14 @@ Class for grasp learning.
 
                 old_m_id = m_id
                 m_id = 0
-                # publish frames for ODE
-                for link_name in ode_gripper_geoms:
-                    link_body = ode_gripper_geoms[link_name].getBody()
-                    if link_body == None:
-                        link_body = ode_gripper_geoms[link_name]
-                    T_W_Lsim = self.getOdeBodyPose(link_body)
-                    m_id = self.pub_marker.publishFrameMarker(T_W_Lsim, m_id, scale=0.05, frame='world', namespace='default')
+                # publish frames from ODE
+                if False:
+                    for link_name in ode_gripper_geoms:
+                        link_body = ode_gripper_geoms[link_name].getBody()
+                        if link_body == None:
+                            link_body = ode_gripper_geoms[link_name]
+                        T_W_Lsim = self.getOdeBodyPose(link_body)
+                        m_id = self.pub_marker.publishFrameMarker(T_W_Lsim, m_id, scale=0.05, frame='world', namespace='default')
 
                 # publish the mesh of the object
                 T_W_Osim = self.getOdeBodyPose(body)
@@ -810,8 +861,8 @@ Class for grasp learning.
                     js.name.append(ros_joint_name)
                     if jn in ode_gripper_joints:
                         js.position.append(ode_gripper_joints[jn].getAngle())
-                    elif jn in fixed_coupled_joints:
-                        js.position.append(fixed_coupled_joints[jn][1])
+                    elif jn in fixed_joints:
+                        js.position.append(fixed_joints[jn][1])
                     else:
                         js.position.append(0)
                 self.pub_js.publish(js)
@@ -825,18 +876,27 @@ Class for grasp learning.
                 if m_id < old_m_id:
                     self.pub_marker.eraseMarkers(m_id,old_m_id+1, frame_id='world')
 
-                rospy.sleep(0.01)
+#                rospy.sleep(0.01)
+
+
+            gws = self.generateGWS(self.grasp_contacts)
+
+            grasp_quality = None
+            for wr in ext_wrenches:
+                wr_qual = self.getQualituMeasure2(gws, wr)
+                if grasp_quality == None or wr_qual < grasp_quality:
+                    grasp_quality = wr_qual
+
+            grasp_quality_classic = self.getQualituMeasure(gws)
+
+            print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
 
             exit(0)
-
-
-
-
-#        link = self.openrave_robot.GetLink("right_HandPalmLink")
-#        link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleTwoLink")
-#        col = link.GetCollisionData()
-#        vertices = col.vertices
-#        faces = col.indices
+#################################
+#################################
+#################################
+#################################
+#################################
 
 #        surface_points = velmautils.sampleMeshDetailed(vertices, faces, 0.005)
         surface_points = velmautils.sampleMeshDetailedRays(vertices, faces, 0.001)
