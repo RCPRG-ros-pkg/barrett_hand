@@ -592,22 +592,16 @@ class OpenraveInstance:
         qhullplanes = self.getGraspQHull(target_name, qhullpoints)
         return qhullplanes
 
-    def getQualituMeasure2(self, qhull, wr):#gv_O, com=None):
+    def getQualituMeasure2(self, qhull, wr):
         if qhull == None:
             return 0.0
 
         wr6 = [wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]]
         mindist = None
         for qp in qhull:
-#            r = velmautils.projectPointToPlaneAlongVector([0.0,0.0,0.0,0.0,0.0,0.0], wr6, [qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]], qp[6], positive_only=False)
-#            if r == None:
-#                continue
-#            dqp = np.dot(r, wr6)
-#            if dqp > 0 and (mindist == None or mindist > dqp):
-#                mindist = dqp
             n = np.array([qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]])
             if np.dot(n,n) > 1.00001 or np.dot(n,n) < 0.9999:
-                print "np.dot(n,n): %s"%(np.dot(n,n))
+                print "ERROR: getQualituMeasure2: np.dot(n,n): %s"%(np.dot(n,n))
                 exit(0)
             dot = np.dot(np.array(wr6), n)
             if dot > 0:

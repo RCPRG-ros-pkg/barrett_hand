@@ -578,6 +578,11 @@ Class for grasp learning.
         self.disallowUpdateObjects()
 
         vertices, faces = self.openrave.getMesh("object")
+
+        print vertices
+        print faces
+
+        exit(0)
 #        com_pt = velmautils.generateComSamples(vertices, faces, 2000)
 #        obj_grasp.addComPoints(com_pt)
 
