@@ -67,6 +67,7 @@ from openravepy.openravepy_int import KinBody, TriMesh
 from optparse import OptionParser
 from openravepy.misc import OpenRAVEGlobalArguments
 import velmautils
+import surfaceutils
 import openraveinstance
 import itertools
 import dijkstra
@@ -150,7 +151,7 @@ Class for grasp learning.
                         if directions[i] > 0.0:
                             pos.append(lower_limit[i]+0.001)
                         elif directions[i] < 0.0:
-                            pos.append(upper_limit[i]-0.001)
+                            pos.append(upper_limit[i]-0.051)
                         else:
                             pos.append(positions[i])
 
@@ -172,14 +173,10 @@ Class for grasp learning.
             return None
         return planes
 
-    def generateGWS(self, contacts):
-        friction = 1.0
-        Nconepoints = 6
-        fdeltaang = 2.0*math.pi/float(Nconepoints)
-        qhullpoints = []
-        for c in contacts:
-            p = PyKDL.Vector(c[0], c[1], c[2])
-            nz = PyKDL.Vector(c[3], c[4], c[5])
+    def contactToWrenches(self, pos, normal, friction, Nconepoints):
+            wrenches = []
+            fdeltaang = 2.0*math.pi/float(Nconepoints)
+            nz = normal
             if abs(nz.z()) < 0.7:
                 nx = PyKDL.Vector(0,0,1)
             elif abs(nz.y()) < 0.7:
@@ -188,19 +185,59 @@ Class for grasp learning.
                 nx = PyKDL.Vector(1,0,0)
             ny = nz * nx
             nx = ny * nz
+            nx.Normalize()
             ny.Normalize()
             nz.Normalize()
             R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
             fangle = 0.0
             for cp in range(Nconepoints):
-                nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * (PyKDL.Vector(friction,0,1))
+                nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * PyKDL.Vector(friction,0,1)
                 fangle += fdeltaang
-                tr = p * nn
+                tr = pos * nn
                 wr = PyKDL.Wrench(nn,tr)
+                wrenches.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
+            return wrenches
+
+    def generateGWS(self, contacts, friction):
+        qhullpoints = []
+        qhullpoints_contact_idx = []
+        contact_idx = 0
+        for c in contacts:
+            p = PyKDL.Vector(c[0], c[1], c[2])
+            nz = PyKDL.Vector(c[3], c[4], c[5])
+            wrs = self.contactToWrenches(p, nz, friction, 6)
+            for wr in wrs:
                 qhullpoints.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
+                qhullpoints_contact_idx.append(contact_idx)
+            contact_idx += 1
 
         qhullplanes = self.getGraspQHull(qhullpoints)
-        return qhullplanes
+        qhullplanes_contacts = []
+        contact_planes = []
+        for pl in qhullplanes:
+            qhullplanes_contacts.append([])
+
+        for c in contacts:
+            contact_planes.append([])
+
+        for pt_idx in range(len(qhullpoints)):
+            pt = qhullpoints[pt_idx]
+            contact_idx = qhullpoints_contact_idx[pt_idx]
+
+            for pl_idx in range(len(qhullplanes)):
+                pl = qhullplanes[pl_idx]
+                dist = pl[0] * pt[0] + pl[1] * pt[1] + pl[2] * pt[2] + pl[3] * pt[3] + pl[4] * pt[4] + pl[5] * pt[5] + pl[6]
+                if abs(dist) < 0.00000001 and not contact_idx in qhullplanes_contacts[pl_idx]:
+                    qhullplanes_contacts[pl_idx].append(contact_idx)
+                    contact_planes[contact_idx].append(pl_idx)
+
+#        for contact_idx in range(len(contacts)):
+#            print contact_planes[contact_idx]
+
+#        for pl_idx in range(len(qhullplanes)):
+#            print qhullplanes_contacts[pl_idx]
+
+        return qhullplanes, contact_planes
 
     def reduceContacts(self, contacts):
         max_angle = 15.0/180*math.pi
@@ -261,32 +298,52 @@ Class for grasp learning.
         return control
 
     def processFeedback(self, feedback):
-        if feedback.marker_name == 'obj_pose_marker' and feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP:
-#            self.T_W_O = pm.fromMsg(feedback.pose)
-            old_T_W_obj_pose_marker = self.T_W_obj_pose_marker
-            self.T_W_obj_pose_marker = pm.fromMsg(feedback.pose)
-#            self.force_W = PyKDL.diff(old_T_W_obj_pose_marker, self.T_W_obj_pose_marker)
-            self.force_W = PyKDL.diff(PyKDL.Frame(), self.T_W_obj_pose_marker)
+        if feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK and feedback.control_name == "button":
+            self.run_ode_simulation = True
+
+        if feedback.marker_name == 'obj_pose_marker':# and feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP:
+            self.T_W_O = pm.fromMsg(feedback.pose)
+
+    def createButtonMarkerControl(self, scale, position):
+        marker = Marker()
+        marker.type = Marker.SPHERE
+        marker.scale = scale
+        marker.pose.position = position
+        marker.color = ColorRGBA(1,0,0,1)
+        control = InteractiveMarkerControl()
+        control.always_visible = True;
+        control.markers.append( marker );
+        return control
 
     def insert6DofGlobalMarker(self, T_W_M):
         int_position_marker = InteractiveMarker()
         int_position_marker.header.frame_id = 'world'
         int_position_marker.name = 'obj_pose_marker'
-        int_position_marker.scale = 0.2
+        int_position_marker.scale = 0.1
         int_position_marker.pose = pm.toMsg(T_W_M)
-
         int_position_marker.controls.append(self.createInteractiveMarkerControl6DOF(InteractiveMarkerControl.ROTATE_AXIS,'x'));
         int_position_marker.controls.append(self.createInteractiveMarkerControl6DOF(InteractiveMarkerControl.ROTATE_AXIS,'y'));
         int_position_marker.controls.append(self.createInteractiveMarkerControl6DOF(InteractiveMarkerControl.ROTATE_AXIS,'z'));
         int_position_marker.controls.append(self.createInteractiveMarkerControl6DOF(InteractiveMarkerControl.MOVE_AXIS,'x'));
         int_position_marker.controls.append(self.createInteractiveMarkerControl6DOF(InteractiveMarkerControl.MOVE_AXIS,'y'));
         int_position_marker.controls.append(self.createInteractiveMarkerControl6DOF(InteractiveMarkerControl.MOVE_AXIS,'z'));
-
-#        box = createAxisMarkerControl(Point(0.15,0.015,0.015), Point(0.0, 0.0, 0.0) )
-#        box.interaction_mode = InteractiveMarkerControl.BUTTON
-#        box.name = 'button'
-#        int_position_marker.controls.append( box )
         self.mk_server.insert(int_position_marker, self.processFeedback)
+
+        int_button_marker = InteractiveMarker()
+        int_button_marker.header.frame_id = 'world'
+        int_button_marker.name = 'obj_button_marker'
+        int_button_marker.scale = 0.2
+        int_button_marker.pose = pm.toMsg(PyKDL.Frame())
+        box = self.createButtonMarkerControl(Point(0.05,0.05,0.05), Point(0.0, 0.0, 0.15) )
+        box.interaction_mode = InteractiveMarkerControl.BUTTON
+        box.name = 'button'
+        int_button_marker.controls.append( box )
+        self.mk_server.insert(int_button_marker, self.processFeedback)
+
+        self.mk_server.applyChanges()
+
+    def erase6DofMarker(self):
+        self.mk_server.erase('obj_pose_marker')
         self.mk_server.applyChanges()
 
     def getMesh(self, name):
@@ -496,14 +553,14 @@ Class for grasp learning.
         # Create contact joints
         world,contactgroup = args
         for c in contacts:
-            c.setBounce(0.2)
+            c.setBounce(0.0)
             c.setMu(5000)
             j = ode.ContactJoint(world, contactgroup, c)
             j.attach(body1, body2)
 
     def spin(self):
         m_id = 0
-        self.pub_marker.eraseMarkers(0,1000, frame_id='world')
+        self.pub_marker.eraseMarkers(0,3000, frame_id='world')
 
         #
         # Init Openrave
@@ -511,7 +568,7 @@ Class for grasp learning.
         parser = OptionParser(description='Openrave Velma interface')
         OpenRAVEGlobalArguments.addOptions(parser)
         (options, leftargs) = parser.parse_args()
-        self.env = OpenRAVEGlobalArguments.parseAndCreate(options,defaultviewer=True)
+        self.env = OpenRAVEGlobalArguments.parseAndCreate(options)#,defaultviewer=True)
 
         self.openrave_robot = self.env.ReadRobotXMLFile('robots/barretthand_ros.robot.xml')
 
@@ -531,7 +588,7 @@ Class for grasp learning.
 
         self.env.Add(self.openrave_robot)
 
-        vertices, faces = velmautils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+        vertices, faces = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
         self.addTrimesh("object", vertices, faces)
 
 #        self.addBox("object", 0.2,0.06,0.06)
@@ -566,7 +623,32 @@ Class for grasp learning.
         if grasp_id == 0:
             grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
             grasp_initial_configuration = [60.0/180.0*math.pi, None, None, None]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.174202588426, -0.177472708083, -0.691231954612, 0.678495061771), PyKDL.Vector(0.0, -0.0213436260819, 0.459123969078))
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.122103662206, -0.124395758838, -0.702726011729, 0.689777190329), PyKDL.Vector(-0.00115787237883, -0.0194999426603, 0.458197712898))
+#            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.174202588426, -0.177472708083, -0.691231954612, 0.678495061771), PyKDL.Vector(0.0, -0.0213436260819, 0.459123969078))
+        elif grasp_id == 1:
+            grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
+            grasp_initial_configuration = [90.0/180.0*math.pi, None, None, None]
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0187387771868, -0.708157209758, -0.0317875569224, 0.705090018033), PyKDL.Vector(4.65661287308e-10, 0.00145332887769, 0.472836345434))
+        elif grasp_id == 2:
+            grasp_direction = [0, 1, 0, 0]    # spread, f1, f3, f2
+            grasp_initial_configuration = [90.0/180.0*math.pi, None, 90.0/180.0*math.pi, 0]
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0187387763947, -0.708157179826, -0.0317875555789, 0.705089928626), PyKDL.Vector(0.0143095180392, 0.00145332887769, 0.483659058809))
+        elif grasp_id == 3:
+            grasp_direction = [0, 1, 1, 1]    # spread, f1, f3, f2
+            grasp_initial_configuration = [90.0/180.0*math.pi, None, None, None]
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00518634245761, -0.706548316769, -0.0182458505507, 0.707410947861), PyKDL.Vector(0.000126354629174, -0.00217361748219, 0.47637796402))
+        elif grasp_id == 4:
+            grasp_direction = [0, 0, 1, 0]    # spread, f1, f3, f2
+            grasp_initial_configuration = [90.0/180.0*math.pi, 100.0/180.0*math.pi, None, 100.0/180.0*math.pi]
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(0.153445252933, -0.161230275653, 0.681741576082, 0.696913201022), PyKDL.Vector(0.000126355327666, 0.00152841210365, 0.466048002243))
+        elif grasp_id == 5:
+            grasp_direction = [0, 0, 1, 0]    # spread, f1, f3, f2
+            grasp_initial_configuration = [100.0/180.0*math.pi, 101.5/180.0*math.pi, None, 101.5/180.0*math.pi]
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(0.155488650062, -0.159260521271, 0.690572597636, 0.688163302213), PyKDL.Vector(-0.000278688268736, 0.00575117766857, 0.461560428143))
+        elif grasp_id == 6:
+            grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
+            grasp_initial_configuration = [90.0/180.0*math.pi, None, 0, 0]
+            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(0.512641041738, -0.485843507183, -0.514213889193, 0.48655882699), PyKDL.Vector(-0.000278423947748, -0.00292747467756, 0.445628076792))
         else:
             print "ERROR: unknown grasp_id: %s"%(grasp_id)
             exit(0)
@@ -587,6 +669,11 @@ Class for grasp learning.
         print joint_map
 
         self.pub_js = rospy.Publisher("/joint_states", JointState)
+
+        # test curvature computation
+        if False:
+            surfaceutils.testSurfaceCurvature1(self.pub_marker, vertices, faces, self.T_W_O)
+            surfaceutils.testSurfaceCurvature2(self.pub_marker, vertices, faces, self.T_W_O)
 
         #
         # PyODE test
@@ -609,33 +696,36 @@ Class for grasp learning.
 
             ignored_links = ["world", "world_link"]
 
-            self.force_W = None
-            self.T_W_obj_pose_marker = PyKDL.Frame()
-#            self.insert6DofGlobalMarker(self.T_W_O)
+            self.run_ode_simulation = False
+            self.insert6DofGlobalMarker(self.T_W_O)
 
             #
             # calculation of the configuration of the gripper for the given grasp using Openrave
             #
             self.basemanip = interfaces.BaseManipulation(self.openrave_robot)
             self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
-            # set the pose of the object to be grasped
-            self.updatePose("object", self.T_W_O)
 
-            # simulate the grasp
-            contacts,finalconfig,mindist,volume = self.runGrasp(grasp_direction, grasp_initial_configuration)    # spread, f1, f3, f2
-            # set the hand configuration for the grasp
-            self.openrave_robot.SetDOFValues(finalconfig[0])
-            # read the position of all joints
-            grasp_config = {}
-            for jn in joint_map:
-                grasp_config[jn] = self.openrave_robot.GetJoint(jn).GetValue(0)
-            # read the position of all links
-            grasp_links_poses = {}
-            for link in self.openrave_robot.GetLinks():
-                grasp_links_poses[link.GetName()] = self.OpenraveToKDL(link.GetTransform())
+            while not rospy.is_shutdown() and not self.run_ode_simulation:
+                # set the pose of the object to be grasped
+                self.updatePose("object", self.T_W_O)
 
-            # visualize the grasp in ROS
-            for i in range(5):
+                # simulate the grasp
+                contacts_W,finalconfig,mindist,volume = self.runGrasp(grasp_direction, grasp_initial_configuration)    # spread, f1, f3, f2
+                # set the hand configuration for the grasp
+                self.openrave_robot.SetDOFValues(finalconfig[0])
+                # read the position of all joints
+                grasp_config = {}
+                for jn in joint_map:
+                    grasp_config[jn] = self.openrave_robot.GetJoint(jn).GetValue(0)
+                # read the position of all links
+                grasp_links_poses = {}
+                for link in self.openrave_robot.GetLinks():
+                    grasp_links_poses[link.GetName()] = self.OpenraveToKDL(link.GetTransform())
+
+                #
+                # visualize the grasp in ROS
+                #
+                old_m_id = m_id
                 m_id = 0
                 # publish the mesh of the object
                 m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
@@ -648,17 +738,29 @@ Class for grasp learning.
                     js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
                 self.pub_js.publish(js)
 
+                contacts_reduced_W = self.reduceContacts(contacts_W)
+
                 # draw contacts
-                for c in contacts:
+                for c in contacts_W:
                     cc = PyKDL.Vector(c[0], c[1], c[2])
                     cn = PyKDL.Vector(c[3], c[4], c[5])
                     m_id = self.pub_marker.publishVectorMarker(cc, cc+cn*0.04, m_id, 1, 0, 0, frame='world', namespace='default', scale=0.003)
 
+                if m_id < old_m_id:
+                    self.pub_marker.eraseMarkers(m_id,old_m_id+1, frame_id='world')
+
                 rospy.sleep(0.1)
 
-            contacts_reduced = contacts#self.reduceContacts(contacts)
+            T_O_W = self.T_W_O.Inverse()
+            contacts_reduced_O = []
+            for contact_W in contacts_reduced_W:
+                cc_W = PyKDL.Vector(contact_W[0], contact_W[1], contact_W[2])
+                cn_W = PyKDL.Vector(contact_W[3], contact_W[4], contact_W[5])
+                cc_O = T_O_W * cc_W
+                cn_O = PyKDL.Frame(T_O_W.M) * cn_W
+                contacts_reduced_O.append([cc_O[0], cc_O[1], cc_O[2], cn_O[0], cn_O[1], cn_O[2]])
 
-            gws = self.generateGWS(contacts_reduced)
+            gws, contact_planes = self.generateGWS(contacts_reduced_O, 1.0)
 
             grasp_quality = None
             for wr in ext_wrenches:
@@ -670,7 +772,114 @@ Class for grasp learning.
 
             print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
 
+            print "grasp_direction = [%s, %s, %s, %s]    # spread, f1, f3, f2"%(grasp_direction[0], grasp_direction[1], grasp_direction[2], grasp_direction[3])
+            print "grasp_initial_configuration = [%s, %s, %s, %s]"%(grasp_initial_configuration[0], grasp_initial_configuration[1], grasp_initial_configuration[2], grasp_initial_configuration[3])
+            rot_q = self.T_W_O.M.GetQuaternion()
+            print "self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(%s, %s, %s, %s), PyKDL.Vector(%s, %s, %s))"%(rot_q[0], rot_q[1], rot_q[2], rot_q[3], self.T_W_O.p.x(), self.T_W_O.p.y(), self.T_W_O.p.z())
+
+            self.erase6DofMarker()
             raw_input("Press ENTER to continue...")
+
+            # ICR computation
+            surface_points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.001)
+
+            # disallow contact with the surface points beyond the key handle
+            for p in surface_points:
+                if p.pos.x() > 0:
+                    p.allowed = False
+
+            for surf_pt in surface_points:
+                surf_pt.contact_regions = []
+
+            print "calculating ICR..."
+            print "surface points: %s"%(len(surface_points))
+            print "contacts: %s"%(len(contacts_reduced_O))
+            print "total planes in gws: %s"%(len(gws))
+            print "planes for contacts:"
+            for contact_idx in range(len(contacts_reduced_O)):
+                print "%s: %s"%(contact_idx, len(contact_planes[contact_idx]))
+
+            min_quality = 0.004
+            for surf_pt in surface_points:
+                if not surf_pt.allowed:
+                    continue
+                wrs = self.contactToWrenches(surf_pt.pos, surf_pt.normal, 1.0, 6)
+                for contact_idx in range(len(contacts_reduced_O)):
+                    contact_ok = True
+                    for pl_idx in contact_planes[contact_idx]:
+                        pl = gws[pl_idx]
+                        pl_norm = math.sqrt(pl[0]*pl[0] + pl[1]*pl[1] + pl[2]*pl[2] + pl[3]*pl[3] + pl[4]*pl[4] + pl[5]*pl[5])
+                        if pl_norm < 0.999999 or pl_norm > 1.000001:
+                            print "ERROR: pl_norm = %s"%(pl_norm)
+                            exit(0)
+                        wrench_ok = False
+                        for wr in wrs:
+                            if pl[6] > 0:
+                                print "ERROR: origin no in gws: %s"%(pl[6])
+                                exit(0)
+
+                            if pl[0]*wr[0] + pl[1]*wr[1] + pl[2]*wr[2] + pl[3]*wr[3] + pl[4]*wr[4] + pl[5]*wr[5] > min_quality: #+ pl[6] > 0:
+                                # one of the forces (wr) at the surface point (surf_pt) lies on the positive side of the plane (pl_idx) for the contact point (contact_idx)
+                                wrench_ok = True
+                                break
+                        if not wrench_ok:
+                            contact_ok = False
+                            break
+                    if contact_ok:
+                        surf_pt.contact_regions.append(contact_idx)
+#                break
+
+            print "done."
+
+            points_icr = []
+            for contact_idx in range(len(contacts_reduced_O)):
+                points_icr.append([])
+
+            points_other = []
+            total_points_in_icr = 0
+            for surf_pt in surface_points:
+                if len(surf_pt.contact_regions) > 0:
+                    total_points_in_icr += 1
+                    for contact_idx in surf_pt.contact_regions:
+                        points_icr[contact_idx].append(surf_pt.pos)
+                else:
+                    points_other.append(surf_pt.pos)
+
+            print "total surface points in ICR: %s"%(total_points_in_icr)
+            for contact_idx in range(len(contacts_reduced_O)):
+                print "contact %s   points in ICR: %s"%(contact_idx, len(points_icr[contact_idx]))
+
+            while not rospy.is_shutdown():
+                m_id = 0
+                # publish the mesh of the object
+                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+
+                m_id = self.pub_marker.publishMultiPointsMarker(points_other, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=self.T_W_O)
+                for contact_idx in range(len(contacts_reduced_O)):
+                    m_id = self.pub_marker.publishMultiPointsMarker(points_icr[contact_idx], m_id, r=0, g=1, b=0, namespace='contact_'+str(contact_idx), frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=self.T_W_O)
+                    c = contacts_reduced_W[contact_idx]
+                    cc = PyKDL.Vector(c[0], c[1], c[2])
+                    cn = PyKDL.Vector(c[3], c[4], c[5])
+                    m_id = self.pub_marker.publishVectorMarker(cc, cc+cn*0.04, m_id, 1, 0, 0, frame='world', namespace='contact_'+str(contact_idx), scale=0.003)
+
+                rospy.sleep(0.1)
+
+            exit(0)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
             # reset the gripper in Openrave
             self.openrave_robot.SetDOFValues([0,0,0,0])
@@ -738,13 +947,22 @@ Class for grasp learning.
                     ode_gripper_geoms[link_name].name = link.GetName()
                     self.setOdeBodyPose(body_link, T_W_L)
 
-            ode_gripper_joints = {}
+            actuated_joint_names = []
+            for dof in range(4):
+                for joint_name in actuated_joints_for_DOF[dof]:
+                    actuated_joint_names.append(joint_name)
 
+            ode_gripper_joints = {}
             for joint_name in joint_names:
                 joint = self.openrave_robot.GetJoint(joint_name)
                 link_parent = joint.GetHierarchyParentLink().GetName()
                 link_child = joint.GetHierarchyChildLink().GetName()
                 if link_parent in ode_gripper_geoms and link_child in ode_gripper_geoms:
+#                    if joint_name in actuated_joint_names:
+#                    ode_gripper_joints[joint_name] = ode.AMotor(world)
+#                    ode_gripper_joints[joint_name].setNumAxes(1)
+#                    ode_gripper_joints[joint_name].setAxis(0,1,axis)
+#                    else:
                     ode_gripper_joints[joint_name] = ode.HingeJoint(world)
                     ode_gripper_joints[joint_name].attach(ode_gripper_geoms[link_parent].getBody(), ode_gripper_geoms[link_child].getBody())
                     axis = joint.GetAxis()
@@ -756,8 +974,10 @@ Class for grasp learning.
 #                    print "axis: %s"%(axis)
 #                    print "anchor: %s"%(anchor)
 #                    print "value: %s"%(value)
+
                     ode_gripper_joints[joint_name].setAxis(-axis)
                     ode_gripper_joints[joint_name].setAnchor(anchor)
+
                     lim = [limits[0], limits[1]]
                     if limits[0] <= -math.pi:
 #                        print "lower joint limit %s <= -PI, setting to -PI+0.01"%(limits[0])
@@ -808,6 +1028,14 @@ Class for grasp learning.
                 fixed_joints[joint_name][0].attach(body0, body1)
                 fixed_joints[joint_name][0].setFixed()
 
+            # change all actuated joints to motor joints
+#            actuated_joint_names = []
+#            for dof in range(4):
+#                for joint_name in actuated_joints_for_DOF[dof]:
+#                    actuated_joint_names.append(joint_name)
+#            for joint_name in actuated_joint_names:
+
+
             # A joint group for the contact joints that are generated whenever
             # two bodies collide
             contactgroup = ode.JointGroup()
@@ -815,10 +1043,12 @@ Class for grasp learning.
             print "ode_gripper_geoms:"
             print ode_gripper_geoms
 
+            initial_T_W_O = self.T_W_O
             # Do the simulation...
-            dt = 0.004
+            dt = 0.001
             total_time = 0.0
-            while total_time < 20.0 and not rospy.is_shutdown():
+            failure = False
+            while total_time < 10.0 and not rospy.is_shutdown():
                 #
                 # ODE simulation
                 #
@@ -826,7 +1056,7 @@ Class for grasp learning.
                 for dof in range(4):
                     for joint_name in actuated_joints_for_DOF[dof]:
                         if joint_name in ode_gripper_joints:
-                            ode_gripper_joints[joint_name].addTorque(0.1*grasp_direction[dof])
+                            ode_gripper_joints[joint_name].addTorque(1*grasp_direction[dof])
 
                 self.grasp_contacts = []
                 self.space.collide((world,contactgroup), self.near_callback)
@@ -876,20 +1106,26 @@ Class for grasp learning.
                 if m_id < old_m_id:
                     self.pub_marker.eraseMarkers(m_id,old_m_id+1, frame_id='world')
 
+                diff_T_W_O = PyKDL.diff(initial_T_W_O, T_W_Osim)
+                if diff_T_W_O.vel.Norm() > 0.02 or diff_T_W_O.rot.Norm() > 30.0/180.0*math.pi:
+                    print "the object moved"
+                    print diff_T_W_O
+                    failure = True
+                    break
 #                rospy.sleep(0.01)
 
+            if not failure:
+                gws = self.generateGWS(self.grasp_contacts)
 
-            gws = self.generateGWS(self.grasp_contacts)
+                grasp_quality = None
+                for wr in ext_wrenches:
+                    wr_qual = self.getQualituMeasure2(gws, wr)
+                    if grasp_quality == None or wr_qual < grasp_quality:
+                        grasp_quality = wr_qual
 
-            grasp_quality = None
-            for wr in ext_wrenches:
-                wr_qual = self.getQualituMeasure2(gws, wr)
-                if grasp_quality == None or wr_qual < grasp_quality:
-                    grasp_quality = wr_qual
+                grasp_quality_classic = self.getQualituMeasure(gws)
 
-            grasp_quality_classic = self.getQualituMeasure(gws)
-
-            print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
+                print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
 
             exit(0)
 #################################
