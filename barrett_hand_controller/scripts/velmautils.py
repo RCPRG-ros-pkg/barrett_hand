@@ -331,12 +331,14 @@ def generateFramesForNormals(angle, normals):
     angle_d = 360.0/180.0*math.pi/steps
     frames = []
     for z in normals:
-        if PyKDL.dot(z, PyKDL.Vector(0,0,1)) > 0.9:
-            y = PyKDL.Vector(1,0,0)
-        else:
+        if abs(z.z()) < 0.7:
             y = PyKDL.Vector(0,0,1)
+        else:
+            y = PyKDL.Vector(0,1,0)
         x = y * z
         y = z * x
+        x.Normalize()
+        y.Normalize()
         for angle in np.arange(0.0, 359.9/180.0*math.pi, angle_d):
             frames.append(PyKDL.Frame(PyKDL.Rotation(x,y,z)) * PyKDL.Frame(PyKDL.Rotation.RotZ(angle)))
 #            print angle/math.pi*180.0

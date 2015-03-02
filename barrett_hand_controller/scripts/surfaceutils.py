@@ -185,7 +185,7 @@ def pclPrincipalCurvaturesEstimation(surf_points, p_idx, neighborhood, neighborh
 #    print n_idx2
 
     M = np.matrix(I - n_idx2)
-    print M
+#    print M
 
 
     # project the normals into the tangent plane

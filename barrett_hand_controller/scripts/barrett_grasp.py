@@ -169,7 +169,8 @@ Class for grasp learning.
     def getGraspQHull(self, points):
         try:
             planes, faces, triangles = self.grasper.ConvexHull(np.array(points), returnplanes=True,returnfaces=False,returntriangles=False)
-        except:
+        except AttributeError as e1:
+            print e1
             return None
         return planes
 
@@ -677,13 +678,351 @@ Class for grasp learning.
 
         if False:
 
+            # object
+            print "sampling the surface of the object..."
+            vertices_obj, faces_obj = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+            surface_points_obj = surfaceutils.sampleMeshDetailedRays(vertices_obj, faces_obj, 0.001)
+            print "surface of the object has %s points"%(len(surface_points_obj))
+
+            # disallow contact with the surface points beyond the key handle
+            for p in surface_points_obj:
+                if p.pos.x() > 0:
+                    p.allowed = False
+
+            surface_points_obj_init = []
+            for sp in surface_points_obj:
+                if sp.allowed:
+                    surface_points_obj_init.append(sp)
+
+            p_idx = random.randint(0, len(surface_points_obj)-1)
+            p_dist = 0.004
+
+            print "generating a subset of surface points of the object..."
+
+            sampled_points_obj = []
+            while True:
+                sampled_points_obj.append(p_idx)
+                surface_points_obj2 = []
+                for sp in surface_points_obj_init:
+                    if (sp.pos-surface_points_obj[p_idx].pos).Norm() > p_dist:
+                        surface_points_obj2.append(sp)
+                if len(surface_points_obj2) == 0:
+                    break
+                surface_points_obj_init = surface_points_obj2
+                p_idx = surface_points_obj_init[0].id
+
+            print "subset size: %s"%(len(sampled_points_obj))
+
+
+            print "calculating surface curvature at sampled points of the obj..."
+            m_id = 0
+            planes = 0
+            edges = 0
+            points = 0
+            for pt_idx in sampled_points_obj:
+                indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(surface_points_obj, pt_idx, 5, 0.003)
+                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_obj[pt_idx].pos, self.T_W_O * (surface_points_obj[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
+                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_obj[pt_idx].pos, self.T_W_O * (surface_points_obj[pt_idx].pos + surface_points_obj[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
+                if pc1 < 0.2:
+                    planes += 1
+                elif pc2 < 0.2:
+                    edges += 1
+                else:
+                    points += 1
+
+            print planes, edges, points
+            print "done."
+            raw_input("Press ENTER to continue...")
+
+
+            # link
+            print "sampling the surface of the link..."
+            link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleThreeLink")
+            col = link.GetCollisionData()
+            vertices_link = col.vertices
+            faces_link = col.indices
+
+            surface_points_link = surfaceutils.sampleMeshDetailedRays(vertices_link, faces_link, 0.0015)
+            print "surface of the link has %s points"%(len(surface_points_link))
+
+            surface_points_link_init = []
+            for sp in surface_points_link:
+                surface_points_link_init.append(sp)
+
+            p_idx = random.randint(0, len(surface_points_link)-1)
+            p_dist = 0.004
+
+            print "generating a subset of surface points of the link..."
+
+            sampled_points_link = []
+            while True:
+                sampled_points_link.append(p_idx)
+                surface_points_link2 = []
+                for sp in surface_points_link_init:
+                    if (sp.pos-surface_points_link[p_idx].pos).Norm() > p_dist:
+                        surface_points_link2.append(sp)
+                if len(surface_points_link2) == 0:
+                    break
+                surface_points_link_init = surface_points_link2
+                p_idx = surface_points_link_init[0].id
+
+            print "subset size: %s"%(len(sampled_points_link))
+
+
+            print "calculating surface curvature at sampled points of the link..."
+            planes_link = 0
+            edges_link = 0
+            points_link = 0
+            m_id = 0
+            for pt_idx in sampled_points_link:
+                indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(surface_points_link, pt_idx, 5, 0.003)
+                surface_points_link[pt_idx].pc1 = pc1
+                surface_points_link[pt_idx].pc2 = pc2
+#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_link[pt_idx].pos, self.T_W_O * (surface_points_link[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
+#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_link[pt_idx].pos, self.T_W_O * (surface_points_link[pt_idx].pos + surface_points_link[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
+                if pc1 < 0.2:
+                    planes_link += 1
+                elif pc2 < 0.2:
+                    edges_link += 1
+                else:
+                    points_link += 1
+
+            print planes_link, edges_link, points_link
+
+            print "1 DOF: %s"%(planes * planes_link)
+            print "2 DOF: %s"%(planes * edges_link + edges * planes_link)
+            print "3 DOF: %s"%(edges * edges_link + planes * points_link + points * planes_link)
+            print "total combinations: %s"%(len(sampled_points_obj)*len(sampled_points_link))
+            print "done."
+
+            points_samp = []
+            points_other = []
+            points_samp2 = []
+            points_samp3 = []
+            for pt in surface_points_link:
+                if pt.id in sampled_points_link:
+                    if surface_points_link[pt.id].pc1 < 0.2:
+                        points_samp.append(pt.pos)
+                    elif surface_points_link[pt.id].pc2 < 0.2:
+                        points_samp2.append(pt.pos)
+                    else:
+                        points_samp3.append(pt.pos)
+                else:
+                    points_other.append(pt.pos)
+            m_id = self.pub_marker.publishMultiPointsMarker(points_samp, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.0005, 0.0005, 0.0005), T=self.T_W_O)
+            m_id = self.pub_marker.publishMultiPointsMarker(points_samp2, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.0005, 0.0005, 0.0005), T=self.T_W_O)
+            m_id = self.pub_marker.publishMultiPointsMarker(points_samp3, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.0005, 0.0005, 0.0005), T=self.T_W_O)
+            m_id = self.pub_marker.publishMultiPointsMarker(points_other, m_id, r=0.1, g=0.1, b=0.1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.0005, 0.0005, 0.0005), T=self.T_W_O)
+            raw_input("Press ENTER to continue...")
+            exit(0)
+
+        if True:
+            normals_sphere = velmautils.generateNormalsSphere(20.0/180.0*math.pi)
+            normals_sphere_pos = []
+            for n in normals_sphere:
+                if n.x() > 0 and n.y() > 0 and n.z() > 0:
+                    normals_sphere_pos.append(n)
+            print "normals_sphere: %s"%(len(normals_sphere))
+            print "normals_sphere_pos: %s"%(len(normals_sphere_pos))
+            orientations = velmautils.generateFramesForNormals(20.0/180.0*math.pi, normals_sphere)
+            orientations2 = []
+            for ori in orientations:
+                x_axis = ori * PyKDL.Vector(1,0,0)
+                if x_axis.z() > 0.0:
+                    orientations2.append(ori)
+            orientations = orientations2
+            print "orientations set size: %s"%(len(orientations))
+            T_O_H = PyKDL.Frame(PyKDL.Vector(-0.0215,0,0))
+            T_H_O = T_O_H.Inverse()
+
+#            m_id = 0
+#            for fr in orientations:
+#                T_W_O = PyKDL.Frame(PyKDL.Vector(0,0,0.5)) * fr * T_H_O
+#                # publish the mesh of the object
+#                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+#            raw_input("Press ENTER to continue...")
+#            exit(0)
+
+        # create volumetric model of the key handle
+        if True:
+            vol_radius = 0.022
+            vol_samples_count = 16
+
+            def getVolIndex(pt):
+                x = pt[0]
+                y = pt[1]
+                z = pt[2]
+                xi = int(np.floor(vol_samples_count*(x-(-vol_radius))/(2.0*vol_radius)))
+                yi = int(np.floor(vol_samples_count*(y-(-vol_radius))/(2.0*vol_radius)))
+                zi = int(np.floor(vol_samples_count*(z-(-vol_radius))/(2.0*vol_radius)))
+                if xi < 0 or xi >= vol_samples_count or yi < 0 or yi >= vol_samples_count or zi < 0 or zi >= vol_samples_count:
+                  print "getVolIndex: error: %s, %s, %s"%(x,y,z)
+                  return None
+                return (xi, yi, zi)
+
+            def getVolPoint(xi,yi,zi):
+                return PyKDL.Vector(-vol_radius + (xi+0.5) * 2.0 * vol_radius / vol_samples_count, -vol_radius + (yi+0.5) * 2.0 * vol_radius / vol_samples_count, -vol_radius + (zi+0.5) * 2.0 * vol_radius / vol_samples_count)
+
+            vol_samples = []
+            for x in np.linspace(-vol_radius, vol_radius, vol_samples_count):
+              vol_samples.append([])
+              for y in np.linspace(-vol_radius, vol_radius, vol_samples_count):
+                vol_samples[-1].append([])
+                for z in np.linspace(-vol_radius, vol_radius, vol_samples_count):
+                  vol_samples[-1][-1].append([])
+                  vol_samples[-1][-1][-1] = {}
+
+            vol_sample_points = []
+            for xi in range(vol_samples_count):
+              for yi in range(vol_samples_count):
+                for zi in range(vol_samples_count):
+                  vol_sample_points.append( getVolPoint(xi,yi,zi) )
+
+            #
+            # object
+            #
+            print "sampling the surface of the object..."
+            vertices_obj, faces_obj = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+            surface_points_obj = surfaceutils.sampleMeshDetailedRays(vertices_obj, faces_obj, 0.0015)
+            print "surface of the object has %s points"%(len(surface_points_obj))
+
+            # disallow contact with the surface points beyond the key handle
+            for p in surface_points_obj:
+                if p.pos.x() > 0:
+                    p.allowed = False
+
+            print "generating volumetric map..."
+            for ori_idx in range(len(orientations)):
+                T_H_Hd = orientations[ori_idx]
+                T_H_Od = T_H_Hd * T_H_O
+                for surf_pt in surface_points_obj:
+                    if not surf_pt.allowed:
+                        continue
+                    pt = T_H_Od * surf_pt.pos
+                    vol_idx = getVolIndex(pt)
+                    if vol_idx != None and not ori_idx in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
+                        vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx] = surf_pt
+            print "done."
+
+            scale = 2.0*vol_radius/vol_samples_count
+            T_W_H = PyKDL.Frame(PyKDL.Vector(0,0,0.5))
+            if False:
+              for ori_idx in range(len(orientations)):
+                self.pub_marker.eraseMarkers(0, 1000, frame_id='world')
+                m_id = 0
+                T_W_O = T_W_H * orientations[ori_idx] * T_H_O
+                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+                for pt in vol_sample_points:
+                    vol_idx = getVolIndex(pt)
+                    if vol_idx != None and ori_idx in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
+                        m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(scale, scale, scale), T=T_W_H)
+                raw_input("Press ENTER to continue...")
+
+            if False:
+              pt = PyKDL.Vector(-vol_radius, 0,0)#vol_radius*0.5, vol_radius*0.5)
+              for i in range(vol_samples_count):
+#                  T_W_O = T_W_H * PyKDL.Frame(PyKDL.Rotation.RotX(angle)) * T_H_O
+                  pt += PyKDL.Vector(2.0*vol_radius/vol_samples_count, 0, 0)
+                  vol_idx = getVolIndex(pt)
+#                  ori_list = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+#                  print len(ori_list)
+                  # publish the mesh of the object
+                  self.pub_marker.eraseMarkers(0, 1000, frame_id='world')
+                  m_id = 0
+                  m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.02, 0.02, 0.02), T=T_W_H)
+                  for o in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
+                      surf_pt = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][o]
+                      print PyKDL.Frame( (T_W_H * orientations[o]).M) * surf_pt.normal
+                      T_W_O = T_W_H * orientations[o] * T_H_O
+                      m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+                  raw_input("Press ENTER to continue...")
+              exit(0)
+
+        if True:
+            #
+            # object
+            #
+#            print "sampling the surface of the object..."
+#            vertices_obj, faces_obj = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+#            surface_points_obj = surfaceutils.sampleMeshDetailedRays(vertices_obj, faces_obj, 0.001)
+#            print "surface of the object has %s points"%(len(surface_points_obj))
+
+            # disallow contact with the surface points beyond the key handle
+#            for p in surface_points_obj:
+#                if p.pos.x() > 0:
+#                    p.allowed = False
+
+            obj_points_for_qhull = []
+            # generate convex hull for the key handle
+            for v in vertices_obj:
+                if v[0] > 0.0:
+                    continue
+                obj_points_for_qhull.append(v)
+
+            # init openrave interface
+#            self.basemanip = interfaces.BaseManipulation(self.openrave_robot)
+            self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
+
+            print "obj_points_for_qhull: %s"%(len(obj_points_for_qhull))
+#            print obj_points_for_qhull
+            obj_qhull_planes_O = self.getGraspQHull(obj_points_for_qhull)
+            print "obj_qhull_planes: %s"%(len(obj_qhull_planes_O))
+
+            surface_points_obj_init = []
+            for sp in surface_points_obj:
+                if sp.allowed:
+                    surface_points_obj_init.append(sp)
+
+            p_idx = random.randint(0, len(surface_points_obj)-1)
+            p_dist = 0.004
+
+            print "generating a subset of surface points of the object..."
+
+            sampled_points_obj = []
+            while True:
+                sampled_points_obj.append(p_idx)
+                surface_points_obj2 = []
+                for sp in surface_points_obj_init:
+                    if (sp.pos-surface_points_obj[p_idx].pos).Norm() > p_dist:
+                        surface_points_obj2.append(sp)
+                if len(surface_points_obj2) == 0:
+                    break
+                surface_points_obj_init = surface_points_obj2
+                p_idx = surface_points_obj_init[0].id
+
+            print "subset size: %s"%(len(sampled_points_obj))
+
+
+            print "calculating surface curvature at sampled points of the obj..."
+            m_id = 0
+            planes = 0
+            edges = 0
+            points = 0
+            for pt_idx in sampled_points_obj:
+                indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(surface_points_obj, pt_idx, 5, 0.003)
+#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_obj[pt_idx].pos, self.T_W_O * (surface_points_obj[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
+#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_obj[pt_idx].pos, self.T_W_O * (surface_points_obj[pt_idx].pos + surface_points_obj[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
+                if pc1 < 0.2:
+                    planes += 1
+                elif pc2 < 0.2:
+                    edges += 1
+                else:
+                    points += 1
+
+#            print planes, edges, points
+            print "done."
+#            raw_input("Press ENTER to continue...")
+
+            #
+            # link
+            #
             link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleThreeLink")
             col = link.GetCollisionData()
             vertices = col.vertices
             faces = col.indices
 
             print "sampling the surface..."
-            surface_points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.002)
+            surface_points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.0015)
             print "surface has %s points"%(len(surface_points))
 
             surface_points_init = []
@@ -709,6 +1048,545 @@ Class for grasp learning.
 
             print "subset size: %s"%(len(sampled_points))
 
+            checked_links = [
+            "right_HandFingerOneKnuckleThreeLink",
+            "right_HandFingerThreeKnuckleThreeLink",
+            "right_HandFingerTwoKnuckleThreeLink",
+            ]
+
+            T_W_E = self.OpenraveToKDL(self.openrave_robot.GetLink("right_HandPalmLink").GetTransform())
+            TR_W_E = PyKDL.Frame(T_W_E.M)
+            T_E_W = T_W_E.Inverse()
+
+            points = []
+
+            for sp in np.linspace(0.01, 179.99, 10):
+              for f1 in np.linspace(30.0, 130.0, 7):
+                self.openrave_robot.SetDOFValues([sp/180.0*math.pi, f1/180.0*math.pi, 0, 0])
+                link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleThreeLink")
+                T_E_L = T_E_W * self.OpenraveToKDL(link.GetTransform())
+                TR_E_L = PyKDL.Frame(T_E_L.M)
+                for pt_idx in sampled_points:
+                    pt_L = surface_points[pt_idx]
+                    pt_E = T_E_L * pt_L.pos
+                    n_E = TR_E_L * pt_L.normal
+                    points.append([0, pt_E, n_E, pt_idx, (sp, f1, None, None)])
+
+              for f2 in np.linspace(30.0, 130.0, 7):
+                self.openrave_robot.SetDOFValues([sp/180.0*math.pi, 0, 0, f2/180.0*math.pi])
+                link = self.openrave_robot.GetLink("right_HandFingerTwoKnuckleThreeLink")
+                T_E_L = T_E_W * self.OpenraveToKDL(link.GetTransform())
+                TR_E_L = PyKDL.Frame(T_E_L.M)
+                for pt_idx in sampled_points:
+                    pt_L = surface_points[pt_idx]
+                    pt_E = T_E_L * pt_L.pos
+                    n_E = TR_E_L * pt_L.normal
+                    points.append([1, pt_E, n_E, pt_idx, (sp, None, None, f2)])
+
+            for f3 in np.linspace(30.0, 130.0, 7):
+                self.openrave_robot.SetDOFValues([sp/180.0*math.pi, 0, f3/180.0*math.pi, 0])
+                link = self.openrave_robot.GetLink("right_HandFingerThreeKnuckleThreeLink")
+                T_E_L = T_E_W * self.OpenraveToKDL(link.GetTransform())
+                TR_E_L = PyKDL.Frame(T_E_L.M)
+                for pt_idx in sampled_points:
+                    pt_L = surface_points[pt_idx]
+                    pt_E = T_E_L * pt_L.pos
+                    n_E = TR_E_L * pt_L.normal
+                    points.append([2, pt_E, n_E, pt_idx, (None, None, f3, None)])
+
+            print "points: %s"%(len(points))
+
+            dim_min = [None, None, None]
+            dim_max = [None, None, None]
+            for pt in points:
+                v = pt[1]
+                for dim in range(3):
+                    if dim_min[dim] == None or dim_min[dim] > v[dim]:
+                        dim_min[dim] = v[dim]
+                    if dim_max[dim] == None or dim_max[dim] < v[dim]:
+                        dim_max[dim] = v[dim]
+            print "dim_min: %s"%(dim_min)
+            print "dim_max: %s"%(dim_max)
+
+            voxel_size = 0.01
+            def getPointIndex(pt):
+                return [int((pt[0] - dim_min[0])/(voxel_size)), int((pt[1] - dim_min[1])/(voxel_size)), int((pt[2] - dim_min[2])/(voxel_size))]
+
+            voxel_map_size = getPointIndex(dim_max)
+            voxel_map_size[0] += 1
+            voxel_map_size[1] += 1
+            voxel_map_size[2] += 1
+
+            voxel_map = []
+            for x in range(voxel_map_size[0]):
+                voxel_map.append([])
+                for y in range(voxel_map_size[1]):
+                    voxel_map[-1].append([])
+                    for z in range(voxel_map_size[2]):
+                        voxel_map[-1][-1].append([])
+                        voxel_map[-1][-1][-1] = []
+
+            # add all points to the voxel map
+            max_points_in_voxel = 0
+            for p in points:
+                idx = getPointIndex(p[1])
+                voxel_map[idx[0]][idx[1]][idx[2]].append(p)
+                voxel_points_count = len(voxel_map[idx[0]][idx[1]][idx[2]])
+                if voxel_points_count > max_points_in_voxel:
+                    max_points_in_voxel = voxel_points_count
+
+            print "voxel_map_size: %s"%(voxel_map_size)
+            print "voxels: %s"%(voxel_map_size[0]*voxel_map_size[1]*voxel_map_size[2])
+            print "max_points_in_voxel: %s"%(max_points_in_voxel)
+
+            # move the sphere around
+            sphere_diameter = 0.0305
+            sphere_radius = 0.5 * sphere_diameter
+
+            cylinder_diameter = 0.0305
+            cylinder_radius = 0.5 * sphere_diameter
+
+            voxel = voxel_map[14][12][5]
+            print "voxel: %s"%(len(voxel))
+
+            # get the neighborhood
+            init_pos = voxel[0][1]
+            print "pos: %s"%(init_pos)
+
+            offsets = []
+            for x in np.linspace(-0.03, 0.03, 20):
+              for y in np.linspace(-0.03, 0.03, 20):
+                for z in np.linspace(-0.03, 0.03, 20):
+                  offsets.append(PyKDL.Vector(x,y,z))
+
+            print "number of candidate positions: %s"%(len(offsets))
+            valid_positions = []
+
+            print "searching for good position for grasping..."
+#            offset_idx = 0
+#            for offset in offsets:
+#              print offset_idx
+#              offset_idx += 1
+            offset = PyKDL.Vector(0,0,0)
+            if True:
+              pos = init_pos + offset
+
+              min_index = getPointIndex(pos - PyKDL.Vector(sphere_radius, sphere_radius, sphere_radius))
+              max_index = getPointIndex(pos + PyKDL.Vector(sphere_radius, sphere_radius, sphere_radius))
+              for dof in range(3):
+                  if min_index[dof] < 0:
+                      min_index[dof] = 0
+                  if max_index[dof] >= voxel_map_size[dof]:
+                      max_index[dof] = voxel_map_size[dof]-1
+
+              # get the indices of voxels around the current point
+              voxel_max_radius = math.sqrt(3)/2.0 * voxel_size
+              voxel_indices = []
+              for x in range(min_index[0], max_index[0]+1):
+                for y in range(min_index[1], max_index[1]+1):
+                  for z in range(min_index[2], max_index[2]+1):
+                      voxel_center = PyKDL.Vector((x+0.5) * voxel_size + dim_min[0], (y+0.5) * voxel_size + dim_min[1], (z+0.5) * voxel_size + dim_min[2])
+                      if (voxel_center-pos).Norm() > voxel_max_radius + sphere_radius:
+                          continue
+                      voxel_indices.append((x,y,z))
+
+              neighborhood_size = 0
+              points_in_sphere = []
+              valid_configurations = [[], [], []]
+              for idx in voxel_indices:
+                  x,y,z = idx
+                  neighborhood_size += len(voxel_map[x][y][z])
+                  for pt in voxel_map[x][y][z]:
+                      pt_diff = pt[1]-pos
+                      dist = pt_diff.Norm()
+                      if dist < sphere_radius:
+                          if PyKDL.dot(pt_diff, pt[2]) < 0:
+                              q = pt[4]
+                              if not q in valid_configurations[pt[0]]:
+                                  valid_configurations[pt[0]].append(q)
+                              points_in_sphere.append(pt)
+
+#              if len(points_in_sphere) < 3:
+#                  continue
+
+#              print len(valid_configurations[0]), len(valid_configurations[1]), len(valid_configurations[2])
+
+              # get the intersection of gripper configurations for f1 and f2 (for spread angle)
+              f1_spread_values = []
+              for f1_q in valid_configurations[0]:
+                  if not f1_q[0] in f1_spread_values:
+                      f1_spread_values.append(f1_q[0])
+              spread_values = []
+              for f2_q in valid_configurations[1]:
+                  if f2_q[0] in f1_spread_values:
+                      spread_values.append(f2_q[0])
+#              if len(spread_values) == 0:
+#                  continue
+
+              f1_valid_configurations = []
+              for f1_q in valid_configurations[0]:
+                  if f1_q[0] in spread_values:
+                      if not f1_q in f1_valid_configurations:
+                          f1_valid_configurations.append(f1_q)
+              f2_valid_configurations = []
+              for f2_q in valid_configurations[1]:
+                  if f2_q[0] in spread_values:
+                      if not f2_q in f2_valid_configurations:
+                          f2_valid_configurations.append(f2_q)
+
+              valid_configurations[0] = f1_valid_configurations
+              valid_configurations[1] = f2_valid_configurations
+
+#              print len(valid_configurations[0]), len(valid_configurations[1]), len(valid_configurations[2])
+              if len(valid_configurations[0]) > 0 and len(valid_configurations[1]) > 0 and len(valid_configurations[2]) > 0:
+                  pass
+              else:
+                  pass
+#                  continue
+
+#              print "neighborhood_size: %s"%(neighborhood_size)
+#              print "points_in_sphere: %s"%(len(points_in_sphere))
+
+              # update the points set
+              points_in_sphere2 = []
+#              points_in_sphere2[None] = []
+#              for sp in spread_values:
+#                  points_in_sphere2[sp] = []
+              for pt in points_in_sphere:
+                  q = pt[4]
+                  if q[0] == None or q[0] in spread_values:
+                      points_in_sphere2.append(pt)
+
+              points_in_sphere = points_in_sphere2
+
+              # calculate the mean and min for each finger and each configuration
+              points_mean_for_config = {}
+              points_min_for_config_E = {}
+              points_count_for_config = {}
+              for pt in points_in_sphere:
+#                  print pt
+                  points_min_for_config_E[pt[4]] = None
+                  points_mean_for_config[pt[4]] = [PyKDL.Vector(), PyKDL.Vector()]
+                  points_count_for_config[pt[4]] = 0
+
+              for pt in points_in_sphere:
+                  dist = (pt[1]-pos).Norm()
+                  if points_min_for_config_E[pt[4]] == None or points_min_for_config_E[pt[4]][0] > dist:
+                      points_min_for_config_E[pt[4]] = [dist, pt[1]]
+                  points_mean_for_config[pt[4]][0] += pt[1]
+                  points_mean_for_config[pt[4]][1] += pt[2]
+                  points_count_for_config[pt[4]] += 1
+
+              m_id = 0
+              for cf in points_mean_for_config:
+                  points_mean_for_config[cf][0] /= points_count_for_config[cf]
+                  points_mean_for_config[cf][1] /= points_count_for_config[cf]
+
+              # visualisation
+              if True:
+                  pt_vis = [[],[],[]]
+                  for pt in points_in_sphere:
+                      pt_vis[pt[0]].append(pt[1])
+                      m_id = self.pub_marker.publishVectorMarker(T_W_E*pt[1], T_W_E*(pt[1]+pt[2]*0.003), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
+
+                  m_id = self.pub_marker.publishMultiPointsMarker(pt_vis[0], m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001), T=T_W_E)
+                  m_id = self.pub_marker.publishMultiPointsMarker(pt_vis[1], m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001), T=T_W_E)
+                  m_id = self.pub_marker.publishMultiPointsMarker(pt_vis[2], m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.001, 0.001, 0.001), T=T_W_E)
+
+                  m_id_old = m_id
+                  for cf in valid_configurations[0]+valid_configurations[1]+valid_configurations[2]:
+                      m_id = m_id_old
+                      m_id = self.pub_marker.publishSinglePointMarker(points_min_for_config_E[cf][1], m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+#                      print "points count for given config: %s"%points_count_for_config[cf]
+#                      print cf
+                      sp = 0 if cf[0] == None else cf[0]
+                      f1 = 0 if cf[1] == None else cf[1]
+                      f3 = 0 if cf[2] == None else cf[2]
+                      f2 = 0 if cf[3] == None else cf[3]
+                      self.openrave_robot.SetDOFValues([sp/180.0*math.pi,f1/180.0*math.pi,f3/180.0*math.pi,f2/180.0*math.pi])
+                      for i in range(0, 2):
+                        # update the gripper visualization in ros
+                        js = JointState()
+                        js.header.stamp = rospy.Time.now()
+                        for jn in joint_map:
+                            js.name.append(joint_map[jn])
+                            js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                        self.pub_js.publish(js)
+                        rospy.sleep(0.1)
+                      raw_input("Press ENTER to continue...")
+                  exit(0)
+              exit(0)
+#              for n in normals_sphere_pos:
+#########################################################################################                  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#              continue
+#              print "checking orientations..."
+              # iterate through orientations
+              ori_ok = []
+              TT_E_H = PyKDL.Frame(pos)
+              for ori_idx in range(len(orientations)):
+                 ori = orientations[ori_idx]
+                 config_ok = [[], [], []]
+                 T_E_O = TT_E_H * ori * T_H_O
+                 T_O_E = T_E_O.Inverse()
+                 TR_E_O = PyKDL.Frame(T_E_O.M)
+
+                 # calculate the position of the minimum points in the frame of the object
+                 points_min_for_config_O = {}
+                 for cf in points_min_for_config_E:
+                     points_min_for_config_O[cf] = T_O_E * points_min_for_config_E[cf][1]
+
+                 # get the minimum points that lie outside the convex hull
+                 points_min_for_config_outside_O = {}
+                 for cf in points_min_for_config_O:
+                     pt = points_min_for_config_O[cf]
+                     outside = False
+                     if abs(pt[2]) > 0.004 or math.sqrt(pt[0]*pt[0] + pt[1]*pt[1]) > cylinder_radius:
+                         outside = True
+#                     for plane in obj_qhull_planes_O:
+#                         dist = pt[0] * plane[0] + pt[1] * plane[1] + pt[2] * plane[2] + plane[3]
+#                         if dist > 0.0:
+#                             outside = True
+#                             break
+                     if outside:
+                         points_min_for_config_outside_O[cf] = pt
+
+                 # get f1 and f2 configurations with the same spread
+                 f1_spread_values = []
+                 for cf in points_min_for_config_outside_O:
+                     if cf[1] != None and not cf[0] in f1_spread_values:
+                         f1_spread_values.append(cf[0])
+                 spread_values = []
+                 for cf in points_min_for_config_outside_O:
+                     if cf[3] != None and cf[0] in f1_spread_values:
+                         spread_values.append(cf[0])
+#                 print spread_values
+
+                 if len(spread_values) == 0:
+                     continue
+
+#                 print len(points_min_for_config_outside_O)
+                 points_min_for_config_outside_O2 = {}
+                 for cf in points_min_for_config_outside_O:
+                     if cf[0] == None or cf[0] in spread_values:
+                         points_min_for_config_outside_O2[cf] = points_min_for_config_outside_O[cf]
+                 points_min_for_config_outside_O = points_min_for_config_outside_O2
+#                 print len(points_min_for_config_outside_O)
+
+                 fingers_ok = [False, False, False]
+                 for cf in points_min_for_config_outside_O:
+                     if cf[1] != None:
+                         fingers_ok[0] = True
+                     if cf[2] != None:
+                         fingers_ok[2] = True
+                     if cf[3] != None:
+                         fingers_ok[1] = True
+
+#                 if fingers_ok[2]:
+#                     print offset
+#                     exit(0)
+
+                 if fingers_ok[0] and fingers_ok[1] and fingers_ok[2]:
+                     ori_ok.append(ori_idx)
+
+                 if False:
+#                 if fingers_ok[0] and fingers_ok[1] and fingers_ok[2]:
+                     m_id = 0
+                     # publish the mesh of the object
+                     m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_E*T_E_O)
+                     m_id_old = m_id
+
+                     for cf in points_min_for_config_outside_O:
+#                         m_id = m_id_old
+                         if cf[1] != None:
+                             color = [1,0,0]
+                         if cf[3] != None:
+                             color = [0,1,0]
+                         if cf[2] != None:
+                             color = [0,0,1]
+                         pt_min = T_E_O * points_min_for_config_outside_O[cf]
+                         m_id = self.pub_marker.publishSinglePointMarker(pt_min, m_id, r=color[0], g=color[1], b=color[2], namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+                         m_id = self.pub_marker.publishSinglePointMarker(pos, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+
+                     for cf in points_min_for_config_outside_O:
+#                         m_id = m_id_old
+#                         pt_min = T_E_O * points_min_for_config_outside_O[cf]
+#                         m_id = self.pub_marker.publishSinglePointMarker(pt_min, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+#                         m_id = self.pub_marker.publishSinglePointMarker(pos, m_id, r=0, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+
+                         print cf
+                         sp = 0 if cf[0] == None else cf[0]
+                         f1 = 0 if cf[1] == None else cf[1]
+                         f3 = 0 if cf[2] == None else cf[2]
+                         f2 = 0 if cf[3] == None else cf[3]
+                         self.openrave_robot.SetDOFValues([sp/180.0*math.pi,f1/180.0*math.pi,f3/180.0*math.pi,f2/180.0*math.pi])
+                         for i in range(0, 2):
+                           # update the gripper visualization in ros
+                           js = JointState()
+                           js.header.stamp = rospy.Time.now()
+                           for jn in joint_map:
+                               js.name.append(joint_map[jn])
+                               js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                           self.pub_js.publish(js)
+                           rospy.sleep(0.1)
+                         raw_input("Press ENTER to continue...")
+
+              print "ori_ok: %s"%(len(ori_ok))
+#              print "done."
+
+#              exit(0)
+#              continue
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+              # iterate through orientations
+              poses_ok = []
+              ori_ok = 0
+              TT_E_O = PyKDL.Frame(pos)
+              for ori_idx in range(len(orientations)):
+                 ori = orientations[ori_idx]
+                 config_ok = [[], [], []]
+                 T_E_O = TT_E_O * T_O_H * ori * T_H_O
+                 TR_E_O = PyKDL.Frame(T_E_O.M)
+                 obj_points = []
+                 for pt_obj_idx in sampled_points_obj:
+                     obj_pos_E = T_E_O * surface_points_obj[pt_obj_idx].pos
+                     obj_norm_E = TR_E_O * surface_points_obj[pt_obj_idx].normal
+                     obj_points.append((obj_pos_E, obj_norm_E))
+
+                 for sp in points_in_sphere:
+                   pts = points_in_sphere[sp]
+                   for pt in pts:
+#                     if finger_ok[pt[0]]:
+#                         continue
+                     for pt_obj in obj_points:
+#                         obj_pos_E = T_E_O * surface_points_obj[pt_obj_idx].pos
+#                         obj_norm_E = TR_E_O * surface_points_obj[pt_obj_idx].normal
+                         if PyKDL.dot(pt[2], pt_obj[1]) > 0.0 and (pt[1]-pt_obj[0]).Norm() < 0.005:
+                             config_ok[pt[0]].append(pt[4])
+#                             break
+
+                 if len(config_ok[0]) == 0 or len(config_ok[1]) == 0 or len(config_ok[2]) == 0:
+                     continue
+
+                 # get common spread values for f1 and f2
+                 f1_spread_values = []
+                 for cf in config_ok[0]:
+                     if not cf[0] in f1_spread_values:
+                         f1_spread_values.append(cf[0])
+                 f1_f2_spread_values = []
+                 for cf in config_ok[1]:
+                     if cf[0] in f1_spread_values:
+                         f1_f2_spread_values.append(cf[0])
+
+                 print len(config_ok[0]), len(config_ok[1]), len(config_ok[2])
+                 config_ok2 = [[],[],[]]
+                 for i in range(3):
+                    for cf in config_ok[i]:
+                        if cf[0] == None or cf[0] in f1_f2_spread_values:
+                            config_ok2[i].append(cf)
+                 config_ok = config_ok2
+                 print len(config_ok[0]), len(config_ok[1]), len(config_ok[2])
+
+                 if len(config_ok[0]) > 0 and len(config_ok[1]) > 0 and len(config_ok[2]) > 0:
+                     ori_ok += 1
+                     poses_ok.append((T_E_O,config_ok))
+
+              print "ori_ok: %s / %s"%(ori_ok, len(orientations))
+
+              for pose in poses_ok:
+                  m_id = 0
+                  T_E_O = pose[0]
+                  conf = pose[1]
+                  sp = conf[0][0][0]
+                  f1 = conf[0][0][1]
+                  for cf in conf[1]:
+                      if cf[0] == sp:
+                          f2 = cf[3]
+                          break
+                  f3 = conf[2][0][2]
+                  print "sp:"
+                  print sp
+                  print "f1:"
+                  print f1
+                  print "f2:"
+                  print f2
+                  print "f3:"
+                  print f3
+                  T_W_O = T_W_E * T_E_O
+                  # publish the mesh of the object
+                  m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+
+                  self.openrave_robot.SetDOFValues([sp/180.0*math.pi,f1/180.0*math.pi,f3/180.0*math.pi,f2/180.0*math.pi])
+                  for i in range(0, 2):
+                    # update the gripper visualization in ros
+                    js = JointState()
+                    js.header.stamp = rospy.Time.now()
+                    for jn in joint_map:
+                        js.name.append(joint_map[jn])
+                        js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                    self.pub_js.publish(js)
+                    rospy.sleep(0.1)
+
+                  raw_input("Press ENTER to continue...")
+
+
+
+#              print "points for each orientation:"
+#              for pt_ori in points_ori:
+#                  print len(pt_ori)
+
+            print "valid_positions: %s"%(len(valid_positions))
+            print "done."
+
+            m_id = 0
+            m_id = self.pub_marker.publishMultiPointsMarker(valid_positions, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_W_E)
+            raw_input("Press ENTER to continue...")
+            exit(0)
+
+
+
+            pts = []
+            for i in range(len(points)):
+                pts.append(points[i][1])
+            m_id = 0
+            m_id = self.pub_marker.publishMultiPointsMarker(pts, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=T_W_E)
+            raw_input("Press ENTER to continue...")
+
+            exit(0)
+
 #            points_samp = []
 #            points_other = []
 #            for pt in surface_points:
@@ -721,7 +1599,6 @@ Class for grasp learning.
 #            m_id = self.pub_marker.publishMultiPointsMarker(points_other, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.0005, 0.0005, 0.0005), T=self.T_W_O)
 #            raw_input("Press ENTER to continue...")
 #            exit(0)
-
 #        if True:
 
             speeds = []
@@ -934,6 +1811,12 @@ Class for grasp learning.
                 m_id = 0
                 # publish the mesh of the object
                 m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+
+                # publish sphere for the centre of the key handle
+                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+                sphere_pos = self.T_W_O * PyKDL.Vector(-0.0215,0,0)
+                m_id = self.pub_marker.publishSinglePointMarker(sphere_pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, scale=Vector3(0.0305, 0.0305, 0.0305), T=None)
+
 
                 # update the gripper visualization in ros
                 js = JointState()
@@ -1306,7 +2189,6 @@ Class for grasp learning.
 #                rospy.sleep(0.01)
 
             if not failure:
-#                gws = self.generateGWS(self.grasp_contacts)
                 T_O_Wsim = T_W_Osim.Inverse()
                 TR_O_Wsim = PyKDL.Frame(T_O_Wsim.M)
                 contacts = []
