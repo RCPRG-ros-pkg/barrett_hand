@@ -916,14 +916,20 @@ Class for grasp learning.
                     p.allowed = False
 
             surface_points_obj_init = []
+            surface_points2_obj_init = []
             for sp in surface_points_obj:
                 if sp.allowed:
                     surface_points_obj_init.append(sp)
-
-            p_idx = random.randint(0, len(surface_points_obj)-1)
-            p_dist = 0.003
+                else:
+                    surface_points2_obj_init.append(sp)
 
             print "generating a subset of surface points of the object..."
+
+            while True:
+                p_idx = random.randint(0, len(surface_points_obj)-1)
+                if surface_points_obj[p_idx].allowed:
+                    break
+            p_dist = 0.003
 
             sampled_points_obj = []
             while True:
@@ -938,6 +944,39 @@ Class for grasp learning.
                 p_idx = surface_points_obj_init[0].id
 
             print "subset size: %s"%(len(sampled_points_obj))
+
+            print "generating a subset of other surface points of the object..."
+
+            p_dist2 = 0.006
+
+            while True:
+                p_idx = random.randint(0, len(surface_points_obj)-1)
+                if not surface_points_obj[p_idx].allowed:
+                    break
+
+            sampled_points2_obj = []
+            while True:
+                sampled_points2_obj.append(p_idx)
+                surface_points2_obj2 = []
+                for sp in surface_points2_obj_init:
+                    if (sp.pos-surface_points_obj[p_idx].pos).Norm() > p_dist2:
+                        surface_points2_obj2.append(sp)
+                if len(surface_points2_obj2) == 0:
+                    break
+                surface_points2_obj_init = surface_points2_obj2
+                p_idx = surface_points2_obj_init[0].id
+
+            for pt_idx in sampled_points2_obj:
+                pt = surface_points_obj[pt_idx]
+                m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
+                rospy.sleep(0.001)
+
+            for pt_idx in sampled_points_obj:
+                pt = surface_points_obj[pt_idx]
+                m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
+                rospy.sleep(0.001)
+
+            print "subset size: %s"%(len(sampled_points2_obj))
 
             print "calculating surface curvature at sampled points of the obj..."
             m_id = 0
@@ -1050,22 +1089,22 @@ Class for grasp learning.
             scale = 2.0*vol_radius/vol_samples_count
             T_W_H = PyKDL.Frame(PyKDL.Vector(0,0,0.5))
             if False:
-              for ori_idx in range(len(orientations)):
-                self.pub_marker.eraseMarkers(0, 1000, frame_id='world')
-                m_id = 0
-                T_W_O = T_W_H * orientations[ori_idx] * T_H_O
-                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                for pt in vol_sample_points:
-                    vol_idx = getVolIndex(pt)
-                    if vol_idx != None and ori_idx in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
-                        m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(scale, scale, scale), T=T_W_H)
-                        rospy.sleep(0.001)
-                raw_input("Press ENTER to continue...")
-              exit(0)
+                for ori_idx in range(len(orientations)):
+                  self.pub_marker.eraseMarkers(0, 1000, frame_id='world')
+                  m_id = 0
+                  T_W_O = T_W_H * orientations[ori_idx] * T_H_O
+                  m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+                  for pt in vol_sample_points:
+                      vol_idx = getVolIndex(pt)
+                      if vol_idx != None and ori_idx in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
+                          m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(scale, scale, scale), T=T_W_H)
+                          rospy.sleep(0.001)
+                  raw_input("Press ENTER to continue...")
+                exit(0)
 
             if False:
-              pt = PyKDL.Vector(-vol_radius, 0,0)#vol_radius*0.5, vol_radius*0.5)
-              for i in range(vol_samples_count):
+                pt = PyKDL.Vector(-vol_radius, 0,0)#vol_radius*0.5, vol_radius*0.5)
+                for i in range(vol_samples_count):
 #                  T_W_O = T_W_H * PyKDL.Frame(PyKDL.Rotation.RotX(angle)) * T_H_O
                   pt += PyKDL.Vector(2.0*vol_radius/vol_samples_count, 0, 0)
                   vol_idx = getVolIndex(pt)
@@ -1082,28 +1121,7 @@ Class for grasp learning.
                       T_W_O = T_W_H * orientations[o] * T_H_O
                       m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
                   raw_input("Press ENTER to continue...")
-              exit(0)
-
-        if True:
-            #
-            # object
-            #
-
-#            obj_points_for_qhull = []
-            # generate convex hull for the key handle
-#            for v in vertices_obj:
-#                if v[0] > 0.0:
-#                    continue
-#                obj_points_for_qhull.append(v)
-
-            # init openrave interface
-#            self.basemanip = interfaces.BaseManipulation(self.openrave_robot)
-#            self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
-
-#            print "obj_points_for_qhull: %s"%(len(obj_points_for_qhull))
-#            obj_qhull_planes_O = self.getGraspQHull(obj_points_for_qhull)
-#            print "obj_qhull_planes: %s"%(len(obj_qhull_planes_O))
-
+                exit(0)
 
             #
             # link
@@ -1143,8 +1161,8 @@ Class for grasp learning.
 
             for pt_idx in sampled_points:
                 indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(surface_points, pt_idx, 5, 0.003)
-                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points[pt_idx].pos, self.T_W_O * (surface_points[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
-                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points[pt_idx].pos, self.T_W_O * (surface_points[pt_idx].pos + surface_points[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
+#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points[pt_idx].pos, self.T_W_O * (surface_points[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
+#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points[pt_idx].pos, self.T_W_O * (surface_points[pt_idx].pos + surface_points[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
 
                 surface_points[pt_idx].frame = PyKDL.Frame(PyKDL.Rotation(nx, surface_points[pt_idx].normal * nx, surface_points[pt_idx].normal), surface_points[pt_idx].pos)
                 surface_points[pt_idx].pc1 = pc1
@@ -1177,9 +1195,9 @@ Class for grasp learning.
                 points_in_link.append(surface_points[pt_idx].pos - surface_points[pt_idx].normal*margin)
 
             print "points_in_link: %s"%(len(points_in_link))
-            for pt in points_in_link:
-                m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
-                rospy.sleep(0.001)
+#            for pt in points_in_link:
+#                m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
+#                rospy.sleep(0.001)
 
             print "done."
 
@@ -1417,10 +1435,6 @@ Class for grasp learning.
                               valid_configurations[pt[0]].append(q)
                           points_f_in_sphere.append(pt)
 
-#              if len(points_in_sphere) < 3:
-#                  continue
-
-#              print len(valid_configurations[0]), len(valid_configurations[1]), len(valid_configurations[2])
 
               # get the intersection of gripper configurations for f1 and f2 (for spread angle)
               f1_spread_values = []
@@ -1606,9 +1620,22 @@ Class for grasp learning.
                       for ori_idx in ori_set:
                           if not is_plane_obj_config[(cf1,ori_idx)] and not is_plane_obj_config[(cf2,ori_idx)] and not is_plane_obj_config[(cf3,ori_idx)]:
                               continue
+
+                          collision = False
+                          for disabled_pt_idx in sampled_points2_obj:
+                              pt_O = surface_points_obj[disabled_pt_idx].pos
+                              pt_E = TT_E_H * orientations[ori_idx] * T_H_O * pt_O
+                              xi, yi, zi = getPointIndex(pt_E)
+                              if xi >= voxel_map_size[0] or xi < 0 or yi >= voxel_map_size[1] or yi < 0 or zi >= voxel_map_size[2] or zi < 0:
+                                  continue
+                              for pt_gr in voxel_map[xi][yi][zi]:
+                                  if pt_gr[4] == cf1 or pt_gr[4] == cf2 or pt_gr[4] == cf3:
+                                      collision = True
+                                      break
+
 #                          normal_sum = normals_for_config[(cf1,ori_idx)] + normals_for_config[(cf2,ori_idx)] + normals_for_config[(cf3,ori_idx)]
 #                          if normal_sum.Norm() < 1.0:
-                          if True:
+                          if not collision:
                               ori_set_ok.add(ori_idx)
                               contacts_obj_for_config[(cf,ori_idx)] = contacts_obj_for_config[(cf1,ori_idx)] + contacts_obj_for_config[(cf2,ori_idx)] + contacts_obj_for_config[(cf3,ori_idx)]
                               contacts_link_for_config[(cf,ori_idx)] = contacts_link_for_config[(cf1,ori_idx)] + contacts_link_for_config[(cf2,ori_idx)] + contacts_link_for_config[(cf3,ori_idx)]
@@ -1634,6 +1661,25 @@ Class for grasp learning.
                   total_points += len(ori_for_config[cf])
               print "points_for_config total_orientations: %s"%(total_points)
 
+              contacts_cf_ori = {}
+              # get contact points for each good grasp
+              for cf in good_configs:
+                  ori_set = good_configs[cf]
+                  for ori in ori_set:
+                      contacts = []
+                      for pt_idx in range(len(contacts_obj_for_config[(cf,ori)])):
+                          pt_E = contacts_obj_for_config[(cf,ori)][pt_idx]
+                          norm_E = normals_for_config[(cf,ori)][pt_idx]
+                          similar = False
+                          for c in contacts:
+                              if (c[0]-pt_E).Norm() < 0.003 and velmautils.getAngle(c[1],norm_E) < 20.0/180.0*math.pi:
+                                  similar = True
+                                  break
+                          if not similar:
+                              contacts.append((pt_E, norm_E))
+                      contacts_cf_ori[(cf, ori)] = contacts
+
+
               # visualisation
               if True:
                   for cf in good_configs:
@@ -1657,11 +1703,12 @@ Class for grasp learning.
                          m_id = 0
                          T_W_O = T_W_E * TT_E_H * orientations[ori] * T_H_O
                          m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                         for pt_idx in range(len(contacts_obj_for_config[(cf,ori)])):
-                             pt = contacts_obj_for_config[(cf,ori)][pt_idx]
-                             norm = normals_for_config[(cf,ori)][pt_idx]
-                             m_id = self.pub_marker.publishVectorMarker(T_W_E*pt, T_W_E*(pt+norm*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
-#                             m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+                         for c in contacts_cf_ori[(cf, ori)]:
+                             m_id = self.pub_marker.publishVectorMarker(T_W_E*c[0], T_W_E*(c[0]+c[1]*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
+#                         for pt_idx in range(len(contacts_obj_for_config[(cf,ori)])):
+#                             pt = contacts_obj_for_config[(cf,ori)][pt_idx]
+#                             norm = normals_for_config[(cf,ori)][pt_idx]
+#                             m_id = self.pub_marker.publishVectorMarker(T_W_E*pt, T_W_E*(pt+norm*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
 
                          for pt in contacts_link_for_config[(cf,ori)]:
                              m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
