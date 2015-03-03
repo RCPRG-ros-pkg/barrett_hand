@@ -139,6 +139,9 @@ class SurfacePoint:
         self.frame = None
         self.pc1 = None
         self.pc2 = None
+        self.is_plane = None
+        self.is_edge = None
+        self.is_point = None
         self.neighbors_id = []
         self.visited = False
         self.allowed = True
