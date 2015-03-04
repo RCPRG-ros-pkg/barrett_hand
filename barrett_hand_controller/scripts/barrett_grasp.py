@@ -1662,6 +1662,7 @@ Class for grasp learning.
               print "points_for_config total_orientations: %s"%(total_points)
 
               contacts_cf_ori = {}
+              wrenches_cf_ori = {}
               # get contact points for each good grasp
               for cf in good_configs:
                   ori_set = good_configs[cf]
@@ -1678,7 +1679,10 @@ Class for grasp learning.
                           if not similar:
                               contacts.append((pt_E, norm_E))
                       contacts_cf_ori[(cf, ori)] = contacts
+                      for c in contacts:
+                          wrenches_cf_ori[(cf, ori)] = self.contactToWrenches(c[0]-pos, c[1], 0.8, 8)
 
+              # initial selection of grasps based on contact forces analysis
 
               # visualisation
               if True:
