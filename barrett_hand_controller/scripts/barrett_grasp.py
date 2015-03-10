@@ -80,138 +80,7 @@ from interactive_markers.menu_handler import *
 
 import ode
 import xode.transform
-
-class VolumetricModel:
-    def __init__(self, vol_radius, vol_samples_count, T_H_O):
-        self.vol_radius = vol_radius
-        self.vol_samples_count = vol_samples_count
-        self.index_factor = float(self.vol_samples_count)/(2.0*self.vol_radius)
-        self.vol_samples = []
-        for x in np.linspace(-self.vol_radius, self.vol_radius, self.vol_samples_count):
-            self.vol_samples.append([])
-            for y in np.linspace(-self.vol_radius, self.vol_radius, self.vol_samples_count):
-                self.vol_samples[-1].append([])
-                for z in np.linspace(-self.vol_radius, self.vol_radius, self.vol_samples_count):
-                    self.vol_samples[-1][-1].append([])
-                    self.vol_samples[-1][-1][-1] = {}
-        self.vol_sample_points = []
-        for xi in range(self.vol_samples_count):
-            for yi in range(self.vol_samples_count):
-                for zi in range(self.vol_samples_count):
-                    self.vol_sample_points.append( self.getVolPoint(xi,yi,zi) )
-        self.T_H_O = T_H_O
-        self.T_O_H = self.T_H_O.Inverse()
-
-
-    def getVolIndex(self, pt):
-        xi = int(np.floor( self.index_factor*(pt[0]+self.vol_radius) ))
-        yi = int(np.floor( self.index_factor*(pt[1]+self.vol_radius) ))
-        zi = int(np.floor( self.index_factor*(pt[2]+self.vol_radius) ))
-        if xi < 0 or xi >= self.vol_samples_count or yi < 0 or yi >= self.vol_samples_count or zi < 0 or zi >= self.vol_samples_count:
-            print "getVolIndex: error: %s, %s, %s"%(pt[0],pt[1],pt[2])
-            return None
-        return (xi, yi, zi)
-
-    def getVolPoint(self, xi,yi,zi):
-        return PyKDL.Vector(-self.vol_radius + (xi+0.5) / self.index_factor, -self.vol_radius + (yi+0.5) / self.index_factor, -self.vol_radius + (zi+0.5) / self.index_factor)
-
-    def generate(self, orientations, surface_points_obj):
-        for ori_idx in range(len(orientations)):
-                    T_H_Hd = orientations[ori_idx]
-                    T_H_Od = T_H_Hd * self.T_H_O
-                    for surf_pt_idx in range(len(surface_points_obj)):
-                        surf_pt = surface_points_obj[surf_pt_idx]
-                        if not surf_pt.allowed:
-                            continue
-                        pt = T_H_Od * surf_pt.pos
-                        vol_idx = self.getVolIndex(pt)
-                        if vol_idx != None:
-                            if not ori_idx in self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
-                                self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx] = [surf_pt.id]
-                            else:
-                                self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx].append(surf_pt.id)
-        print "transforming the volumetric map..."
-
-        for xi in range(self.vol_samples_count):
-                  print xi
-                  for yi in range(self.vol_samples_count):
-                    for zi in range(self.vol_samples_count):
-                      for ori in self.vol_samples[xi][yi][zi]:
-                          planes = 0
-                          edges = 0
-                          points = 0
-                          norm = PyKDL.Vector()
-                          for pt_id in self.vol_samples[xi][yi][zi][ori]:
-                              norm += surface_points_obj[pt_id].normal
-                              if surface_points_obj[pt_id].is_plane:
-                                  planes += 1
-                              if surface_points_obj[pt_id].is_edge:
-                                  edges += 1
-                              if surface_points_obj[pt_id].is_point:
-                                  points += 1
-                          norm.Normalize()
-                          if planes >= edges and planes >= points:
-                              self.vol_samples[xi][yi][zi][ori] = (norm, 0)
-                          elif edges >= planes and edges >= points:
-                              self.vol_samples[xi][yi][zi][ori] = (norm, 1)
-                          else:
-                              self.vol_samples[xi][yi][zi][ori] = (norm, 2)
-
-    def save(self, filename):
-        print "saving the volumetric map to file %s"%(vol_map_filename)
-        with open(filename, 'w') as f:
-                    f.write(str(self.vol_radius) + " " + str(self.vol_samples_count) + "\n")
-                    for xi in range(self.vol_samples_count):
-                      for yi in range(self.vol_samples_count):
-                        for zi in range(self.vol_samples_count):
-                            if len(self.vol_samples[xi][yi][zi]) > 0:
-                                f.write(str(xi) + " " + str(yi) + " " + str(zi))
-                                for ori_idx in self.vol_samples[xi][yi][zi]:
-                                    norm, type_surf = self.vol_samples[xi][yi][zi][ori_idx]
-                                    f.write(" " + str(ori_idx) + " " + str(norm[0]) + " " + str(norm[1]) + " " + str(norm[2]) + " " + str(type_surf))
-                                f.write("\n")
-
-    def load(self, filename):
-        with open(filename, 'r') as f:
-                    line = f.readline()
-                    vol_radius_str, vol_samples_count_str = line.split()
-                    vol_radius = float(vol_radius_str)
-                    if vol_radius != self.vol_radius:
-                        print "error: VolumetricModel.load: vol_radius != self.vol_radius"
-                        return
-                    vol_samples_count = int(vol_samples_count_str)
-                    if vol_samples_count != self.vol_samples_count:
-                        print "error: VolumetricModel.load: vol_samples_count != self.vol_samples_count"
-                        return
-                    while True:
-                        line = f.readline()
-                        val_str = line.split()
-                        if len(val_str) == 0:
-                            break
-                        xi = int(val_str[0])
-                        yi = int(val_str[1])
-                        zi = int(val_str[2])
-                        for i in range(3, len(val_str), 5):
-                            ori_idx = int(val_str[i])
-                            normx = float(val_str[i+1])
-                            normy = float(val_str[i+2])
-                            normz = float(val_str[i+3])
-                            type_surf = int(val_str[i+4])
-                            self.vol_samples[xi][yi][zi][ori_idx] = (PyKDL.Vector(normx, normy, normz), type_surf)
-
-    def test1(self, pub_marker, orientations, T_W_H):
-        scale = 2.0*self.vol_radius/self.vol_samples_count
-        for ori_idx in range(len(orientations)):
-            pub_marker.eraseMarkers(0, 1000, frame_id='world')
-            m_id = 0
-            T_W_O = T_W_H * orientations[ori_idx] * self.T_H_O
-            m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-            for pt in self.vol_sample_points:
-                vol_idx = self.getVolIndex(pt)
-                if vol_idx != None and ori_idx in self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
-                    m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(scale, scale, scale), T=T_W_H)
-                    rospy.sleep(0.001)
-            raw_input("Press ENTER to continue...")
+import volumetricutils
 
 class GraspingTask:
     """
@@ -791,7 +660,7 @@ Class for grasp learning.
             #
             # create volumetric model of the key handle
             #
-            vol_obj = VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O)
+            vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O)
             vol_map_filename = "vol_map.txt"
             if False:
                 print "generating volumetric map (%s iterations)..."%(len(orientations) * len(surface_points_obj))
@@ -989,79 +858,23 @@ Class for grasp learning.
 
             print "points: %s"%(len(points))
 
-            dim_min = [None, None, None]
-            dim_max = [None, None, None]
-            for pt in points:
-                v = pt[1]
-                for dim in range(3):
-                    if dim_min[dim] == None or dim_min[dim] > v[dim]:
-                        dim_min[dim] = v[dim]
-                    if dim_max[dim] == None or dim_max[dim] < v[dim]:
-                        dim_max[dim] = v[dim]
-            print "dim_min: %s"%(dim_min)
-            print "dim_max: %s"%(dim_max)
-
-            voxel_size = 0.005
-            def getPointIndex(pt):
-                return [int((pt[0] - dim_min[0])/(voxel_size)), int((pt[1] - dim_min[1])/(voxel_size)), int((pt[2] - dim_min[2])/(voxel_size))]
-
-            voxel_map_size = getPointIndex(dim_max)
-            voxel_map_size[0] += 1
-            voxel_map_size[1] += 1
-            voxel_map_size[2] += 1
-
-            voxel_map = []
-            for x in range(voxel_map_size[0]):
-                voxel_map.append([])
-                for y in range(voxel_map_size[1]):
-                    voxel_map[-1].append([])
-                    for z in range(voxel_map_size[2]):
-                        voxel_map[-1][-1].append([])
-                        voxel_map[-1][-1][-1] = []
-
-            # add all points to the voxel map
-            max_points_in_voxel = 0
-            for p in points:
-                idx = getPointIndex(p[1])
-                voxel_map[idx[0]][idx[1]][idx[2]].append(p)
-                voxel_points_count = len(voxel_map[idx[0]][idx[1]][idx[2]])
-                if voxel_points_count > max_points_in_voxel:
-                    max_points_in_voxel = voxel_points_count
-
-            print "voxel_map_size: %s"%(voxel_map_size)
-            print "voxels: %s"%(voxel_map_size[0]*voxel_map_size[1]*voxel_map_size[2])
-            print "max_points_in_voxel: %s"%(max_points_in_voxel)
-
-            # add all forbidden points to the second voxel map
-            voxel_map_f = []
-            for x in range(voxel_map_size[0]):
-                voxel_map_f.append([])
-                for y in range(voxel_map_size[1]):
-                    voxel_map_f[-1].append([])
-                    for z in range(voxel_map_size[2]):
-                        voxel_map_f[-1][-1].append([])
-                        voxel_map_f[-1][-1][-1] = []
-
-            max_points_in_voxel = 0
-            for p in points_forbidden:
-                idx = getPointIndex(p[1])
-                voxel_map_f[idx[0]][idx[1]][idx[2]].append(p)
-                voxel_points_count = len(voxel_map_f[idx[0]][idx[1]][idx[2]])
-                if voxel_points_count > max_points_in_voxel:
-                    max_points_in_voxel = voxel_points_count
-
-            print "max_points_in_voxel (f): %s"%(max_points_in_voxel)
-
+            voxel_grid = volumetricutils.VoxelGrid(0.005)
+            voxel_grid.build(points, points_forbidden)
+            print "dim_min: %s"%(voxel_grid.dim_min)
+            print "dim_max: %s"%(voxel_grid.dim_max)
+            print "voxel_map_size: %s %s %s"%(voxel_grid.grid_size[0], voxel_grid.grid_size[1], voxel_grid.grid_size[2])
+            print "voxels: %s"%(voxel_grid.grid_size[0]*voxel_grid.grid_size[1]*voxel_grid.grid_size[2])
+            print "max_points_in_voxel: %s"%(voxel_grid.max_points_in_voxel)
+            print "max_points_in_voxel (f): %s"%(voxel_grid.max_points_in_voxel_f)
 
             # move the sphere around
-#            sphere_diameter = 0.0305
             sphere_diameter = 0.044
             sphere_radius = 0.5 * sphere_diameter
 
             cylinder_diameter = 0.0305
             cylinder_radius = 0.5 * sphere_diameter
 
-            voxel = voxel_map[int(voxel_map_size[0]/2.0)][int(voxel_map_size[1]/2.0)][int(voxel_map_size[2]/2.0)]
+            voxel = voxel_grid.grid[int(voxel_grid.grid_size[0]/2.0)][int(voxel_grid.grid_size[1]/2.0)][int(voxel_grid.grid_size[2]/2.0)]
             print "voxel: %s"%(len(voxel))
 
             # get the neighborhood
@@ -1086,50 +899,7 @@ Class for grasp learning.
 #            if True:
               pos = init_pos + offset
 
-              min_index = getPointIndex(pos - PyKDL.Vector(sphere_radius, sphere_radius, sphere_radius))
-              max_index = getPointIndex(pos + PyKDL.Vector(sphere_radius, sphere_radius, sphere_radius))
-              for dof in range(3):
-                  if min_index[dof] < 0:
-                      min_index[dof] = 0
-                  if max_index[dof] >= voxel_map_size[dof]:
-                      max_index[dof] = voxel_map_size[dof]-1
-
-              # get the indices of voxels around the current point
-              voxel_max_radius = math.sqrt(3)/2.0 * voxel_size
-              voxel_indices = []
-              for x in range(min_index[0], max_index[0]+1):
-                for y in range(min_index[1], max_index[1]+1):
-                  for z in range(min_index[2], max_index[2]+1):
-                      voxel_center = PyKDL.Vector((x+0.5) * voxel_size + dim_min[0], (y+0.5) * voxel_size + dim_min[1], (z+0.5) * voxel_size + dim_min[2])
-                      if (voxel_center-pos).Norm() > voxel_max_radius + sphere_radius:
-                          continue
-                      voxel_indices.append((x,y,z))
-
-              neighborhood_size = 0
-              points_in_sphere = []
-              points_f_in_sphere = []
-              valid_configurations = [[], [], []]
-              for idx in voxel_indices:
-                  x,y,z = idx
-                  neighborhood_size += len(voxel_map[x][y][z])
-                  for pt in voxel_map[x][y][z]:
-                      pt_diff = pt[1]-pos
-                      dist = pt_diff.Norm()
-                      if dist < sphere_radius:
-                          q = pt[4]
-                          if not q in valid_configurations[pt[0]]:
-                              valid_configurations[pt[0]].append(q)
-                          points_in_sphere.append(pt)
-
-                  for pt in voxel_map_f[x][y][z]:
-                      pt_diff = pt[1]-pos
-                      dist = pt_diff.Norm()
-                      if dist < sphere_radius:
-                          q = pt[4]
-                          if not q in valid_configurations[pt[0]]:
-                              valid_configurations[pt[0]].append(q)
-                          points_f_in_sphere.append(pt)
-
+              points_in_sphere, points_f_in_sphere, valid_configurations, neighborhood_size = voxel_grid.getPointsAtPoint(pos, sphere_radius)
 
               # get the intersection of gripper configurations for f1 and f2 (for spread angle)
               f1_spread_values = []
@@ -1403,10 +1173,10 @@ Class for grasp learning.
                           for disabled_pt_idx in sampled_points2_obj:
                               pt_O = surface_points_obj[disabled_pt_idx].pos
                               pt_E = TT_E_H * orientations[ori_idx] * T_H_O * pt_O
-                              xi, yi, zi = getPointIndex(pt_E)
-                              if xi >= voxel_map_size[0] or xi < 0 or yi >= voxel_map_size[1] or yi < 0 or zi >= voxel_map_size[2] or zi < 0:
+                              xi, yi, zi = voxel_grid.getPointIndex(pt_E)
+                              if xi >= voxel_grid.grid_size[0] or xi < 0 or yi >= voxel_grid.grid_size[1] or yi < 0 or zi >= voxel_grid.grid_size[2] or zi < 0:
                                   continue
-                              for pt_gr in voxel_map[xi][yi][zi]:
+                              for pt_gr in voxel_grid.grid[xi][yi][zi]:
                                   if pt_gr[4] == cf1 or pt_gr[4] == cf2 or pt_gr[4] == cf3:
                                       collision = True
                                       break
