@@ -1867,6 +1867,14 @@ Class for grasp learning.
               all_configs = 0
               good_poses = 0
               good_configs = {}
+              forbidden_cf_ori = {}
+              for cf1 in points_for_config_f1:
+                  forbidden_cf_ori[cf1] = set()
+              for cf2 in points_for_config_f2:
+                  forbidden_cf_ori[cf2] = set()
+              for cf3 in points_for_config_f3:
+                  forbidden_cf_ori[cf3] = set()
+
               # iterate through all locally possible hand configs
               for cf1 in points_for_config_f1:
                 for cf2 in points_for_config_f2:
@@ -1882,43 +1890,68 @@ Class for grasp learning.
 
                       # get the intersection of the orientations set for contact of the object with each of the fingers
                       ori_set = ori_for_config[cf1].intersection(ori_for_config[cf2], ori_for_config[cf3])
-                      print "ori_set intersection: %s"%(len(ori_set))
+#                      print "ori_set intersection: %s"%(len(ori_set))
+                      ori_set = ori_set.difference(forbidden_cf_ori[cf1], forbidden_cf_ori[cf2], forbidden_cf_ori[cf3])
 
                       # perform additional checks for each possible orientation
                       ori_set_ok = set()
                       for ori_idx in ori_set:
 
+                          if True:
+##################
+                              T_E_O = TT_E_H * orientations[ori_idx] * T_H_O
+                              TR_E_O = PyKDL.Frame(T_E_O.M)
 
+                              for cfx in [cf1, cf2, cf3]:
+                                ori_ok = False
+                                if ori_idx in forbidden_cf_ori[cfx]:
+                                    break
+                                if (cfx,ori_idx) in contacts_link_for_config:
+                                    continue
+                                for f_pt in points_for_config[cfx]:
+                                  vol_idx = getVolIndex(f_pt[1]-pos)
+                                  vol_sample = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                                  if not ori_idx in vol_sample:
+                                      continue
 
+                                  norm, type_surf = vol_sample[ori_idx]
+                                  normal_obj_E = TR_E_O * norm
+                                  # check the contact between two surfaces
+                                  if surface_points[f_pt[3]].is_plane and type_surf==0:
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.8:
+                                          ori_ok = True
+                                  elif (surface_points[f_pt[3]].is_plane and type_surf==2) or (surface_points[f_pt[3]].is_point and type_surf==0):
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
+                                          ori_ok = True
+                                  elif (surface_points[f_pt[3]].is_plane and type_surf==1) or (surface_points[f_pt[3]].is_edge and type_surf==0):
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
+                                          ori_ok = True
+                                  elif surface_points[f_pt[3]].is_edge and type_surf==1:
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
+                                          ori_ok = True
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+                                  if ori_ok:
+                                      if not (cfx,ori_idx) in contacts_link_for_config:
+                                          contacts_link_for_config[(cfx,ori_idx)] = [f_pt[1]]
+                                      else:
+                                          contacts_link_for_config[(cfx,ori_idx)].append(f_pt[1])
+                                      if not (cfx,ori_idx) in contacts_obj_for_config:
+                                          contacts_obj_for_config[(cfx,ori_idx)] = [pos + getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
+                                      else:
+                                          contacts_obj_for_config[(cfx,ori_idx)].append(pos + getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
+                                      if not (cfx,ori_idx) in normals_for_config:
+                                          normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
+                                      else:
+                                          normals_for_config[(cfx,ori_idx)].append(normal_obj_E)
+                                      is_plane_obj_config[(cfx,ori_idx)] = type_surf==0
+                                  else:
+                                      forbidden_cf_ori[cfx].add(ori_idx)
+                                      break
+                                if not ori_ok:
+                                  break
+                              if not ori_ok:
+                                  continue
+#################
 
 
                           # at least one contact should be with planar part of the object
