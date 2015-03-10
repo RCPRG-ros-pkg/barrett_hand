@@ -61,7 +61,6 @@ from velma import Velma
 from velmasim import VelmaSim
 import random
 from openravepy import *
-#from ..openravepy_int import KinBody, TriMesh
 from openravepy.openravepy_int import KinBody, TriMesh
 
 from optparse import OptionParser
@@ -81,6 +80,138 @@ from interactive_markers.menu_handler import *
 
 import ode
 import xode.transform
+
+class VolumetricModel:
+    def __init__(self, vol_radius, vol_samples_count, T_H_O):
+        self.vol_radius = vol_radius
+        self.vol_samples_count = vol_samples_count
+        self.index_factor = float(self.vol_samples_count)/(2.0*self.vol_radius)
+        self.vol_samples = []
+        for x in np.linspace(-self.vol_radius, self.vol_radius, self.vol_samples_count):
+            self.vol_samples.append([])
+            for y in np.linspace(-self.vol_radius, self.vol_radius, self.vol_samples_count):
+                self.vol_samples[-1].append([])
+                for z in np.linspace(-self.vol_radius, self.vol_radius, self.vol_samples_count):
+                    self.vol_samples[-1][-1].append([])
+                    self.vol_samples[-1][-1][-1] = {}
+        self.vol_sample_points = []
+        for xi in range(self.vol_samples_count):
+            for yi in range(self.vol_samples_count):
+                for zi in range(self.vol_samples_count):
+                    self.vol_sample_points.append( self.getVolPoint(xi,yi,zi) )
+        self.T_H_O = T_H_O
+        self.T_O_H = self.T_H_O.Inverse()
+
+
+    def getVolIndex(self, pt):
+        xi = int(np.floor( self.index_factor*(pt[0]+self.vol_radius) ))
+        yi = int(np.floor( self.index_factor*(pt[1]+self.vol_radius) ))
+        zi = int(np.floor( self.index_factor*(pt[2]+self.vol_radius) ))
+        if xi < 0 or xi >= self.vol_samples_count or yi < 0 or yi >= self.vol_samples_count or zi < 0 or zi >= self.vol_samples_count:
+            print "getVolIndex: error: %s, %s, %s"%(pt[0],pt[1],pt[2])
+            return None
+        return (xi, yi, zi)
+
+    def getVolPoint(self, xi,yi,zi):
+        return PyKDL.Vector(-self.vol_radius + (xi+0.5) / self.index_factor, -self.vol_radius + (yi+0.5) / self.index_factor, -self.vol_radius + (zi+0.5) / self.index_factor)
+
+    def generate(self, orientations, surface_points_obj):
+        for ori_idx in range(len(orientations)):
+                    T_H_Hd = orientations[ori_idx]
+                    T_H_Od = T_H_Hd * self.T_H_O
+                    for surf_pt_idx in range(len(surface_points_obj)):
+                        surf_pt = surface_points_obj[surf_pt_idx]
+                        if not surf_pt.allowed:
+                            continue
+                        pt = T_H_Od * surf_pt.pos
+                        vol_idx = self.getVolIndex(pt)
+                        if vol_idx != None:
+                            if not ori_idx in self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
+                                self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx] = [surf_pt.id]
+                            else:
+                                self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx].append(surf_pt.id)
+        print "transforming the volumetric map..."
+
+        for xi in range(self.vol_samples_count):
+                  print xi
+                  for yi in range(self.vol_samples_count):
+                    for zi in range(self.vol_samples_count):
+                      for ori in self.vol_samples[xi][yi][zi]:
+                          planes = 0
+                          edges = 0
+                          points = 0
+                          norm = PyKDL.Vector()
+                          for pt_id in self.vol_samples[xi][yi][zi][ori]:
+                              norm += surface_points_obj[pt_id].normal
+                              if surface_points_obj[pt_id].is_plane:
+                                  planes += 1
+                              if surface_points_obj[pt_id].is_edge:
+                                  edges += 1
+                              if surface_points_obj[pt_id].is_point:
+                                  points += 1
+                          norm.Normalize()
+                          if planes >= edges and planes >= points:
+                              self.vol_samples[xi][yi][zi][ori] = (norm, 0)
+                          elif edges >= planes and edges >= points:
+                              self.vol_samples[xi][yi][zi][ori] = (norm, 1)
+                          else:
+                              self.vol_samples[xi][yi][zi][ori] = (norm, 2)
+
+    def save(self, filename):
+        print "saving the volumetric map to file %s"%(vol_map_filename)
+        with open(filename, 'w') as f:
+                    f.write(str(self.vol_radius) + " " + str(self.vol_samples_count) + "\n")
+                    for xi in range(self.vol_samples_count):
+                      for yi in range(self.vol_samples_count):
+                        for zi in range(self.vol_samples_count):
+                            if len(self.vol_samples[xi][yi][zi]) > 0:
+                                f.write(str(xi) + " " + str(yi) + " " + str(zi))
+                                for ori_idx in self.vol_samples[xi][yi][zi]:
+                                    norm, type_surf = self.vol_samples[xi][yi][zi][ori_idx]
+                                    f.write(" " + str(ori_idx) + " " + str(norm[0]) + " " + str(norm[1]) + " " + str(norm[2]) + " " + str(type_surf))
+                                f.write("\n")
+
+    def load(self, filename):
+        with open(filename, 'r') as f:
+                    line = f.readline()
+                    vol_radius_str, vol_samples_count_str = line.split()
+                    vol_radius = float(vol_radius_str)
+                    if vol_radius != self.vol_radius:
+                        print "error: VolumetricModel.load: vol_radius != self.vol_radius"
+                        return
+                    vol_samples_count = int(vol_samples_count_str)
+                    if vol_samples_count != self.vol_samples_count:
+                        print "error: VolumetricModel.load: vol_samples_count != self.vol_samples_count"
+                        return
+                    while True:
+                        line = f.readline()
+                        val_str = line.split()
+                        if len(val_str) == 0:
+                            break
+                        xi = int(val_str[0])
+                        yi = int(val_str[1])
+                        zi = int(val_str[2])
+                        for i in range(3, len(val_str), 5):
+                            ori_idx = int(val_str[i])
+                            normx = float(val_str[i+1])
+                            normy = float(val_str[i+2])
+                            normz = float(val_str[i+3])
+                            type_surf = int(val_str[i+4])
+                            self.vol_samples[xi][yi][zi][ori_idx] = (PyKDL.Vector(normx, normy, normz), type_surf)
+
+    def test1(self, pub_marker, orientations, T_W_H):
+        scale = 2.0*self.vol_radius/self.vol_samples_count
+        for ori_idx in range(len(orientations)):
+            pub_marker.eraseMarkers(0, 1000, frame_id='world')
+            m_id = 0
+            T_W_O = T_W_H * orientations[ori_idx] * self.T_H_O
+            m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+            for pt in self.vol_sample_points:
+                vol_idx = self.getVolIndex(pt)
+                if vol_idx != None and ori_idx in self.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
+                    m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(scale, scale, scale), T=T_W_H)
+                    rospy.sleep(0.001)
+            raw_input("Press ENTER to continue...")
 
 class GraspingTask:
     """
@@ -392,6 +523,37 @@ Class for grasp learning.
                     mindist = dqp
         return mindist
 
+    def generateSelfCollisionData(self, sp_configs, f1_configs, f2_configs, f3_configs):
+        self_collisions_configs = set()
+        for sp_idx in range(len(sp_configs)):
+            print "%s / %s"%(sp_idx, len(sp_configs))
+            sp = sp_configs[sp_idx]
+            for f1_idx in range(len(f1_configs)):
+                f1 = f1_configs[f1_idx]
+                for f2_idx in range(len(f2_configs)):
+                    f2 = f2_configs[f2_idx]
+                    for f3_idx in range(len(f3_configs)):
+                        f3 = f3_configs[f3_idx]
+                        self.openrave_robot.SetDOFValues([sp/180.0*math.pi, f1/180.0*math.pi, f3/180.0*math.pi, f2/180.0*math.pi])
+                        if self.openrave_robot.CheckSelfCollision():
+                            self_collisions_configs.add( (sp_idx, f1_idx, f3_idx, f2_idx) )
+        return self_collisions_configs
+
+    def saveSelfCollisionData(self, filename, self_collisions_configs):
+        with open(filename, 'w') as f:
+            for cf in self_collisions_configs:
+                f.write(str(cf[0]) + " " + str(cf[1]) + " " + str(cf[2]) + " " + str(cf[3]) + "\n")
+
+    def loadSelfCollisionData(self, filename):
+        self_collisions_configs = set()
+        with open(filename, 'r') as f:
+            while True:
+                cf_str = f.readline().split()
+                if len(cf_str) != 4:
+                    break
+                self_collisions_configs.add( (int(cf_str[0]), int(cf_str[1]), int(cf_str[2]), int(cf_str[3])) )
+        return self_collisions_configs
+
     def spin(self):
         m_id = 0
         self.pub_marker.eraseMarkers(0,3000, frame_id='world')
@@ -425,10 +587,6 @@ Class for grasp learning.
         vertices, faces = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
         self.addTrimesh("object", vertices, faces)
 
-#        self.addBox("object", 0.2,0.06,0.06)
-#        self.addSphere("object", 0.15)
-#        vertices, faces = self.getMesh("object")
-
         #
         # definition of the expected external wrenches
         #
@@ -450,44 +608,7 @@ Class for grasp learning.
             torque = wr_orig * force
             ext_wrenches.append(PyKDL.Wrench(force, torque))
 
-        #
-        # definition of the grasps
-        #
-        grasp_id = 0
-        if grasp_id == 0:
-            grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
-            grasp_initial_configuration = [60.0/180.0*math.pi, None, None, None]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.122103662206, -0.124395758838, -0.702726011729, 0.689777190329), PyKDL.Vector(-0.00115787237883, -0.0194999426603, 0.458197712898))
-#            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.174202588426, -0.177472708083, -0.691231954612, 0.678495061771), PyKDL.Vector(0.0, -0.0213436260819, 0.459123969078))
-        elif grasp_id == 1:
-            grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
-            grasp_initial_configuration = [90.0/180.0*math.pi, None, None, None]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0187387771868, -0.708157209758, -0.0317875569224, 0.705090018033), PyKDL.Vector(4.65661287308e-10, 0.00145332887769, 0.472836345434))
-        elif grasp_id == 2:
-            grasp_direction = [0, 1, 0, 0]    # spread, f1, f3, f2
-            grasp_initial_configuration = [90.0/180.0*math.pi, None, 90.0/180.0*math.pi, 0]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.0187387763947, -0.708157179826, -0.0317875555789, 0.705089928626), PyKDL.Vector(0.0143095180392, 0.00145332887769, 0.483659058809))
-        elif grasp_id == 3:
-            grasp_direction = [0, 1, 1, 1]    # spread, f1, f3, f2
-            grasp_initial_configuration = [90.0/180.0*math.pi, None, None, None]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(-0.00518634245761, -0.706548316769, -0.0182458505507, 0.707410947861), PyKDL.Vector(0.000126354629174, -0.00217361748219, 0.47637796402))
-        elif grasp_id == 4:
-            grasp_direction = [0, 0, 1, 0]    # spread, f1, f3, f2
-            grasp_initial_configuration = [90.0/180.0*math.pi, 100.0/180.0*math.pi, None, 100.0/180.0*math.pi]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(0.153445252933, -0.161230275653, 0.681741576082, 0.696913201022), PyKDL.Vector(0.000126355327666, 0.00152841210365, 0.466048002243))
-        elif grasp_id == 5:
-            grasp_direction = [0, 0, 1, 0]    # spread, f1, f3, f2
-            grasp_initial_configuration = [100.0/180.0*math.pi, 101.5/180.0*math.pi, None, 101.5/180.0*math.pi]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(0.155488650062, -0.159260521271, 0.690572597636, 0.688163302213), PyKDL.Vector(-0.000278688268736, 0.00575117766857, 0.461560428143))
-        elif grasp_id == 6:
-            grasp_direction = [0, 1, -1, 1]    # spread, f1, f3, f2
-            grasp_initial_configuration = [90.0/180.0*math.pi, None, 0, 0]
-            self.T_W_O = PyKDL.Frame(PyKDL.Rotation.Quaternion(0.512641041738, -0.485843507183, -0.514213889193, 0.48655882699), PyKDL.Vector(-0.000278423947748, -0.00292747467756, 0.445628076792))
-        else:
-            print "ERROR: unknown grasp_id: %s"%(grasp_id)
-            exit(0)
-
-        self.updatePose("object", self.T_W_O)
+#        self.updatePose("object", self.T_W_O)
 
         with open('barret_hand_openrave2ros_joint_map2.txt', 'r') as f:
             lines = f.readlines()
@@ -504,130 +625,6 @@ Class for grasp learning.
 
         self.pub_js = rospy.Publisher("/joint_states", JointState)
 
-        if True:
-            def getDirectionIndex(n):
-                min_angle = -45.0/180.0*math.pi
-                angle_range = 90.0/180.0*math.pi
-                angles_count = 5
-                angles_count2 = angles_count * angles_count
-                max_indices = angles_count2 * 6
-                if abs(n.x()) > abs(n.y()) and abs(n.x()) > abs(n.z()):
-                    if n.x() > 0:
-                        sec = 0
-                        a1 = math.atan2(n.y(), n.x())
-                        a2 = math.atan2(n.z(), n.x())
-                    else:
-                        sec = 1
-                        a1 = math.atan2(n.y(), -n.x())
-                        a2 = math.atan2(n.z(), -n.x())
-                elif abs(n.y()) > abs(n.x()) and abs(n.y()) > abs(n.z()):
-                    if n.y() > 0:
-                        sec = 2
-                        a1 = math.atan2(n.x(), n.y())
-                        a2 = math.atan2(n.z(), n.y())
-                    else:
-                        sec = 3
-                        a1 = math.atan2(n.x(), -n.y())
-                        a2 = math.atan2(n.z(), -n.y())
-                else:
-                    if n.z() > 0:
-                        sec = 4
-                        a1 = math.atan2(n.x(), n.z())
-                        a2 = math.atan2(n.y(), n.z())
-                    else:
-                        sec = 5
-                        a1 = math.atan2(n.x(), -n.z())
-                        a2 = math.atan2(n.y(), -n.z())
-
-                a1i = int(angles_count*(a1-min_angle)/angle_range)
-                a2i = int(angles_count*(a2-min_angle)/angle_range)
-                if a1i < 0:
-                    print sec, a1i, a2i
-                    a1i = 0
-                if a1i >= angles_count:
-#                    print sec, a1i, a2i
-                    a1i = angles_count-1
-                if a2i < 0:
-                    print sec, a1i, a2i
-                    a2i = 0
-                if a2i >= angles_count:
-                    print sec, a1i, a2i
-                    a2i = angles_count-1
-                return sec * angles_count2 + a1i * angles_count + a2i
-
-            # generate a dictionary of indexed directions
-            normals_sphere_indexed_dir = velmautils.generateNormalsSphere(3.0/180.0*math.pi)
-            print len(normals_sphere_indexed_dir)
-            indices_directions = {}
-            for n in normals_sphere_indexed_dir:
-                index = getDirectionIndex(n)
-                if not index in indices_directions:
-                    indices_directions[index] = [n]
-                else:
-                    indices_directions[index].append(n)
-
-            for index in indices_directions:
-                n_mean = PyKDL.Vector()
-                for n in indices_directions[index]:
-                    n_mean += n
-                n_mean.Normalize()
-                indices_directions[index] = n_mean
-
-            # test direction indexing
-            if False:
-                normals_sphere = velmautils.generateNormalsSphere(3.0/180.0*math.pi)
-                print len(normals_sphere)
-                m_id = 0
-                for current_index in range(5*5*6):
-                  count = 0
-                  r = random.random()
-                  g = random.random()
-                  b = random.random()
-                  for n in normals_sphere:
-                    sec = -1
-                    a1 = None
-                    a2 = None
-                    index = getDirectionIndex(n)
-                    if index == current_index:
-                        m_id = self.pub_marker.publishSinglePointMarker(n*0.1, m_id, r=r, g=g, b=b, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.007, 0.007, 0.007), T=None)
-                        count += 1
-                  print current_index, count
-                for index in indices_directions:
-                    m_id = self.pub_marker.publishSinglePointMarker(indices_directions[index]*0.12, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.012, 0.012, 0.012), T=None)
-
-                exit(0)
-
-        # test curvature computation
-        if False:
-            surfaceutils.testSurfaceCurvature1(self.pub_marker, vertices, faces, self.T_W_O)
-            surfaceutils.testSurfaceCurvature2(self.pub_marker, vertices, faces, self.T_W_O)
-
-        # test curvature computation
-        if False:
-
-            points = []
-            point_id = 0
-            for angle in np.arange(0, 359.9999/180.0*math.pi, 10.0/180.0*math.pi):
-                for z in np.arange(-0.2, 0.2, 0.01):
-                    surf_pt = SurfacePoint()
-                    surf_pt.id = point_id
-                    x = math.cos(angle)
-                    y = math.sin(angle)
-                    surf_pt.pos = PyKDL.Vector(x,y,z)
-                    normal = PyKDL.Vector(x,y,0)
-                    normal.Normalize()
-                    surf_pt.normal = normal
-                    points.append(surf_pt)
-                    point_id += 1
-
-            print len(points)
-            for p_idx1 in range(len(points)):
-                for p_idx2 in range(len(points)):
-                    if p_idx1 == p_idx2:
-                        continue
-#                    if
-
-            exit(0)
 
         if True:
             #
@@ -682,42 +679,6 @@ Class for grasp learning.
             #
             normals_sphere_contacts = velmautils.generateNormalsSphere(20.0/180.0*math.pi)
             print "normals_sphere_contacts: %s"%(len(normals_sphere_contacts))
-
-            #
-            # create volumetric model of the key handle
-            #
-            vol_radius = 0.022
-            vol_samples_count = 16
-
-            def getVolIndex(pt):
-                x = pt[0]
-                y = pt[1]
-                z = pt[2]
-                xi = int(np.floor(vol_samples_count*(x-(-vol_radius))/(2.0*vol_radius)))
-                yi = int(np.floor(vol_samples_count*(y-(-vol_radius))/(2.0*vol_radius)))
-                zi = int(np.floor(vol_samples_count*(z-(-vol_radius))/(2.0*vol_radius)))
-                if xi < 0 or xi >= vol_samples_count or yi < 0 or yi >= vol_samples_count or zi < 0 or zi >= vol_samples_count:
-                  print "getVolIndex: error: %s, %s, %s"%(x,y,z)
-                  return None
-                return (xi, yi, zi)
-
-            def getVolPoint(xi,yi,zi):
-                return PyKDL.Vector(-vol_radius + (xi+0.5) * 2.0 * vol_radius / vol_samples_count, -vol_radius + (yi+0.5) * 2.0 * vol_radius / vol_samples_count, -vol_radius + (zi+0.5) * 2.0 * vol_radius / vol_samples_count)
-
-            vol_samples = []
-            for x in np.linspace(-vol_radius, vol_radius, vol_samples_count):
-              vol_samples.append([])
-              for y in np.linspace(-vol_radius, vol_radius, vol_samples_count):
-                vol_samples[-1].append([])
-                for z in np.linspace(-vol_radius, vol_radius, vol_samples_count):
-                  vol_samples[-1][-1].append([])
-                  vol_samples[-1][-1][-1] = {}
-
-            vol_sample_points = []
-            for xi in range(vol_samples_count):
-              for yi in range(vol_samples_count):
-                for zi in range(vol_samples_count):
-                  vol_sample_points.append( getVolPoint(xi,yi,zi) )
 
             #
             # object
@@ -783,15 +744,17 @@ Class for grasp learning.
                 surface_points2_obj_init = surface_points2_obj2
                 p_idx = surface_points2_obj_init[0].id
 
-            for pt_idx in sampled_points2_obj:
-                pt = surface_points_obj[pt_idx]
-                m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
-                rospy.sleep(0.001)
+            # test volumetric model
+            if False:
+                for pt_idx in sampled_points2_obj:
+                    pt = surface_points_obj[pt_idx]
+                    m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
+                    rospy.sleep(0.001)
 
-            for pt_idx in sampled_points_obj:
-                pt = surface_points_obj[pt_idx]
-                m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
-                rospy.sleep(0.001)
+                for pt_idx in sampled_points_obj:
+                    pt = surface_points_obj[pt_idx]
+                    m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
+                    rospy.sleep(0.001)
 
             print "subset size: %s"%(len(sampled_points2_obj))
 
@@ -825,125 +788,23 @@ Class for grasp learning.
 
             print "obj planes: %s  edges: %s  points: %s"%(planes, edges, points)
 
+            #
+            # create volumetric model of the key handle
+            #
+            vol_obj = VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O)
             vol_map_filename = "vol_map.txt"
             if False:
                 print "generating volumetric map (%s iterations)..."%(len(orientations) * len(surface_points_obj))
-                for ori_idx in range(len(orientations)):
-                    T_H_Hd = orientations[ori_idx]
-                    T_H_Od = T_H_Hd * T_H_O
-                    for surf_pt_idx in range(len(surface_points_obj)):#sampled_points_obj:
-                        surf_pt = surface_points_obj[surf_pt_idx]
-                        if not surf_pt.allowed:
-                            continue
-                        pt = T_H_Od * surf_pt.pos
-                        vol_idx = getVolIndex(pt)
-                        if vol_idx != None:
-                            if not ori_idx in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
-                                vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx] = [surf_pt.id]
-                            else:
-                                vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][ori_idx].append(surf_pt.id)
-                print "transforming the volumetric map..."
-
-                for xi in range(vol_samples_count):
-                  print xi
-                  for yi in range(vol_samples_count):
-                    for zi in range(vol_samples_count):
-                      for ori in vol_samples[xi][yi][zi]:
-                          planes = 0
-                          edges = 0
-                          points = 0
-                          norm = PyKDL.Vector()
-                          for pt_id in vol_samples[xi][yi][zi][ori]:
-                              norm += surface_points_obj[pt_id].normal
-                              if surface_points_obj[pt_id].is_plane:
-                                  planes += 1
-                              if surface_points_obj[pt_id].is_edge:
-                                  edges += 1
-                              if surface_points_obj[pt_id].is_point:
-                                  points += 1
-                          norm.Normalize()
-                          if planes >= edges and planes >= points:
-                              vol_samples[xi][yi][zi][ori] = (norm, 0)
-                          elif edges >= planes and edges >= points:
-                              vol_samples[xi][yi][zi][ori] = (norm, 1)
-                          else:
-                              vol_samples[xi][yi][zi][ori] = (norm, 2)
-
+                vol_obj.generate(orientations, surface_points_obj)
                 print "done."
-
-                print "saving the volumetric map to file %s"%(vol_map_filename)
-                with open(vol_map_filename, 'w') as f:
-                    f.write(str(vol_radius) + " " + str(vol_samples_count) + "\n")
-                    for xi in range(vol_samples_count):
-                      for yi in range(vol_samples_count):
-                        for zi in range(vol_samples_count):
-                            if len(vol_samples[xi][yi][zi]) > 0:
-                                f.write(str(xi) + " " + str(yi) + " " + str(zi))
-                                for ori_idx in vol_samples[xi][yi][zi]:
-                                    norm, type_surf = vol_samples[xi][yi][zi][ori_idx]
-                                    f.write(" " + str(ori_idx) + " " + str(norm[0]) + " " + str(norm[1]) + " " + str(norm[2]) + " " + str(type_surf))
-                                f.write("\n")
+                vol_obj.save(vol_map_filename)
             else:
                 print "reading the volumetric map from file %s"%(vol_map_filename)
-                with open(vol_map_filename, 'r') as f:
-                    line = f.readline()
-                    vol_radius_str, vol_samples_count_str = line.split()
-                    vol_radius = float(vol_radius_str)
-                    vol_samples_count = int(vol_samples_count_str)
-                    print "vol_radius: %s   vol_samples_count: %s"%(vol_radius, vol_samples_count)
+                vol_obj.load(vol_map_filename)
 
-                    while True:
-                        line = f.readline()
-                        val_str = line.split()
-                        if len(val_str) == 0:
-                            break
-                        xi = int(val_str[0])
-                        yi = int(val_str[1])
-                        zi = int(val_str[2])
-                        for i in range(3, len(val_str), 5):
-                            ori_idx = int(val_str[i])
-                            normx = float(val_str[i+1])
-                            normy = float(val_str[i+2])
-                            normz = float(val_str[i+3])
-                            type_surf = int(val_str[i+4])
-                            vol_samples[xi][yi][zi][ori_idx] = (PyKDL.Vector(normx, normy, normz), type_surf)
-
-            scale = 2.0*vol_radius/vol_samples_count
-            T_W_H = PyKDL.Frame(PyKDL.Vector(0,0,0.5))
+            # test volumetric model
             if False:
-                for ori_idx in range(len(orientations)):
-                  self.pub_marker.eraseMarkers(0, 1000, frame_id='world')
-                  m_id = 0
-                  T_W_O = T_W_H * orientations[ori_idx] * T_H_O
-                  m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                  for pt in vol_sample_points:
-                      vol_idx = getVolIndex(pt)
-                      if vol_idx != None and ori_idx in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
-                          m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(scale, scale, scale), T=T_W_H)
-                          rospy.sleep(0.001)
-                  raw_input("Press ENTER to continue...")
-                exit(0)
-
-            # test orientations map
-            if False:
-                pt = PyKDL.Vector(-vol_radius, 0,0)#vol_radius*0.5, vol_radius*0.5)
-                for i in range(vol_samples_count):
-#                  T_W_O = T_W_H * PyKDL.Frame(PyKDL.Rotation.RotX(angle)) * T_H_O
-                  pt += PyKDL.Vector(2.0*vol_radius/vol_samples_count, 0, 0)
-                  vol_idx = getVolIndex(pt)
-#                  ori_list = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
-#                  print len(ori_list)
-                  # publish the mesh of the object
-                  self.pub_marker.eraseMarkers(0, 1000, frame_id='world')
-                  m_id = 0
-                  m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.02, 0.02, 0.02), T=T_W_H)
-                  for o in vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]:
-#                      surf_pt_idx = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]][o]
-#                      surf_pt = surface_points_obj[surf_pt_idx]
-#                      print PyKDL.Frame( (T_W_H * orientations[o]).M) * surf_pt.normal
-                      T_W_O = T_W_H * orientations[o] * T_H_O
-                      m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                  raw_input("Press ENTER to continue...")
+                vol_obj.test1(self.pub_marker, orientations, PyKDL.Frame(PyKDL.Vector(0,0,0.5)))
                 exit(0)
 
             #
@@ -1018,9 +879,6 @@ Class for grasp learning.
                 points_in_link.append(surface_points[pt_idx].pos - surface_points[pt_idx].normal*margin)
 
             print "points_in_link: %s"%(len(points_in_link))
-#            for pt in points_in_link:
-#                m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=1, g=1, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=self.T_W_O)
-#                rospy.sleep(0.001)
 
             print "done."
 
@@ -1123,29 +981,11 @@ Class for grasp learning.
             self_collisions_configs = set()
             if False:
                 print "checking self collision for %s configurations..."%(len(sp_configs) * len(f1_configs) * len(f2_configs) * len(f3_configs))
-                for sp_idx in range(len(sp_configs)):
-                  print "%s / %s"%(sp_idx, len(sp_configs))
-                  sp = sp_configs[sp_idx]
-                  for f1_idx in range(len(f1_configs)):
-                    f1 = f1_configs[f1_idx]
-                    for f2_idx in range(len(f2_configs)):
-                      f2 = f2_configs[f2_idx]
-                      for f3_idx in range(len(f3_configs)):
-                          f3 = f3_configs[f3_idx]
-                          self.openrave_robot.SetDOFValues([sp/180.0*math.pi, f1/180.0*math.pi, f3/180.0*math.pi, f2/180.0*math.pi])
-                          if self.openrave_robot.CheckSelfCollision():
-                              self_collisions_configs.add( (sp_idx, f1_idx, f3_idx, f2_idx) )
+                self_collisions_configs = self.generateSelfCollisionData(sp_configs, f1_configs, f2_configs, f3_configs)
                 print "done."
-                with open(self_collision_set_filename, 'w') as f:
-                    for cf in self_collisions_configs:
-                        f.write(str(cf[0]) + " " + str(cf[1]) + " " + str(cf[2]) + " " + str(cf[3]) + "\n")
+                self.saveSelfCollisionData(self_collision_set_filename, self_collisions_configs)
             else:
-                with open(self_collision_set_filename, 'r') as f:
-                    while True:
-                        cf_str = f.readline().split()
-                        if len(cf_str) != 4:
-                            break
-                        self_collisions_configs.add( (int(cf_str[0]), int(cf_str[1]), int(cf_str[2]), int(cf_str[3])) )
+                self_collisions_configs = self.loadSelfCollisionData(self_collision_set_filename)
 
             print "points: %s"%(len(points))
 
@@ -1321,7 +1161,6 @@ Class for grasp learning.
               if len(valid_configurations[0]) > 0 and len(valid_configurations[1]) > 0 and len(valid_configurations[2]) > 0:
                   pass
               else:
-#                  pass
                   continue
 
               # update the points set
@@ -1382,13 +1221,14 @@ Class for grasp learning.
 
                   if cf in points_f_for_config:
                       for f_pt_f in points_f_for_config[cf]:
-                          vol_idx = getVolIndex(f_pt_f[1]-pos)
-                          forbidden_ori = forbidden_ori.union(set(vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]].keys()))
+                          vol_idx = vol_obj.getVolIndex(f_pt_f[1]-pos)
+                          vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                          forbidden_ori = forbidden_ori.union(set(vol_sample.keys()))
 
                   for f_pt in points_for_config[cf]:
-                      vol_idx = getVolIndex(f_pt[1]-pos)
-                      vol_sample = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
-                      oris_to_check = set(vol_sample.keys()).difference(forbidden_ori)
+                      vol_idx = vol_obj.getVolIndex(f_pt[1]-pos)
+                      vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                      oris_to_check = set(vol_sample.keys())
                       allowed_ori = allowed_ori.union(oris_to_check)
 
                   ori = allowed_ori.difference(forbidden_ori)
@@ -1449,7 +1289,6 @@ Class for grasp learning.
                           rospy.sleep(0.001)
 
                       for ori in ori_for_config[cf]:
-#                          o_pt = orientations[ori].M.GetRot()
                           o_q = orientations[ori].M.GetQuaternion()
                           o_pt = PyKDL.Vector(o_q[0], o_q[1], o_q[2])
                           m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(0,0,0.6) + o_pt*0.1, m_id, r=0, g=o_q[3], b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
@@ -1460,8 +1299,6 @@ Class for grasp learning.
                           if ch == 'n':
                               break
                           self.pub_marker.eraseMarkers(0,6000, frame_id='world')
-#                          ori_idx_idx = random.randint(0, len(ori_for_config[cf]) - 1)
-#                          ori = ori_for_config[cf][ori_idx_idx]
                           ori = random.choice(tuple(ori_for_config[cf]))
                           T_W_O = T_W_E * TT_E_H * orientations[ori] * T_H_O
                           m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
@@ -1513,8 +1350,8 @@ Class for grasp learning.
                               if (cfx,ori_idx) in contacts_link_for_config:
                                   continue
                               for f_pt in points_for_config[cfx]:
-                                  vol_idx = getVolIndex(f_pt[1]-pos)
-                                  vol_sample = vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                                  vol_idx = vol_obj.getVolIndex(f_pt[1]-pos)
+                                  vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
                                   if not ori_idx in vol_sample:
                                       continue
 
@@ -1540,9 +1377,9 @@ Class for grasp learning.
                                       else:
                                           contacts_link_for_config[(cfx,ori_idx)].append(f_pt[1])
                                       if not (cfx,ori_idx) in contacts_obj_for_config:
-                                          contacts_obj_for_config[(cfx,ori_idx)] = [pos + getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
+                                          contacts_obj_for_config[(cfx,ori_idx)] = [pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
                                       else:
-                                          contacts_obj_for_config[(cfx,ori_idx)].append(pos + getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
+                                          contacts_obj_for_config[(cfx,ori_idx)].append(pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
                                       if not (cfx,ori_idx) in normals_for_config:
                                           normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
                                       else:
