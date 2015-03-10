@@ -423,6 +423,77 @@ Class for grasp learning.
                 self_collisions_configs.add( (int(cf_str[0]), int(cf_str[1]), int(cf_str[2]), int(cf_str[3])) )
         return self_collisions_configs
 
+    def visualize1(self, T_W_H, T_H_O, joint_map, points_for_config, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, contacts_link_for_config):
+                  for cf in points_for_config:
+                      # update the gripper visualization in ros
+                      cf2 = [0,0,0,0]
+                      cf2[0] = cf[0] if cf[0] != None else 0
+                      cf2[1] = cf[1] if cf[1] != None else 0
+                      cf2[2] = cf[2] if cf[2] != None else 0
+                      cf2[3] = cf[3] if cf[3] != None else 0
+                      self.openrave_robot.SetDOFValues([sp_configs[cf2[0]]/180.0*math.pi,f1_configs[cf2[1]]/180.0*math.pi,f3_configs[cf2[2]]/180.0*math.pi,f2_configs[cf2[3]]/180.0*math.pi])
+                      for i in range(0, 2):
+                          js = JointState()
+                          js.header.stamp = rospy.Time.now()
+                          for jn in joint_map:
+                              js.name.append(joint_map[jn])
+                              js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                          self.pub_js.publish(js)
+                          rospy.sleep(0.1)
+
+                      pub_marker.eraseMarkers(0,6000, frame_id='world')
+                      print "orientations: %s"%(len(ori_for_config[cf]))
+                      m_id = 0
+                      for ori in ori_for_config[cf]:
+                          T_W_O = T_W_H * orientations[ori] * T_H_O
+                          m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+                          rospy.sleep(0.001)
+
+                      for ori in ori_for_config[cf]:
+                          o_q = orientations[ori].M.GetQuaternion()
+                          o_pt = PyKDL.Vector(o_q[0], o_q[1], o_q[2])
+                          m_id = pub_marker.publishSinglePointMarker(PyKDL.Vector(0,0,0.6) + o_pt*0.1, m_id, r=0, g=o_q[3], b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
+                          rospy.sleep(0.001)
+
+                      while True:
+                          ch = raw_input("x")
+                          if ch == 'n':
+                              break
+                          pub_marker.eraseMarkers(0,6000, frame_id='world')
+                          ori = random.choice(tuple(ori_for_config[cf]))
+                          T_W_O = T_W_H * orientations[ori] * T_H_O
+                          m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+
+                          for pt in contacts_link_for_config[(cf,ori)]:
+                              m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+
+    def visualize2(self, T_W_E, T_W_H, T_H_O, orientations, joint_map, contacts_link_for_config, contacts_cf_ori, good_configs, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
+                  for cf in good_configs:
+                      ori_set = good_configs[cf]
+                      self.openrave_robot.SetDOFValues([sp_configs[cf[0]]/180.0*math.pi,f1_configs[cf[1]]/180.0*math.pi,f3_configs[cf[2]]/180.0*math.pi,f2_configs[cf[3]]/180.0*math.pi])
+                      for i in range(0, 2):
+                        # update the gripper visualization in ros
+                        js = JointState()
+                        js.header.stamp = rospy.Time.now()
+                        for jn in joint_map:
+                            js.name.append(joint_map[jn])
+                            js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                        self.pub_js.publish(js)
+                        rospy.sleep(0.1)
+                      for ori in ori_set:
+                         print cf, ori
+                         pub_marker.eraseMarkers(0,2000, frame_id='world')
+                         m_id = 0
+                         T_W_O = T_W_H * orientations[ori] * T_H_O
+                         m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+                         for c in contacts_cf_ori[(cf, ori)]:
+                             m_id = pub_marker.publishVectorMarker(T_W_E*c[0], T_W_E*(c[0]+c[1]*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
+
+                         for pt in contacts_link_for_config[(cf,ori)]:
+                             m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+
+                         raw_input("Press ENTER to continue...")
+
     def spin(self):
         m_id = 0
         self.pub_marker.eraseMarkers(0,3000, frame_id='world')
@@ -890,7 +961,6 @@ Class for grasp learning.
             print "number of candidate positions: %s"%(len(offsets))
             valid_positions = []
 
-            print "searching for good position for grasping..."
             offset_idx = 0
             for offset in offsets:
               print "offset_idx: %s"%(offset_idx)
@@ -898,6 +968,17 @@ Class for grasp learning.
 #            offset = PyKDL.Vector(0,0,0)
 #            if True:
               pos = init_pos + offset
+
+
+
+
+
+
+
+
+
+
+
 
               points_in_sphere, points_f_in_sphere, valid_configurations, neighborhood_size = voxel_grid.getPointsAtPoint(pos, sphere_radius)
 
@@ -1033,49 +1114,7 @@ Class for grasp learning.
 
               # visualization
               if False:
-                  for cf in points_for_config:
-                      # update the gripper visualization in ros
-                      cf2 = [0,0,0,0]
-                      cf2[0] = cf[0] if cf[0] != None else 0
-                      cf2[1] = cf[1] if cf[1] != None else 0
-                      cf2[2] = cf[2] if cf[2] != None else 0
-                      cf2[3] = cf[3] if cf[3] != None else 0
-                      self.openrave_robot.SetDOFValues([sp_configs[cf2[0]]/180.0*math.pi,f1_configs[cf2[1]]/180.0*math.pi,f3_configs[cf2[2]]/180.0*math.pi,f2_configs[cf2[3]]/180.0*math.pi])
-                      for i in range(0, 2):
-                          js = JointState()
-                          js.header.stamp = rospy.Time.now()
-                          for jn in joint_map:
-                              js.name.append(joint_map[jn])
-                              js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
-                          self.pub_js.publish(js)
-                          rospy.sleep(0.1)
-
-                      self.pub_marker.eraseMarkers(0,6000, frame_id='world')
-                      print "orientations: %s"%(len(ori_for_config[cf]))
-                      m_id = 0
-                      for ori in ori_for_config[cf]:
-                          T_W_O = T_W_E * TT_E_H * orientations[ori] * T_H_O
-                          m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                          rospy.sleep(0.001)
-
-                      for ori in ori_for_config[cf]:
-                          o_q = orientations[ori].M.GetQuaternion()
-                          o_pt = PyKDL.Vector(o_q[0], o_q[1], o_q[2])
-                          m_id = self.pub_marker.publishSinglePointMarker(PyKDL.Vector(0,0,0.6) + o_pt*0.1, m_id, r=0, g=o_q[3], b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
-                          rospy.sleep(0.001)
-
-                      while True:
-                          ch = raw_input("x")
-                          if ch == 'n':
-                              break
-                          self.pub_marker.eraseMarkers(0,6000, frame_id='world')
-                          ori = random.choice(tuple(ori_for_config[cf]))
-                          T_W_O = T_W_E * TT_E_H * orientations[ori] * T_H_O
-                          m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-
-                          for pt in contacts_link_for_config[(cf,ori)]:
-                              m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
-
+                  self.visualize1(T_W_E * TT_E_H, T_H_O, joint_map, points_for_config, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, contacts_link_for_config)
                   exit(0)
 
               all_configs = 0
@@ -1162,7 +1201,6 @@ Class for grasp learning.
                                   break
                           if not ori_ok:
                               continue
-
 
                           # at least one contact should be with planar part of the object
                           if not is_plane_obj_config[(cf1,ori_idx)] and not is_plane_obj_config[(cf2,ori_idx)] and not is_plane_obj_config[(cf3,ori_idx)]:
@@ -1271,32 +1309,9 @@ Class for grasp learning.
               print "good_configs: %s"%(len(good_configs))
 
               # visualization
-              if False:
-                  for cf in good_configs:
-                      ori_set = good_configs[cf]
-                      self.openrave_robot.SetDOFValues([sp_configs[cf[0]]/180.0*math.pi,f1_configs[cf[1]]/180.0*math.pi,f3_configs[cf[2]]/180.0*math.pi,f2_configs[cf[3]]/180.0*math.pi])
-                      for i in range(0, 2):
-                        # update the gripper visualization in ros
-                        js = JointState()
-                        js.header.stamp = rospy.Time.now()
-                        for jn in joint_map:
-                            js.name.append(joint_map[jn])
-                            js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
-                        self.pub_js.publish(js)
-                        rospy.sleep(0.1)
-                      for ori in ori_set:
-                         print cf, ori
-                         self.pub_marker.eraseMarkers(0,2000, frame_id='world')
-                         m_id = 0
-                         T_W_O = T_W_E * TT_E_H * orientations[ori] * T_H_O
-                         m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                         for c in contacts_cf_ori[(cf, ori)]:
-                             m_id = self.pub_marker.publishVectorMarker(T_W_E*c[0], T_W_E*(c[0]+c[1]*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
+              if True:
+                  self.visualize2(T_W_E, T_W_E * TT_E_H, T_H_O, orientations, joint_map, contacts_link_for_config, contacts_cf_ori, good_configs, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker)
 
-                         for pt in contacts_link_for_config[(cf,ori)]:
-                             m_id = self.pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
-
-                         raw_input("Press ENTER to continue...")
 
 
 if __name__ == '__main__':
