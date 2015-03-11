@@ -463,7 +463,7 @@ Class for grasp learning.
                 self_collisions_configs.add( (int(cf_str[0]), int(cf_str[1]), int(cf_str[2]), int(cf_str[3])) )
         return self_collisions_configs
 
-    def visualize1(self, T_W_H, T_H_O, joint_map, points_for_config, ori_for_config, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
+    def visualize1(self, T_W_H, joint_map, points_for_config, ori_for_config, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
                   for cf in points_for_config:
                       # update the gripper visualization in ros
                       cf2 = [0,0,0,0]
@@ -485,7 +485,7 @@ Class for grasp learning.
                       print "orientations: %s"%(len(ori_for_config[cf]))
                       m_id = 0
                       for ori in ori_for_config[cf]:
-                          T_W_O = T_W_H * vol_obj.orientations[ori] * T_H_O
+                          T_W_O = T_W_H * vol_obj.orientations[ori] * vol_obj.T_H_O
                           m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
                           rospy.sleep(0.001)
 
@@ -501,10 +501,10 @@ Class for grasp learning.
                               break
                           pub_marker.eraseMarkers(0,6000, frame_id='world')
                           ori = random.choice(tuple(ori_for_config[cf]))
-                          T_W_O = T_W_H * vol_obj.orientations[ori] * T_H_O
+                          T_W_O = T_W_H * vol_obj.orientations[ori] * vol_obj.T_H_O
                           m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
 
-    def visualize2(self, T_W_E, T_H_O, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, joint_map):
+    def visualize2(self, T_W_E, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, joint_map):
         for grasp in good_grasps:
             cf = grasp.hand_config
             ori = grasp.obj_ori_idx
@@ -525,7 +525,7 @@ Class for grasp learning.
             print cf, ori
             pub_marker.eraseMarkers(0,2000, frame_id='world')
             m_id = 0
-            T_W_O = T_W_H * vol_obj.orientations[ori] * T_H_O
+            T_W_O = T_W_H * vol_obj.orientations[ori] * vol_obj.T_H_O
             m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
             for cf_idx in range(len(grasp.contacts_obj_reduced)):
                 for c in grasp.contacts_obj_reduced[cf_idx]:
@@ -790,7 +790,7 @@ Class for grasp learning.
 
               return good_grasps
 
-    def getGraspsForPosition(self, pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj):
+    def getGraspsForPosition(self, pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts):
 
                 points_in_sphere, points_f_in_sphere, valid_configurations = voxel_grid.getPointsAtPoint(pos, vol_obj.vol_radius)
 
@@ -820,14 +820,46 @@ Class for grasp learning.
                 good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid)
                 print "done."
 
-                return good_grasps
+
+                # initial selection of grasps based on contact forces analysis
+                print "initial selection of grasps based on contact forces analysis..."
+                good_grasps2 = []
+                for grasp in good_grasps:
+                    cf = grasp.hand_config
+                    ori = grasp.obj_ori_idx
+
+                    grasp_ok = True
+                    for n in normals_sphere_contacts:
+                        min_f = None
+                        max_f = None
+                        min_t = None
+                        max_t = None
+                        for cf_idx in range(len(grasp.wrenches)):
+                            for wr in grasp.wrenches[cf_idx]:
+                                f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
+                                t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
+                                if min_f == None or min_f > f:
+                                    min_f = f
+                                if max_f == None or max_f < f:
+                                    max_f = f
+                                if min_t == None or min_t > t:
+                                    min_t = t
+                                if max_t == None or max_t < t:
+                                    max_t = t
+                        if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
+                            grasp_ok = False
+                            break
+                    if grasp_ok:
+                        good_grasps2.append(grasp)
+
+                return good_grasps2
 
     def graspingThread(self, args, queue):
 #        print offset_idx
 #        time.sleep(random.randint(1,3))
 
-        pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj = args
-        good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
+        pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts = args
+        good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts)
 
         queue.put(good_grasps)
 #        print "th_idx: %s  good_grasps: %s"%(th_idx,len(good_grasps))
@@ -1267,6 +1299,7 @@ Class for grasp learning.
             init_pos = voxel[0][1]
             print "pos: %s"%(init_pos)
 
+            # the BarrettHand gripper is symmetrical
             offsets = []
             for x in np.linspace(-0.01, 0.01, 2):
               for y in np.linspace(-0.01, 0.01, 2):
@@ -1310,7 +1343,7 @@ Class for grasp learning.
                             print "ERROR: start_thread and stop"
                         print "starting thread %s for %s"%(th_idx, offset_idx)
                         pos = init_pos + offsets[offset_idx]
-                        args = (pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
+                        args = (pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts)
                         p = Process(target=self.graspingThread, args=(args,threads_queues[th_idx]))
                         p.start()
 
@@ -1320,67 +1353,10 @@ Class for grasp learning.
                 if stopped_threads == len(threads_queues):
                     break
                 rospy.sleep(0.1)
+
             print "Ended."
-            return
 
-
-            for offset in offsets:
-                print "offset_idx: %s"%(offset_idx)
-                offset_idx += 1
-
-                pos = init_pos + offset
-
-
-                continue
-                good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
-
-                # visualization
-                if False:
-                    self.visualize2(T_W_E, T_H_O, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, joint_map)
-
-
-                print "good grasps: %s"%(len(good_grasps))
-                continue
-
-                # initial selection of grasps based on contact forces analysis
-                print "initial selection of grasps based on contact forces analysis..."
-                good_configs2 = {}
-                contacts_cf_ori2 = {}
-                wrenches_cf_ori2 = {}
-                good_poses = 0
-                for cf, ori in wrenches_cf_ori:
-                    grip_ok = True
-                    for n in normals_sphere_contacts:
-                        min_f = None
-                        max_f = None
-                        min_t = None
-                        max_t = None
-                        for wr in wrenches_cf_ori[(cf, ori)]:
-                            f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
-                            t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
-                            if min_f == None or min_f > f:
-                                min_f = f
-                            if max_f == None or max_f < f:
-                                max_f = f
-                            if min_t == None or min_t > t:
-                                min_t = t
-                            if max_t == None or max_t < t:
-                                max_t = t
-                        if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
-                            grip_ok = False
-                            break
-                    if grip_ok:
-                        if not cf in good_configs2:
-                            good_configs2[cf] = set([ori])
-                        else:
-                            good_configs2[cf].add(ori)
-                        contacts_cf_ori2[(cf,ori)] = contacts_cf_ori[(cf,ori)]
-                        wrenches_cf_ori2[(cf,ori)] = wrenches_cf_ori[(cf,ori)]
-                        good_poses += 1
-
-                print "done."
-                print "good_poses: %s"%(good_poses)
-                print "good_configs: %s"%(len(good_configs))
+            self.visualize2(T_W_E, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, joint_map)
 
 if __name__ == '__main__':
 
