@@ -82,6 +82,8 @@ import ode
 import xode.transform
 import volumetricutils
 
+from multiprocessing import Process, Queue
+
 def contactToWrenches(pos, normal, friction, Nconepoints):
             wrenches = []
             fdeltaang = 2.0*math.pi/float(Nconepoints)
@@ -820,6 +822,16 @@ Class for grasp learning.
 
                 return good_grasps
 
+    def graspingThread(self, args, queue):
+#        print offset_idx
+#        time.sleep(random.randint(1,3))
+
+        pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj = args
+        good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
+
+        queue.put(good_grasps)
+#        print "th_idx: %s  good_grasps: %s"%(th_idx,len(good_grasps))
+
     def spin(self):
         m_id = 0
         self.pub_marker.eraseMarkers(0,3000, frame_id='world')
@@ -1256,21 +1268,70 @@ Class for grasp learning.
             print "pos: %s"%(init_pos)
 
             offsets = []
-            for x in np.linspace(-0.01, 0.01, 5):
-              for y in np.linspace(-0.01, 0.01, 5):
-                for z in np.linspace(-0.01, 0.01, 5):
+            for x in np.linspace(-0.01, 0.01, 2):
+              for y in np.linspace(-0.01, 0.01, 2):
+                for z in np.linspace(-0.01, 0.01, 2):
                   offsets.append(PyKDL.Vector(x,y,z))
 
             print "number of candidate positions: %s"%(len(offsets))
             valid_positions = []
 
+            # multiprocessing
+            good_grasps = []
+            threads_queues = [None, None, None, None]
             offset_idx = 0
+            stop = False
+            while True:
+                stopped_threads = 0
+                for th_idx in range(len(threads_queues)):
+                    start_thread = False
+                    if threads_queues[th_idx] == None:
+                        if stop:
+                            stopped_threads += 1
+                        else:
+                            start_thread = True
+                            threads_queues[th_idx] = Queue()
+                    elif not threads_queues[th_idx].empty():
+                        if stop:
+                            grasps = threads_queues[th_idx].get()
+                            good_grasps += grasps
+                            print "thread %s grasps: %s"%(th_idx, len(grasps))
+                            print "total grasps: %s"%(len(good_grasps))
+                            threads_queues[th_idx] = None
+                        else:
+                            start_thread = True
+                            grasps = threads_queues[th_idx].get()
+                            good_grasps += grasps
+                            print "thread %s grasps: %s"%(th_idx, len(grasps))
+                            print "total grasps: %s"%(len(good_grasps))
+
+                    if start_thread:
+                        if stop:
+                            print "ERROR: start_thread and stop"
+                        print "starting thread %s for %s"%(th_idx, offset_idx)
+                        pos = init_pos + offsets[offset_idx]
+                        args = (pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
+                        p = Process(target=self.graspingThread, args=(args,threads_queues[th_idx]))
+                        p.start()
+
+                        offset_idx += 1
+                        if offset_idx >= len(offsets):
+                            stop = True
+                if stopped_threads == len(threads_queues):
+                    break
+                rospy.sleep(0.1)
+            print "Ended."
+            return
+
+
             for offset in offsets:
                 print "offset_idx: %s"%(offset_idx)
                 offset_idx += 1
 
                 pos = init_pos + offset
 
+
+                continue
                 good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
 
                 # visualization
