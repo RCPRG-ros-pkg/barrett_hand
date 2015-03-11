@@ -175,7 +175,7 @@ class VoxelGrid:
         return points_in_sphere, points_f_in_sphere, valid_configurations
 
 class VolumetricModel:
-    def __init__(self, vol_radius, vol_samples_count, T_H_O):
+    def __init__(self, vol_radius, vol_samples_count, T_H_O, orientations_angle):
         self.vol_radius = vol_radius
         self.vol_samples_count = vol_samples_count
         self.index_factor = float(self.vol_samples_count)/(2.0*self.vol_radius)
@@ -195,6 +195,21 @@ class VolumetricModel:
         self.T_H_O = T_H_O
         self.T_O_H = self.T_H_O.Inverse()
 
+        # generate the set of orientations
+        self.orientations_angle = orientations_angle
+        normals_sphere = velmautils.generateNormalsSphere(self.orientations_angle)
+
+#        print "normals_sphere: %s"%(len(normals_sphere))
+        orientations1 = velmautils.generateFramesForNormals(self.orientations_angle, normals_sphere)
+        orientations2 = []
+        for ori in orientations1:
+            x_axis = ori * PyKDL.Vector(1,0,0)
+            if x_axis.z() > 0.0:
+                orientations2.append(ori)
+        self.orientations = {}
+        for ori_idx in range(len(orientations2)):
+            self.orientations[ori_idx] = orientations2[ori_idx]
+#        print "orientations set size: %s"%(len(self.orientations))
 
     def getVolIndex(self, pt):
         xi = int(np.floor( self.index_factor*(pt[0]+self.vol_radius) ))
@@ -208,7 +223,8 @@ class VolumetricModel:
     def getVolPoint(self, xi,yi,zi):
         return PyKDL.Vector(-self.vol_radius + (xi+0.5) / self.index_factor, -self.vol_radius + (yi+0.5) / self.index_factor, -self.vol_radius + (zi+0.5) / self.index_factor)
 
-    def generate(self, orientations, surface_points_obj):
+    def generate(self, surface_points_obj):
+
         for ori_idx in range(len(orientations)):
                     T_H_Hd = orientations[ori_idx]
                     T_H_Od = T_H_Hd * self.T_H_O
@@ -292,12 +308,12 @@ class VolumetricModel:
                             type_surf = int(val_str[i+4])
                             self.vol_samples[xi][yi][zi][ori_idx] = (PyKDL.Vector(normx, normy, normz), type_surf)
 
-    def test1(self, pub_marker, orientations, T_W_H):
+    def test1(self, pub_marker, T_W_H):
         scale = 2.0*self.vol_radius/self.vol_samples_count
-        for ori_idx in range(len(orientations)):
+        for ori_idx in range(len(self.orientations)):
             pub_marker.eraseMarkers(0, 1000, frame_id='world')
             m_id = 0
-            T_W_O = T_W_H * orientations[ori_idx] * self.T_H_O
+            T_W_O = T_W_H * self.orientations[ori_idx] * self.T_H_O
             m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
             for pt in self.vol_sample_points:
                 vol_idx = self.getVolIndex(pt)

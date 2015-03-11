@@ -461,7 +461,7 @@ Class for grasp learning.
                 self_collisions_configs.add( (int(cf_str[0]), int(cf_str[1]), int(cf_str[2]), int(cf_str[3])) )
         return self_collisions_configs
 
-    def visualize1(self, T_W_H, T_H_O, joint_map, points_for_config, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
+    def visualize1(self, T_W_H, T_H_O, joint_map, points_for_config, ori_for_config, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
                   for cf in points_for_config:
                       # update the gripper visualization in ros
                       cf2 = [0,0,0,0]
@@ -483,7 +483,7 @@ Class for grasp learning.
                       print "orientations: %s"%(len(ori_for_config[cf]))
                       m_id = 0
                       for ori in ori_for_config[cf]:
-                          T_W_O = T_W_H * orientations[ori] * T_H_O
+                          T_W_O = T_W_H * vol_obj.orientations[ori] * T_H_O
                           m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
                           rospy.sleep(0.001)
 
@@ -499,12 +499,13 @@ Class for grasp learning.
                               break
                           pub_marker.eraseMarkers(0,6000, frame_id='world')
                           ori = random.choice(tuple(ori_for_config[cf]))
-                          T_W_O = T_W_H * orientations[ori] * T_H_O
+                          T_W_O = T_W_H * vol_obj.orientations[ori] * T_H_O
                           m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
 
-    def visualize2(self, T_W_E, T_H_O, good_grasps, orientations, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, joint_map):
-        for cf, ori in good_grasps:
-            grasp = good_grasps[(cf, ori)]
+    def visualize2(self, T_W_E, T_H_O, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, joint_map):
+        for grasp in good_grasps:
+            cf = grasp.hand_config
+            ori = grasp.obj_ori_idx
 
             TT_E_H = PyKDL.Frame(grasp.obj_pos_E)
             T_W_H = T_W_E * TT_E_H
@@ -522,7 +523,7 @@ Class for grasp learning.
             print cf, ori
             pub_marker.eraseMarkers(0,2000, frame_id='world')
             m_id = 0
-            T_W_O = T_W_H * orientations[ori] * T_H_O
+            T_W_O = T_W_H * vol_obj.orientations[ori] * T_H_O
             m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
             for cf_idx in range(len(grasp.contacts_obj_reduced)):
                 for c in grasp.contacts_obj_reduced[cf_idx]:
@@ -630,9 +631,9 @@ Class for grasp learning.
                       points_for_config2[cf] = points_for_config[cf]
               return ori_for_config, points_for_config2
 
-    def joinFingersConfigurations(self, points_for_config2, ori_for_config, self_collisions_configs, orientations, pos, T_H_O, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid):
+    def joinFingersConfigurations(self, points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid):
               # return value
-              good_grasps = {}
+              good_grasps = []
 
               TT_E_H = PyKDL.Frame(pos)
 
@@ -688,7 +689,7 @@ Class for grasp learning.
                       ori_set_ok = []
                       for ori_idx in ori_set:
 
-                          T_E_O = TT_E_H * orientations[ori_idx] * T_H_O
+                          T_E_O = TT_E_H * vol_obj.orientations[ori_idx] * vol_obj.T_H_O
                           TR_E_O = PyKDL.Frame(T_E_O.M)
 
                           for cfx in [cf1, cf2, cf3]:
@@ -750,7 +751,7 @@ Class for grasp learning.
                           collision = False
                           for disabled_pt_idx in sampled_points2_obj:
                               pt_O = surface_points_obj[disabled_pt_idx].pos
-                              pt_E = TT_E_H * orientations[ori_idx] * T_H_O * pt_O
+                              pt_E = TT_E_H * vol_obj.orientations[ori_idx] * vol_obj.T_H_O * pt_O
                               xi, yi, zi = voxel_grid.getPointIndex(pt_E)
                               if xi >= voxel_grid.grid_size[0] or xi < 0 or yi >= voxel_grid.grid_size[1] or yi < 0 or zi >= voxel_grid.grid_size[2] or zi < 0:
                                   continue
@@ -767,9 +768,9 @@ Class for grasp learning.
 
                       for ori_idx in ori_set_ok:
                           grasp = VolumetricGrasp()
-                          if (cf,ori_idx) in good_grasps:
-                              print "ERROR: (cf,ori_idx) in good_grasps"
-                              return None
+#                          if (cf,ori_idx) in good_grasps:
+#                              print "ERROR: (cf,ori_idx) in good_grasps"
+#                              return None
 
                           grasp.hand_config = cf
                           grasp.obj_ori_idx = ori_idx
@@ -778,13 +779,46 @@ Class for grasp learning.
                           grasp.normals_obj = normals_for_config[(cf,ori_idx)]
                           grasp.obj_pos_E = pos
                           grasp.calculateWrenches()
-                          good_grasps[(cf,ori_idx)] = grasp
+#                          good_grasps[(cf,ori_idx)] = grasp
+                          good_grasps.append(grasp)
 
 #                      if len(ori_set_ok) > 0:
 #                          good_poses += len(ori_set_ok)
 #                          good_configs[(cf1[0], cf1[1], cf3[2], cf2[3])] = ori_set_ok
 
               return good_grasps
+
+    def getGraspsForPosition(self, pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj):
+
+                points_in_sphere, points_f_in_sphere, valid_configurations = voxel_grid.getPointsAtPoint(pos, vol_obj.vol_radius)
+
+                points_for_config, points_f_for_config = self.sortPointsByConfig(points_in_sphere, points_f_in_sphere, valid_configurations)
+
+                print "configs: %s"%(len(points_for_config))
+                print "configs_f: %s"%(len(points_f_for_config))
+
+                if len(points_for_config) == 0:
+                    return None
+
+
+                print "calculating valid orientations..."
+                ori_for_config, points_for_config2 = self.calculateValidOrientations(points_for_config, points_f_for_config, vol_obj, pos)
+                print "done"
+
+                points_for_config = None
+                points_f_for_config = None
+
+                # visualization
+#                if False:
+#                    TT_E_H = PyKDL.Frame(pos)
+#                    self.visualize1(T_W_E * TT_E_H, T_H_O, joint_map, points_for_config2, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker)
+#                    exit(0)
+
+                print "joining fingers configurations..."
+                good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid)
+                print "done."
+
+                return good_grasps
 
     def spin(self):
         m_id = 0
@@ -862,49 +896,32 @@ Class for grasp learning.
             #
             # generate the set of orientations
             #
-            normals_sphere = velmautils.generateNormalsSphere(10.0/180.0*math.pi)
+#            normals_sphere = velmautils.generateNormalsSphere(10.0/180.0*math.pi)
 
-            def getNormalIndex(n):
-                max_dot = None
-                max_idx = None
-                normal_idx = 0
-                for normal in normals_sphere:
-                    dot = PyKDL.dot(normal, n)
-                    if max_dot == None or max_dot < dot:
-                        max_dot = dot
-                        max_idx = normal_idx
-                    normal_idx += 1
-                return max_idx
-
-            normals_sphere_pos = []
-            for n in normals_sphere:
-                if n.x() > 0 and n.y() > 0 and n.z() > 0:
-                    normals_sphere_pos.append(n)
-            print "normals_sphere: %s"%(len(normals_sphere))
-            print "normals_sphere_pos: %s"%(len(normals_sphere_pos))
-            orientations = velmautils.generateFramesForNormals(10.0/180.0*math.pi, normals_sphere)
-            orientations2 = []
-            for ori in orientations:
-                x_axis = ori * PyKDL.Vector(1,0,0)
-                if x_axis.z() > 0.0:
-                    orientations2.append(ori)
-            orientations = orientations2
-            orientations = {}
-            for ori_idx in range(len(orientations2)):
-                orientations[ori_idx] = orientations2[ori_idx]
-            print "orientations set size: %s"%(len(orientations))
+#            print "normals_sphere: %s"%(len(normals_sphere))
+#            orientations = velmautils.generateFramesForNormals(10.0/180.0*math.pi, normals_sphere)
+#            orientations2 = []
+#            for ori in orientations:
+#                x_axis = ori * PyKDL.Vector(1,0,0)
+#                if x_axis.z() > 0.0:
+#                    orientations2.append(ori)
+#            orientations = orientations2
+#            orientations = {}
+#            for ori_idx in range(len(orientations2)):
+#                orientations[ori_idx] = orientations2[ori_idx]
+#            print "orientations set size: %s"%(len(orientations))
             T_O_H = PyKDL.Frame(PyKDL.Vector(-0.0215,0,0))
             T_H_O = T_O_H.Inverse()
 
-            # visualization of orientations
-            if False:
-                m_id = 0
-                for fr in orientations:
-                    T_W_O = PyKDL.Frame(PyKDL.Vector(0,0,0.5)) * fr * T_H_O
-                    # publish the mesh of the object
-                    m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                raw_input("Press ENTER to continue...")
-                exit(0)
+#            # visualization of orientations
+#            if False:
+#                m_id = 0
+#                for fr in orientations:
+#                    T_W_O = PyKDL.Frame(PyKDL.Vector(0,0,0.5)) * fr * T_H_O
+#                    # publish the mesh of the object
+#                    m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+#                raw_input("Press ENTER to continue...")
+#                exit(0)
 
             #
             # create normals set for the contact point forces verification procedure
@@ -1023,11 +1040,12 @@ Class for grasp learning.
             #
             # create volumetric model of the key handle
             #
-            vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O)
+            vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O, orientations_angle = 10.0/180.0*math.pi)
+
             vol_map_filename = "vol_map.txt"
             if False:
-                print "generating volumetric map (%s iterations)..."%(len(orientations) * len(surface_points_obj))
-                vol_obj.generate(orientations, surface_points_obj)
+                print "generating volumetric map (%s iterations)..."%(len(vol_obj.orientations) * len(surface_points_obj))
+                vol_obj.generate(surface_points_obj)
                 print "done."
                 vol_obj.save(vol_map_filename)
             else:
@@ -1036,7 +1054,7 @@ Class for grasp learning.
 
             # test volumetric model
             if False:
-                vol_obj.test1(self.pub_marker, orientations, PyKDL.Frame(PyKDL.Vector(0,0,0.5)))
+                vol_obj.test1(self.pub_marker, PyKDL.Frame(PyKDL.Vector(0,0,0.5)))
                 exit(0)
 
             #
@@ -1230,17 +1248,10 @@ Class for grasp learning.
             print "max_points_in_voxel: %s"%(voxel_grid.max_points_in_voxel)
             print "max_points_in_voxel (f): %s"%(voxel_grid.max_points_in_voxel_f)
 
-            # move the sphere around
-            sphere_diameter = 0.044
-            sphere_radius = 0.5 * sphere_diameter
-
-            cylinder_diameter = 0.0305
-            cylinder_radius = 0.5 * sphere_diameter
-
             voxel = voxel_grid.grid[int(voxel_grid.grid_size[0]/2.0)][int(voxel_grid.grid_size[1]/2.0)][int(voxel_grid.grid_size[2]/2.0)]
             print "voxel: %s"%(len(voxel))
 
-            # get the neighborhood
+            # get the initial position
             init_pos = voxel[0][1]
             print "pos: %s"%(init_pos)
 
@@ -1260,38 +1271,12 @@ Class for grasp learning.
 
                 pos = init_pos + offset
 
-                points_in_sphere, points_f_in_sphere, valid_configurations = voxel_grid.getPointsAtPoint(pos, sphere_radius)
-
-                points_for_config, points_f_for_config = self.sortPointsByConfig(points_in_sphere, points_f_in_sphere, valid_configurations)
-
-                print "configs: %s"%(len(points_for_config))
-                print "configs_f: %s"%(len(points_f_for_config))
-
-                if len(points_for_config) == 0:
-                    continue
-
-
-                TT_E_H = PyKDL.Frame(pos)
-
-                print "calculating valid orientations..."
-                ori_for_config, points_for_config2 = self.calculateValidOrientations(points_for_config, points_f_for_config, vol_obj, pos)
-                print "done"
-
-                points_for_config = None
-                points_f_for_config = None
+                good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj)
 
                 # visualization
                 if False:
-                    self.visualize1(T_W_E * TT_E_H, T_H_O, joint_map, points_for_config2, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker)
-                    exit(0)
+                    self.visualize2(T_W_E, T_H_O, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, joint_map)
 
-                print "joining fingers configurations..."
-                good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, orientations, pos, T_H_O, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid)
-                print "done."
-
-                # visualization
-                if True:
-                    self.visualize2(T_W_E, T_H_O, good_grasps, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, joint_map)
 
                 print "good grasps: %s"%(len(good_grasps))
                 continue
