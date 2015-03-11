@@ -149,13 +149,11 @@ class VoxelGrid:
                         continue
                     voxel_indices.append((x,y,z))
 
-        neighborhood_size = 0
         points_in_sphere = []
         points_f_in_sphere = []
         valid_configurations = [[], [], []]
         for idx in voxel_indices:
             x,y,z = idx
-            neighborhood_size += len(self.grid[x][y][z])
             for pt in self.grid[x][y][z]:
                 pt_diff = pt[1]-pos
                 dist = pt_diff.Norm()
@@ -174,7 +172,7 @@ class VoxelGrid:
                         valid_configurations[pt[0]].append(q)
                     points_f_in_sphere.append(pt)
 
-        return points_in_sphere, points_f_in_sphere, valid_configurations, neighborhood_size
+        return points_in_sphere, points_f_in_sphere, valid_configurations
 
 class VolumetricModel:
     def __init__(self, vol_radius, vol_samples_count, T_H_O):

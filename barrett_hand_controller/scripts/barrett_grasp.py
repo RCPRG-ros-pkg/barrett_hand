@@ -82,6 +82,69 @@ import ode
 import xode.transform
 import volumetricutils
 
+def contactToWrenches(pos, normal, friction, Nconepoints):
+            wrenches = []
+            fdeltaang = 2.0*math.pi/float(Nconepoints)
+            nz = normal
+            if abs(nz.z()) < 0.7:
+                nx = PyKDL.Vector(0,0,1)
+            elif abs(nz.y()) < 0.7:
+                nx = PyKDL.Vector(0,1,0)
+            else:
+                nx = PyKDL.Vector(1,0,0)
+            ny = nz * nx
+            nx = ny * nz
+            nx.Normalize()
+            ny.Normalize()
+            nz.Normalize()
+            R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
+            fangle = 0.0
+            for cp in range(Nconepoints):
+                nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * PyKDL.Vector(friction,0,1)
+                fangle += fdeltaang
+                tr = pos * nn
+                wr = PyKDL.Wrench(nn,tr)
+                wrenches.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
+            return wrenches
+
+class VolumetricGrasp:
+    def __init__(self):
+        self.hand_config = None
+        self.obj_ori_idx = None
+        self.contacts_obj = None
+        self.contacts_link = None
+        self.normals_obj = None
+        self.contacts_obj_reduced = None
+        self.wrenches = None
+        self.obj_pos_E = None
+
+    def calculateWrenches(self):
+        contacts_cf_ori = {}
+        wrenches_cf_ori = {}
+        # get contact points for each good grasp
+#        for cf in good_configs:
+#            ori_set = good_configs[cf]
+#            for ori in ori_set:
+        if True:
+            self.contacts_obj_reduced = []
+            self.wrenches = []
+            for cf_idx in range(len(self.contacts_obj)):
+                contacts = []
+                for pt_idx in range(len(self.contacts_obj[cf_idx])):
+                    pt_E = self.contacts_obj[cf_idx][pt_idx]
+                    norm_E = self.normals_obj[cf_idx][pt_idx]
+                    similar = False
+                    for c in contacts:
+                        if (c[0]-pt_E).Norm() < 0.003 and velmautils.getAngle(c[1],norm_E) < 20.0/180.0*math.pi:
+                            similar = True
+                            break
+                    if not similar:
+                        contacts.append((pt_E, norm_E))
+                self.contacts_obj_reduced.append(contacts)
+                self.wrenches.append([])
+                for c in contacts:
+                    self.wrenches[-1] += contactToWrenches(c[0]-self.obj_pos_E, c[1], 0, 1)
+
 class GraspingTask:
     """
 Class for grasp learning.
@@ -174,31 +237,6 @@ Class for grasp learning.
             return None
         return planes
 
-    def contactToWrenches(self, pos, normal, friction, Nconepoints):
-            wrenches = []
-            fdeltaang = 2.0*math.pi/float(Nconepoints)
-            nz = normal
-            if abs(nz.z()) < 0.7:
-                nx = PyKDL.Vector(0,0,1)
-            elif abs(nz.y()) < 0.7:
-                nx = PyKDL.Vector(0,1,0)
-            else:
-                nx = PyKDL.Vector(1,0,0)
-            ny = nz * nx
-            nx = ny * nz
-            nx.Normalize()
-            ny.Normalize()
-            nz.Normalize()
-            R_n = PyKDL.Frame(PyKDL.Rotation(nx,ny,nz))
-            fangle = 0.0
-            for cp in range(Nconepoints):
-                nn = R_n * PyKDL.Frame(PyKDL.Rotation.RotZ(fangle)) * PyKDL.Vector(friction,0,1)
-                fangle += fdeltaang
-                tr = pos * nn
-                wr = PyKDL.Wrench(nn,tr)
-                wrenches.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
-            return wrenches
-
     def generateGWS(self, contacts, friction):
         qhullpoints = []
         qhullpoints_contact_idx = []
@@ -206,7 +244,7 @@ Class for grasp learning.
         for c in contacts:
             p = PyKDL.Vector(c[0], c[1], c[2])
             nz = PyKDL.Vector(c[3], c[4], c[5])
-            wrs = self.contactToWrenches(p, nz, friction, 6)
+            wrs = contactToWrenches(p, nz, friction, 6)
             for wr in wrs:
                 qhullpoints.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
                 qhullpoints_contact_idx.append(contact_idx)
@@ -423,7 +461,7 @@ Class for grasp learning.
                 self_collisions_configs.add( (int(cf_str[0]), int(cf_str[1]), int(cf_str[2]), int(cf_str[3])) )
         return self_collisions_configs
 
-    def visualize1(self, T_W_H, T_H_O, joint_map, points_for_config, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, contacts_link_for_config):
+    def visualize1(self, T_W_H, T_H_O, joint_map, points_for_config, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
                   for cf in points_for_config:
                       # update the gripper visualization in ros
                       cf2 = [0,0,0,0]
@@ -464,35 +502,289 @@ Class for grasp learning.
                           T_W_O = T_W_H * orientations[ori] * T_H_O
                           m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
 
-                          for pt in contacts_link_for_config[(cf,ori)]:
-                              m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+    def visualize2(self, T_W_E, T_H_O, good_grasps, orientations, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, joint_map):
+        for cf, ori in good_grasps:
+            grasp = good_grasps[(cf, ori)]
 
-    def visualize2(self, T_W_E, T_W_H, T_H_O, orientations, joint_map, contacts_link_for_config, contacts_cf_ori, good_configs, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker):
-                  for cf in good_configs:
-                      ori_set = good_configs[cf]
-                      self.openrave_robot.SetDOFValues([sp_configs[cf[0]]/180.0*math.pi,f1_configs[cf[1]]/180.0*math.pi,f3_configs[cf[2]]/180.0*math.pi,f2_configs[cf[3]]/180.0*math.pi])
-                      for i in range(0, 2):
-                        # update the gripper visualization in ros
-                        js = JointState()
-                        js.header.stamp = rospy.Time.now()
-                        for jn in joint_map:
-                            js.name.append(joint_map[jn])
-                            js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
-                        self.pub_js.publish(js)
-                        rospy.sleep(0.1)
-                      for ori in ori_set:
-                         print cf, ori
-                         pub_marker.eraseMarkers(0,2000, frame_id='world')
-                         m_id = 0
-                         T_W_O = T_W_H * orientations[ori] * T_H_O
-                         m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-                         for c in contacts_cf_ori[(cf, ori)]:
-                             m_id = pub_marker.publishVectorMarker(T_W_E*c[0], T_W_E*(c[0]+c[1]*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
+            TT_E_H = PyKDL.Frame(grasp.obj_pos_E)
+            T_W_H = T_W_E * TT_E_H
 
-                         for pt in contacts_link_for_config[(cf,ori)]:
-                             m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+            self.openrave_robot.SetDOFValues([sp_configs[cf[0]]/180.0*math.pi,f1_configs[cf[1]]/180.0*math.pi,f3_configs[cf[2]]/180.0*math.pi,f2_configs[cf[3]]/180.0*math.pi])
+            for i in range(0, 2):
+                # update the gripper visualization in ros
+                js = JointState()
+                js.header.stamp = rospy.Time.now()
+                for jn in joint_map:
+                    js.name.append(joint_map[jn])
+                    js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                self.pub_js.publish(js)
+                rospy.sleep(0.1)
+            print cf, ori
+            pub_marker.eraseMarkers(0,2000, frame_id='world')
+            m_id = 0
+            T_W_O = T_W_H * orientations[ori] * T_H_O
+            m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+            for cf_idx in range(len(grasp.contacts_obj_reduced)):
+                for c in grasp.contacts_obj_reduced[cf_idx]:
+                    m_id = pub_marker.publishVectorMarker(T_W_E*c[0], T_W_E*(c[0]+c[1]*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
 
-                         raw_input("Press ENTER to continue...")
+            for cf_idx in range(len(grasp.contacts_link)):
+                for pt in grasp.contacts_link[cf_idx]:
+                    m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+
+            raw_input("Press ENTER to continue...")
+
+    def sortPointsByConfig(self, points_in_sphere, points_f_in_sphere, valid_configurations):
+              # returned values
+              points_for_config = {}
+              points_f_for_config = {}
+
+              # get the intersection of gripper configurations for f1 and f2 (for spread angle)
+              f1_spread_values = []
+              for f1_q in valid_configurations[0]:
+                  if not f1_q[0] in f1_spread_values:
+                      f1_spread_values.append(f1_q[0])
+              spread_values = []
+              for f2_q in valid_configurations[1]:
+                  if f2_q[0] in f1_spread_values:
+                      spread_values.append(f2_q[0])
+
+              if len(spread_values) == 0:
+                  return points_for_config, points_f_for_config
+
+              f1_valid_configurations = []
+              for f1_q in valid_configurations[0]:
+                  if f1_q[0] in spread_values:
+                      if not f1_q in f1_valid_configurations:
+                          f1_valid_configurations.append(f1_q)
+              f2_valid_configurations = []
+              for f2_q in valid_configurations[1]:
+                  if f2_q[0] in spread_values:
+                      if not f2_q in f2_valid_configurations:
+                          f2_valid_configurations.append(f2_q)
+
+              valid_configurations[0] = f1_valid_configurations
+              valid_configurations[1] = f2_valid_configurations
+
+              if len(valid_configurations[0]) > 0 and len(valid_configurations[1]) > 0 and len(valid_configurations[2]) > 0:
+                  pass
+              else:
+                  return points_for_config, points_f_for_config
+
+              # update the points set
+              points_in_sphere2 = []
+              for pt in points_in_sphere:
+                  q = pt[4]
+                  if q[0] == None or q[0] in spread_values:
+                      points_in_sphere2.append(pt)
+
+              points_f_in_sphere2 = []
+              for pt in points_f_in_sphere:
+                  q = pt[4]
+                  if q[0] == None or q[0] in spread_values:
+                      points_f_in_sphere2.append(pt)
+
+              for pt in points_in_sphere2:
+                  if not pt[4] in points_for_config:
+                      points_for_config[pt[4]] = [pt]
+                  else:
+                      points_for_config[pt[4]].append(pt)
+
+#              print "points_in_sphere: %s"%(len(points_in_sphere2))
+#              print "configs: %s"%(len(points_for_config))
+
+              for pt in points_f_in_sphere2:
+                  if not pt[4] in points_f_for_config:
+                      points_f_for_config[pt[4]] = [pt]
+                  else:
+                      points_f_for_config[pt[4]].append(pt)
+
+#              print "points_f_in_sphere: %s"%(len(points_f_in_sphere2))
+#              print "configs_f: %s"%(len(points_f_for_config))
+
+              return points_for_config, points_f_for_config
+
+    def calculateValidOrientations(self, points_for_config, points_f_for_config, vol_obj, pos):
+              ori_for_config = {}
+              points_for_config2 = {}
+              # for each config calculate valid orientations
+              for cf in points_for_config:
+                  allowed_ori = set()
+                  forbidden_ori = set()
+
+                  if cf in points_f_for_config:
+                      for f_pt_f in points_f_for_config[cf]:
+                          vol_idx = vol_obj.getVolIndex(f_pt_f[1]-pos)
+                          vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                          forbidden_ori = forbidden_ori.union(set(vol_sample.keys()))
+
+                  for f_pt in points_for_config[cf]:
+                      vol_idx = vol_obj.getVolIndex(f_pt[1]-pos)
+                      vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                      oris_to_check = set(vol_sample.keys())
+                      allowed_ori = allowed_ori.union(oris_to_check)
+
+                  ori = allowed_ori.difference(forbidden_ori)
+                  if len(ori) > 0:
+                      ori_for_config[cf] = ori
+                      points_for_config2[cf] = points_for_config[cf]
+              return ori_for_config, points_for_config2
+
+    def joinFingersConfigurations(self, points_for_config2, ori_for_config, self_collisions_configs, orientations, pos, T_H_O, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid):
+              # return value
+              good_grasps = {}
+
+              TT_E_H = PyKDL.Frame(pos)
+
+              points_for_config_f1 = {}
+              points_for_config_f2 = {}
+              points_for_config_f3 = {}
+
+              for cf in points_for_config2:
+                  if cf[1] != None:
+                      points_for_config_f1[cf] = points_for_config2[cf]
+                  elif cf[3] != None:
+                      points_for_config_f2[cf] = points_for_config2[cf]
+                  elif cf[2] != None:
+                      points_for_config_f3[cf] = points_for_config2[cf]
+                  else:
+                      print "error: wrong hand configuration %s"%(offset)
+                      exit(0)
+
+              all_configs = 0
+              good_poses = 0
+              good_configs = {}
+              forbidden_cf_ori = {}
+              for cf1 in points_for_config_f1:
+                  forbidden_cf_ori[cf1] = set()
+              for cf2 in points_for_config_f2:
+                  forbidden_cf_ori[cf2] = set()
+              for cf3 in points_for_config_f3:
+                  forbidden_cf_ori[cf3] = set()
+
+              normals_for_config = {}
+              contacts_obj_for_config = {}
+              contacts_link_for_config = {}
+              is_plane_obj_config = {}
+
+              # iterate through all locally possible hand configs
+              for cf1 in points_for_config_f1:
+                for cf2 in points_for_config_f2:
+                  if cf2[0] != cf1[0]:
+                      continue
+                  for cf3 in points_for_config_f3:
+                      all_configs += 1
+                      cf = (cf1[0], cf1[1], cf3[2], cf2[3])
+
+                      # eliminate self collision configs
+                      if cf in self_collisions_configs:
+                          continue
+
+                      # get the intersection of the orientations set for contact of the object with each of the fingers
+                      ori_set = ori_for_config[cf1].intersection(ori_for_config[cf2], ori_for_config[cf3])
+                      ori_set = ori_set.difference(forbidden_cf_ori[cf1], forbidden_cf_ori[cf2], forbidden_cf_ori[cf3])
+
+                      # perform additional checks for each possible orientation
+                      ori_set_ok = []
+                      for ori_idx in ori_set:
+
+                          T_E_O = TT_E_H * orientations[ori_idx] * T_H_O
+                          TR_E_O = PyKDL.Frame(T_E_O.M)
+
+                          for cfx in [cf1, cf2, cf3]:
+                              ori_ok = False
+                              if ori_idx in forbidden_cf_ori[cfx]:
+                                  break
+                              if (cfx,ori_idx) in contacts_link_for_config:
+                                  continue
+                              for f_pt in points_for_config2[cfx]:
+                                  vol_idx = vol_obj.getVolIndex(f_pt[1]-pos)
+                                  vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
+                                  if not ori_idx in vol_sample:
+                                      continue
+
+                                  norm, type_surf = vol_sample[ori_idx]
+                                  normal_obj_E = TR_E_O * norm
+                                  # check the contact between two surfaces
+                                  if surface_points[f_pt[3]].is_plane and type_surf==0:
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.8:
+                                          ori_ok = True
+                                  elif (surface_points[f_pt[3]].is_plane and type_surf==2) or (surface_points[f_pt[3]].is_point and type_surf==0):
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
+                                          ori_ok = True
+                                  elif (surface_points[f_pt[3]].is_plane and type_surf==1) or (surface_points[f_pt[3]].is_edge and type_surf==0):
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
+                                          ori_ok = True
+                                  elif surface_points[f_pt[3]].is_edge and type_surf==1:
+                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
+                                          ori_ok = True
+
+                                  if ori_ok:
+
+                                      if not (cfx,ori_idx) in contacts_link_for_config:
+                                          contacts_link_for_config[(cfx,ori_idx)] = [f_pt[1]]
+                                      else:
+                                          contacts_link_for_config[(cfx,ori_idx)].append(f_pt[1])
+                                      if not (cfx,ori_idx) in contacts_obj_for_config:
+                                          contacts_obj_for_config[(cfx,ori_idx)] = [pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
+                                      else:
+                                          contacts_obj_for_config[(cfx,ori_idx)].append(pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
+                                      if not (cfx,ori_idx) in normals_for_config:
+                                          normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
+                                      else:
+                                          normals_for_config[(cfx,ori_idx)].append(normal_obj_E)
+                                      is_plane_obj_config[(cfx,ori_idx)] = type_surf==0
+                                  else:
+                                      forbidden_cf_ori[cfx].add(ori_idx)
+                                      break
+                              if not ori_ok:
+                                  break
+                          if not ori_ok:
+                              continue
+
+                          # at least one contact should be with planar part of the object
+                          if not is_plane_obj_config[(cf1,ori_idx)] and not is_plane_obj_config[(cf2,ori_idx)] and not is_plane_obj_config[(cf3,ori_idx)]:
+                              continue
+
+                          # check if there is a collision of the gripper with the other part of the object
+                          collision = False
+                          for disabled_pt_idx in sampled_points2_obj:
+                              pt_O = surface_points_obj[disabled_pt_idx].pos
+                              pt_E = TT_E_H * orientations[ori_idx] * T_H_O * pt_O
+                              xi, yi, zi = voxel_grid.getPointIndex(pt_E)
+                              if xi >= voxel_grid.grid_size[0] or xi < 0 or yi >= voxel_grid.grid_size[1] or yi < 0 or zi >= voxel_grid.grid_size[2] or zi < 0:
+                                  continue
+                              for pt_gr in voxel_grid.grid[xi][yi][zi]:
+                                  if pt_gr[4] == cf1 or pt_gr[4] == cf2 or pt_gr[4] == cf3:
+                                      collision = True
+                                      break
+
+                          if not collision:
+                              ori_set_ok.append(ori_idx)
+                              contacts_obj_for_config[(cf,ori_idx)] = (contacts_obj_for_config[(cf1,ori_idx)], contacts_obj_for_config[(cf2,ori_idx)], contacts_obj_for_config[(cf3,ori_idx)])
+                              contacts_link_for_config[(cf,ori_idx)] = (contacts_link_for_config[(cf1,ori_idx)], contacts_link_for_config[(cf2,ori_idx)], contacts_link_for_config[(cf3,ori_idx)])
+                              normals_for_config[(cf,ori_idx)] = (normals_for_config[(cf1,ori_idx)], normals_for_config[(cf2,ori_idx)], normals_for_config[(cf3,ori_idx)])
+
+                      for ori_idx in ori_set_ok:
+                          grasp = VolumetricGrasp()
+                          if (cf,ori_idx) in good_grasps:
+                              print "ERROR: (cf,ori_idx) in good_grasps"
+                              return None
+
+                          grasp.hand_config = cf
+                          grasp.obj_ori_idx = ori_idx
+                          grasp.contacts_obj = contacts_obj_for_config[(cf,ori_idx)]
+                          grasp.contacts_link = contacts_link_for_config[(cf,ori_idx)]
+                          grasp.normals_obj = normals_for_config[(cf,ori_idx)]
+                          grasp.obj_pos_E = pos
+                          grasp.calculateWrenches()
+                          good_grasps[(cf,ori_idx)] = grasp
+
+#                      if len(ori_set_ok) > 0:
+#                          good_poses += len(ori_set_ok)
+#                          good_configs[(cf1[0], cf1[1], cf3[2], cf2[3])] = ori_set_ok
+
+              return good_grasps
 
     def spin(self):
         m_id = 0
@@ -963,356 +1255,86 @@ Class for grasp learning.
 
             offset_idx = 0
             for offset in offsets:
-              print "offset_idx: %s"%(offset_idx)
-              offset_idx += 1
-#            offset = PyKDL.Vector(0,0,0)
-#            if True:
-              pos = init_pos + offset
+                print "offset_idx: %s"%(offset_idx)
+                offset_idx += 1
+
+                pos = init_pos + offset
+
+                points_in_sphere, points_f_in_sphere, valid_configurations = voxel_grid.getPointsAtPoint(pos, sphere_radius)
+
+                points_for_config, points_f_for_config = self.sortPointsByConfig(points_in_sphere, points_f_in_sphere, valid_configurations)
+
+                print "configs: %s"%(len(points_for_config))
+                print "configs_f: %s"%(len(points_f_for_config))
+
+                if len(points_for_config) == 0:
+                    continue
 
 
+                TT_E_H = PyKDL.Frame(pos)
 
+                print "calculating valid orientations..."
+                ori_for_config, points_for_config2 = self.calculateValidOrientations(points_for_config, points_f_for_config, vol_obj, pos)
+                print "done"
 
+                points_for_config = None
+                points_f_for_config = None
 
+                # visualization
+                if False:
+                    self.visualize1(T_W_E * TT_E_H, T_H_O, joint_map, points_for_config2, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker)
+                    exit(0)
 
+                print "joining fingers configurations..."
+                good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, orientations, pos, T_H_O, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid)
+                print "done."
 
+                # visualization
+                if True:
+                    self.visualize2(T_W_E, T_H_O, good_grasps, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, joint_map)
 
+                print "good grasps: %s"%(len(good_grasps))
+                continue
 
+                # initial selection of grasps based on contact forces analysis
+                print "initial selection of grasps based on contact forces analysis..."
+                good_configs2 = {}
+                contacts_cf_ori2 = {}
+                wrenches_cf_ori2 = {}
+                good_poses = 0
+                for cf, ori in wrenches_cf_ori:
+                    grip_ok = True
+                    for n in normals_sphere_contacts:
+                        min_f = None
+                        max_f = None
+                        min_t = None
+                        max_t = None
+                        for wr in wrenches_cf_ori[(cf, ori)]:
+                            f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
+                            t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
+                            if min_f == None or min_f > f:
+                                min_f = f
+                            if max_f == None or max_f < f:
+                                max_f = f
+                            if min_t == None or min_t > t:
+                                min_t = t
+                            if max_t == None or max_t < t:
+                                max_t = t
+                        if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
+                            grip_ok = False
+                            break
+                    if grip_ok:
+                        if not cf in good_configs2:
+                            good_configs2[cf] = set([ori])
+                        else:
+                            good_configs2[cf].add(ori)
+                        contacts_cf_ori2[(cf,ori)] = contacts_cf_ori[(cf,ori)]
+                        wrenches_cf_ori2[(cf,ori)] = wrenches_cf_ori[(cf,ori)]
+                        good_poses += 1
 
-
-
-              points_in_sphere, points_f_in_sphere, valid_configurations, neighborhood_size = voxel_grid.getPointsAtPoint(pos, sphere_radius)
-
-              # get the intersection of gripper configurations for f1 and f2 (for spread angle)
-              f1_spread_values = []
-              for f1_q in valid_configurations[0]:
-                  if not f1_q[0] in f1_spread_values:
-                      f1_spread_values.append(f1_q[0])
-              spread_values = []
-              for f2_q in valid_configurations[1]:
-                  if f2_q[0] in f1_spread_values:
-                      spread_values.append(f2_q[0])
-
-              if len(spread_values) == 0:
-                  continue
-
-              f1_valid_configurations = []
-              for f1_q in valid_configurations[0]:
-                  if f1_q[0] in spread_values:
-                      if not f1_q in f1_valid_configurations:
-                          f1_valid_configurations.append(f1_q)
-              f2_valid_configurations = []
-              for f2_q in valid_configurations[1]:
-                  if f2_q[0] in spread_values:
-                      if not f2_q in f2_valid_configurations:
-                          f2_valid_configurations.append(f2_q)
-
-              valid_configurations[0] = f1_valid_configurations
-              valid_configurations[1] = f2_valid_configurations
-
-              if len(valid_configurations[0]) > 0 and len(valid_configurations[1]) > 0 and len(valid_configurations[2]) > 0:
-                  pass
-              else:
-                  continue
-
-              # update the points set
-              points_in_sphere2 = []
-              for pt in points_in_sphere:
-                  q = pt[4]
-                  if q[0] == None or q[0] in spread_values:
-                      points_in_sphere2.append(pt)
-
-              points_in_sphere = points_in_sphere2
-
-              points_f_in_sphere2 = []
-              for pt in points_f_in_sphere:
-                  q = pt[4]
-                  if q[0] == None or q[0] in spread_values:
-                      points_f_in_sphere2.append(pt)
-
-              points_f_in_sphere = points_f_in_sphere2
-
-              points_for_config = {}
-              for pt in points_in_sphere:
-                  if not pt[4] in points_for_config:
-                      points_for_config[pt[4]] = [pt]
-                  else:
-                      points_for_config[pt[4]].append(pt)
-
-              print "points_in_sphere: %s"%(len(points_in_sphere))
-              print "configs: %s"%(len(points_for_config))
-
-              points_f_for_config = {}
-              for pt in points_f_in_sphere:
-                  if not pt[4] in points_f_for_config:
-                      points_f_for_config[pt[4]] = [pt]
-                  else:
-                      points_f_for_config[pt[4]].append(pt)
-
-              print "points_f_in_sphere: %s"%(len(points_f_in_sphere))
-              print "configs_f: %s"%(len(points_f_for_config))
-
-              TT_E_H = PyKDL.Frame(pos)
-              T_E_O_dict = {}
-              TR_E_O_dict = {}
-
-              normals_for_config = {}
-              contacts_obj_for_config = {}
-              contacts_normal_obj_for_config = {}
-              contacts_link_for_config = {}
-              is_plane_obj_config = {}
-              ori_for_config = {}
-              config_pt_ori = {}
-              total_loops = 0
-              print "calculating valid orientations..."
-              # for each config calculate valid orientations
-              points_for_config2 = {}
-              for cf in points_for_config:
-                  allowed_ori = set()
-                  forbidden_ori = set()
-
-                  if cf in points_f_for_config:
-                      for f_pt_f in points_f_for_config[cf]:
-                          vol_idx = vol_obj.getVolIndex(f_pt_f[1]-pos)
-                          vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
-                          forbidden_ori = forbidden_ori.union(set(vol_sample.keys()))
-
-                  for f_pt in points_for_config[cf]:
-                      vol_idx = vol_obj.getVolIndex(f_pt[1]-pos)
-                      vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
-                      oris_to_check = set(vol_sample.keys())
-                      allowed_ori = allowed_ori.union(oris_to_check)
-
-                  ori = allowed_ori.difference(forbidden_ori)
-                  if len(ori) > 0:
-                      ori_for_config[cf] = ori
-                      points_for_config2[cf] = points_for_config[cf]
-
-              print "done (%s)."%(total_loops)
-
-              points_for_config = points_for_config2
-#              print "configs: %s"%(len(points_for_config))
-
-              points_for_config_f1 = {}
-              points_for_config_f2 = {}
-              points_for_config_f3 = {}
-
-              for cf in points_for_config:
-                  if cf[1] != None:
-                      points_for_config_f1[cf] = points_for_config[cf]
-                  elif cf[3] != None:
-                      points_for_config_f2[cf] = points_for_config[cf]
-                  elif cf[2] != None:
-                      points_for_config_f3[cf] = points_for_config[cf]
-                  else:
-                      print "error: wrong hand configuration %s"%(offset)
-                      exit(0)
-
-              print "joining fingers configurations..."
-
-              ori_for_config2 = {}
-              points_for_config2 = {}
-
-              # visualization
-              if False:
-                  self.visualize1(T_W_E * TT_E_H, T_H_O, joint_map, points_for_config, ori_for_config, orientations, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, contacts_link_for_config)
-                  exit(0)
-
-              all_configs = 0
-              good_poses = 0
-              good_configs = {}
-              forbidden_cf_ori = {}
-              for cf1 in points_for_config_f1:
-                  forbidden_cf_ori[cf1] = set()
-              for cf2 in points_for_config_f2:
-                  forbidden_cf_ori[cf2] = set()
-              for cf3 in points_for_config_f3:
-                  forbidden_cf_ori[cf3] = set()
-
-              # iterate through all locally possible hand configs
-              for cf1 in points_for_config_f1:
-                for cf2 in points_for_config_f2:
-                  if cf2[0] != cf1[0]:
-                      continue
-                  for cf3 in points_for_config_f3:
-                      all_configs += 1
-                      cf = (cf1[0], cf1[1], cf3[2], cf2[3])
-
-                      # eliminate self collision configs
-                      if cf in self_collisions_configs:
-                          continue
-
-                      # get the intersection of the orientations set for contact of the object with each of the fingers
-                      ori_set = ori_for_config[cf1].intersection(ori_for_config[cf2], ori_for_config[cf3])
-                      ori_set = ori_set.difference(forbidden_cf_ori[cf1], forbidden_cf_ori[cf2], forbidden_cf_ori[cf3])
-
-                      # perform additional checks for each possible orientation
-                      ori_set_ok = set()
-                      for ori_idx in ori_set:
-
-                          T_E_O = TT_E_H * orientations[ori_idx] * T_H_O
-                          TR_E_O = PyKDL.Frame(T_E_O.M)
-
-                          for cfx in [cf1, cf2, cf3]:
-                              ori_ok = False
-                              if ori_idx in forbidden_cf_ori[cfx]:
-                                  break
-                              if (cfx,ori_idx) in contacts_link_for_config:
-                                  continue
-                              for f_pt in points_for_config[cfx]:
-                                  vol_idx = vol_obj.getVolIndex(f_pt[1]-pos)
-                                  vol_sample = vol_obj.vol_samples[vol_idx[0]][vol_idx[1]][vol_idx[2]]
-                                  if not ori_idx in vol_sample:
-                                      continue
-
-                                  norm, type_surf = vol_sample[ori_idx]
-                                  normal_obj_E = TR_E_O * norm
-                                  # check the contact between two surfaces
-                                  if surface_points[f_pt[3]].is_plane and type_surf==0:
-                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.8:
-                                          ori_ok = True
-                                  elif (surface_points[f_pt[3]].is_plane and type_surf==2) or (surface_points[f_pt[3]].is_point and type_surf==0):
-                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
-                                          ori_ok = True
-                                  elif (surface_points[f_pt[3]].is_plane and type_surf==1) or (surface_points[f_pt[3]].is_edge and type_surf==0):
-                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
-                                          ori_ok = True
-                                  elif surface_points[f_pt[3]].is_edge and type_surf==1:
-                                      if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
-                                          ori_ok = True
-
-                                  if ori_ok:
-                                      if not (cfx,ori_idx) in contacts_link_for_config:
-                                          contacts_link_for_config[(cfx,ori_idx)] = [f_pt[1]]
-                                      else:
-                                          contacts_link_for_config[(cfx,ori_idx)].append(f_pt[1])
-                                      if not (cfx,ori_idx) in contacts_obj_for_config:
-                                          contacts_obj_for_config[(cfx,ori_idx)] = [pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
-                                      else:
-                                          contacts_obj_for_config[(cfx,ori_idx)].append(pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
-                                      if not (cfx,ori_idx) in normals_for_config:
-                                          normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
-                                      else:
-                                          normals_for_config[(cfx,ori_idx)].append(normal_obj_E)
-                                      is_plane_obj_config[(cfx,ori_idx)] = type_surf==0
-                                  else:
-                                      forbidden_cf_ori[cfx].add(ori_idx)
-                                      break
-                              if not ori_ok:
-                                  break
-                          if not ori_ok:
-                              continue
-
-                          # at least one contact should be with planar part of the object
-                          if not is_plane_obj_config[(cf1,ori_idx)] and not is_plane_obj_config[(cf2,ori_idx)] and not is_plane_obj_config[(cf3,ori_idx)]:
-                              continue
-
-                          # check if there is a collision of the gripper with the other part of the object
-                          collision = False
-                          for disabled_pt_idx in sampled_points2_obj:
-                              pt_O = surface_points_obj[disabled_pt_idx].pos
-                              pt_E = TT_E_H * orientations[ori_idx] * T_H_O * pt_O
-                              xi, yi, zi = voxel_grid.getPointIndex(pt_E)
-                              if xi >= voxel_grid.grid_size[0] or xi < 0 or yi >= voxel_grid.grid_size[1] or yi < 0 or zi >= voxel_grid.grid_size[2] or zi < 0:
-                                  continue
-                              for pt_gr in voxel_grid.grid[xi][yi][zi]:
-                                  if pt_gr[4] == cf1 or pt_gr[4] == cf2 or pt_gr[4] == cf3:
-                                      collision = True
-                                      break
-
-                          if not collision:
-                              ori_set_ok.add(ori_idx)
-                              contacts_obj_for_config[(cf,ori_idx)] = contacts_obj_for_config[(cf1,ori_idx)] + contacts_obj_for_config[(cf2,ori_idx)] + contacts_obj_for_config[(cf3,ori_idx)]
-                              contacts_link_for_config[(cf,ori_idx)] = contacts_link_for_config[(cf1,ori_idx)] + contacts_link_for_config[(cf2,ori_idx)] + contacts_link_for_config[(cf3,ori_idx)]
-                              normals_for_config[(cf,ori_idx)] = normals_for_config[(cf1,ori_idx)] + normals_for_config[(cf2,ori_idx)] + normals_for_config[(cf3,ori_idx)]
-
-                      if len(ori_set_ok) > 0:
-                          good_poses += len(ori_set_ok)
-                          good_configs[(cf1[0], cf1[1], cf3[2], cf2[3])] = ori_set_ok
-              print "done."
-
-              print "all_configs: %s"%(all_configs)
-              print "good_poses: %s"%(good_poses)
-              print "good_configs: %s"%(len(good_configs))
-
-              print "points_for_config: %s"%(len(points_for_config))
-              total_points = 0
-              for cf in points_for_config:
-                  total_points += len(points_for_config[cf])
-              print "points_for_config total_points: %s"%(total_points)
-
-              total_points = 0
-              for cf in ori_for_config:
-                  total_points += len(ori_for_config[cf])
-              print "points_for_config total_orientations: %s"%(total_points)
-
-              contacts_cf_ori = {}
-              wrenches_cf_ori = {}
-              # get contact points for each good grasp
-              for cf in good_configs:
-                  ori_set = good_configs[cf]
-                  for ori in ori_set:
-                      contacts = []
-                      for pt_idx in range(len(contacts_obj_for_config[(cf,ori)])):
-                          pt_E = contacts_obj_for_config[(cf,ori)][pt_idx]
-                          norm_E = normals_for_config[(cf,ori)][pt_idx]
-                          similar = False
-                          for c in contacts:
-                              if (c[0]-pt_E).Norm() < 0.003 and velmautils.getAngle(c[1],norm_E) < 20.0/180.0*math.pi:
-                                  similar = True
-                                  break
-                          if not similar:
-                              contacts.append((pt_E, norm_E))
-                      contacts_cf_ori[(cf, ori)] = contacts
-                      wrenches_cf_ori[(cf, ori)] = []
-                      for c in contacts:
-                          wrenches_cf_ori[(cf, ori)] += self.contactToWrenches(c[0]-pos, c[1], 0, 1)
-
-              # initial selection of grasps based on contact forces analysis
-              print "initial selection of grasps based on contact forces analysis..."
-              good_configs2 = {}
-              contacts_cf_ori2 = {}
-              wrenches_cf_ori2 = {}
-              good_poses = 0
-              for cf, ori in wrenches_cf_ori:
-                  grip_ok = True
-                  for n in normals_sphere_contacts:
-                      min_f = None
-                      max_f = None
-                      min_t = None
-                      max_t = None
-                      for wr in wrenches_cf_ori[(cf, ori)]:
-                          f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
-                          t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
-                          if min_f == None or min_f > f:
-                              min_f = f
-                          if max_f == None or max_f < f:
-                              max_f = f
-                          if min_t == None or min_t > t:
-                              min_t = t
-                          if max_t == None or max_t < t:
-                              max_t = t
-#                      print cf, ori, n, min_f, max_f, min_t, max_t
-                      if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
-                          grip_ok = False
-                          break
-                  if grip_ok:
-                      if not cf in good_configs2:
-                          good_configs2[cf] = set([ori])
-                      else:
-                          good_configs2[cf].add(ori)
-                      contacts_cf_ori2[(cf,ori)] = contacts_cf_ori[(cf,ori)]
-                      wrenches_cf_ori2[(cf,ori)] = wrenches_cf_ori[(cf,ori)]
-                      good_poses += 1
-
-              print "done."
-              print "good_poses: %s"%(good_poses)
-              print "good_configs: %s"%(len(good_configs))
-
-              # visualization
-              if True:
-                  self.visualize2(T_W_E, T_W_E * TT_E_H, T_H_O, orientations, joint_map, contacts_link_for_config, contacts_cf_ori, good_configs, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker)
-
-
+                print "done."
+                print "good_poses: %s"%(good_poses)
+                print "good_configs: %s"%(len(good_configs))
 
 if __name__ == '__main__':
 
@@ -1323,5 +1345,4 @@ if __name__ == '__main__':
     rospy.sleep(1)
 
     task.spin()
-
 
