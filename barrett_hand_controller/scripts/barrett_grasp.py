@@ -109,6 +109,227 @@ def contactToWrenches(pos, normal, friction, Nconepoints):
                 wrenches.append([wr[0], wr[1], wr[2], wr[3], wr[4], wr[5]])
             return wrenches
 
+def getGraspQHull(points, openrave_grasper):
+    try:
+        planes, faces, triangles = openrave_grasper.ConvexHull(np.array(points), returnplanes=True,returnfaces=False,returntriangles=False)
+    except AttributeError as e1:
+        print e1
+        return None
+    return planes
+
+def KDLToOpenrave(T):
+        ret = numpy.array([
+        [T.M[0,0], T.M[0,1], T.M[0,2], T.p.x()],
+        [T.M[1,0], T.M[1,1], T.M[1,2], T.p.y()],
+        [T.M[2,0], T.M[2,1], T.M[2,2], T.p.z()],
+        [0, 0, 0, 1]])
+        return ret
+
+def OpenraveToKDL(T):
+        rot = PyKDL.Rotation(T[0][0],T[0][1],T[0][2],T[1][0],T[1][1],T[1][2],T[2][0],T[2][1],T[2][2])
+        pos = PyKDL.Vector(T[0][3], T[1][3], T[2][3])
+        return PyKDL.Frame(rot, pos)
+
+class GripperLinkGeometricModel:
+    def __init__(self, name, openrave_robot, openrave_grasper):
+        link = openrave_robot.GetLink(name)
+        col = link.GetCollisionData()
+        vertices = col.vertices
+        faces = col.indices
+
+        print "sampling the surface..."
+        self.surface_points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.0015)
+        print "surface has %s points"%(len(self.surface_points))
+
+        surface_points_init = []
+        for sp in self.surface_points:
+            surface_points_init.append(sp)
+
+        p_idx = random.randint(0, len(self.surface_points)-1)
+        p_dist = 0.004
+
+        print "generating a subset of surface points..."
+
+        self.sampled_points = []
+        while True:
+            self.sampled_points.append(p_idx)
+            surface_points2 = []
+            for sp in surface_points_init:
+                if (sp.pos-self.surface_points[p_idx].pos).Norm() > p_dist:
+                    surface_points2.append(sp)
+            if len(surface_points2) == 0:
+                break
+            surface_points_init = surface_points2
+            p_idx = surface_points_init[0].id
+
+        print "subset size: %s"%(len(self.sampled_points))
+
+        points_for_qhull = []
+        for pt_idx in self.sampled_points:
+            pos = self.surface_points[pt_idx].pos
+            points_for_qhull.append([pos[0], pos[1], pos[2]])
+        print "generating qhull for link"
+        self.qhull_planes = getGraspQHull(points_for_qhull, openrave_grasper)
+        print "link qhull planes: %s"%(len(self.qhull_planes))
+
+
+#        T_W_O = PyKDL.Frame(PyKDL.Vector(0,0,0.5))
+        for pt_idx in self.sampled_points:
+                indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(self.surface_points, pt_idx, 5, 0.003)
+#                m_id = self.pub_marker.publishVectorMarker(T_W_O * surface_points[pt_idx].pos, T_W_O * (surface_points[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
+#                m_id = self.pub_marker.publishVectorMarker(T_W_O * surface_points[pt_idx].pos, T_W_O * (surface_points[pt_idx].pos + surface_points[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
+
+                self.surface_points[pt_idx].frame = PyKDL.Frame(PyKDL.Rotation(nx, self.surface_points[pt_idx].normal * nx, self.surface_points[pt_idx].normal), self.surface_points[pt_idx].pos)
+                self.surface_points[pt_idx].pc1 = pc1
+                self.surface_points[pt_idx].pc2 = pc2
+                if pc1 < 0.2:
+                    self.surface_points[pt_idx].is_plane = True
+                    self.surface_points[pt_idx].is_edge = False
+                    self.surface_points[pt_idx].is_point = False
+                elif pc2 < 0.2:
+                    self.surface_points[pt_idx].is_plane = False
+                    self.surface_points[pt_idx].is_edge = True
+                    self.surface_points[pt_idx].is_point = False
+                else:
+                    self.surface_points[pt_idx].is_plane = False
+                    self.surface_points[pt_idx].is_edge = False
+                    self.surface_points[pt_idx].is_point = True
+
+        print "generating a set of interior points..."
+        margin = 0.002
+#            vertices_min, vertices_max = velmautils.getMeshBB(vertices, faces)
+
+        self.points_in_link = []
+        for pt_idx in self.sampled_points:
+                if self.surface_points[pt_idx].pc1 > 0.2:
+                    continue
+                self.points_in_link.append(self.surface_points[pt_idx].pos - self.surface_points[pt_idx].normal*margin)
+
+        print "points_in_link: %s"%(len(self.points_in_link))
+
+class GripperLinkModel:
+    def __init__(self, name, link_geom):
+        self.name = name
+        self.link_geom = link_geom
+        self.intersecting_links = []
+
+class GripperModel:
+    def __init__(self, openrave_robot, openrave_grasper):
+        self.openrave_robot = openrave_robot
+        link_three_geom = GripperLinkGeometricModel("right_HandFingerOneKnuckleThreeLink", openrave_robot, openrave_grasper)
+        link_two_geom = GripperLinkGeometricModel("right_HandFingerOneKnuckleTwoLink", openrave_robot, openrave_grasper)
+
+        self.links = {}
+        self.links["right_HandFingerOneKnuckleTwoLink"] = GripperLinkModel("right_HandFingerOneKnuckleTwoLink", link_two_geom)
+        self.links["right_HandFingerOneKnuckleThreeLink"] = GripperLinkModel("right_HandFingerOneKnuckleThreeLink", link_three_geom)
+        self.links["right_HandFingerTwoKnuckleTwoLink"] = GripperLinkModel("right_HandFingerTwoKnuckleTwoLink", link_two_geom)
+        self.links["right_HandFingerTwoKnuckleThreeLink"] = GripperLinkModel("right_HandFingerTwoKnuckleThreeLink", link_three_geom)
+        self.links["right_HandFingerThreeKnuckleTwoLink"] = GripperLinkModel("right_HandFingerThreeKnuckleTwoLink", link_two_geom)
+        self.links["right_HandFingerThreeKnuckleThreeLink"] = GripperLinkModel("right_HandFingerThreeKnuckleThreeLink", link_three_geom)
+
+        self.links["right_HandFingerOneKnuckleTwoLink"].intersecting_links.append("right_HandFingerOneKnuckleThreeLink")
+        self.links["right_HandFingerOneKnuckleThreeLink"].intersecting_links.append("right_HandFingerOneKnuckleTwoLink")
+        self.links["right_HandFingerTwoKnuckleTwoLink"].intersecting_links.append("right_HandFingerTwoKnuckleThreeLink")
+        self.links["right_HandFingerTwoKnuckleThreeLink"].intersecting_links.append("right_HandFingerTwoKnuckleTwoLink")
+        self.links["right_HandFingerThreeKnuckleTwoLink"].intersecting_links.append("right_HandFingerThreeKnuckleThreeLink")
+        self.links["right_HandFingerThreeKnuckleThreeLink"].intersecting_links.append("right_HandFingerThreeKnuckleTwoLink")
+
+        #
+        # discretize the configuration of the gripper
+        #
+        self.sp_configs = []
+        self.f1_configs = []
+        self.f2_configs = []
+        self.f3_configs = []
+        for sp in np.linspace(0.01, 179.99, 12):
+            self.sp_configs.append(sp)
+        for fx in np.linspace(80.0, 130.0, 20):
+            self.f1_configs.append(fx)
+            self.f2_configs.append(fx)
+            self.f3_configs.append(fx)
+
+    def getSurfacePointsForConfig(self, cf, T_E_W):
+
+
+        config_link_map = {}
+        config_link_map[(0,1)] = [0, ["right_HandFingerOneKnuckleThreeLink", "right_HandFingerOneKnuckleTwoLink"]]
+        config_link_map[(0,3)] = [1, ["right_HandFingerTwoKnuckleThreeLink", "right_HandFingerTwoKnuckleTwoLink"]]
+        config_link_map[(2,)] = [2, [ "right_HandFingerThreeKnuckleThreeLink", "right_HandFingerThreeKnuckleTwoLink"]]
+
+        points = []
+        points_forbidden = []
+
+        cf_valid = [0,0,0,0]
+        valid_values = None
+        for cf_idx in range(len(cf)):
+            if cf[cf_idx] != None:
+                if valid_values == None:
+                    valid_values = (cf_idx,)
+                else:
+                    valid_values = valid_values + (cf_idx,)
+                cf_valid[cf_idx] = cf[cf_idx]
+
+        self.openrave_robot.SetDOFValues([self.sp_configs[cf_valid[0]]/180.0*math.pi, self.f1_configs[cf_valid[1]]/180.0*math.pi, self.f3_configs[cf_valid[2]]/180.0*math.pi, self.f2_configs[cf_valid[3]]/180.0*math.pi])
+        for link_name in config_link_map[valid_values][1]:
+            link = self.openrave_robot.GetLink(link_name)
+            T_E_L = T_E_W * OpenraveToKDL(link.GetTransform())
+            TR_E_L = PyKDL.Frame(T_E_L.M)
+            for pt_idx in self.links[link_name].link_geom.sampled_points:
+                pt_L = self.links[link_name].link_geom.surface_points[pt_idx]
+                pt_E = T_E_L * pt_L.pos
+                pt_remove = True
+                for int_name in self.links[link_name].intersecting_links:
+                    int_link = self.openrave_robot.GetLink(int_name)
+                    int_T_E_L = T_E_W * OpenraveToKDL(int_link.GetTransform())
+                    int_T_L_E = int_T_E_L.Inverse()
+                    pt_L_int = int_T_L_E * pt_E
+                    for pl in self.links[int_name].link_geom.qhull_planes:
+                        if pt_L_int[0] * pl[0] + pt_L_int[1] * pl[1] + pt_L_int[2] * pl[2] + pl[3] > 0:
+                             pt_remove = False
+                             break
+                    if pt_remove:
+                        break
+                if pt_remove:
+                    continue
+                n_E = TR_E_L * pt_L.normal
+                if pt_L.is_plane == True:
+                    surf_type = 0
+                elif pt_L.is_edge == True:
+                    surf_type = 1
+                elif pt_L.is_point == True:
+                    surf_type = 2
+                else:
+                    print "ERROR: getSurfacePointsForConfig: unknown surface type"
+                points.append([config_link_map[valid_values][0], pt_E, n_E, surf_type, cf])
+            for pt_L in self.links[link_name].link_geom.points_in_link:
+                pt_E = T_E_L * pt_L
+                points_forbidden.append([config_link_map[valid_values][0], pt_E, None, None, cf])
+        return points, points_forbidden
+
+    def generateSamples(self):
+        points = []
+        points_forbidden = []
+
+        T_W_E = OpenraveToKDL(self.openrave_robot.GetLink("right_HandPalmLink").GetTransform())
+        TR_W_E = PyKDL.Frame(T_W_E.M)
+        T_E_W = T_W_E.Inverse()
+
+        configs = []
+        for sp_idx in range(len(self.sp_configs)):
+            for f1_idx in range(len(self.f1_configs)):
+                configs.append((sp_idx, f1_idx, None, None))
+            for f2_idx in range(len(self.f2_configs)):
+                configs.append((sp_idx, None, None, f2_idx))
+        for f3_idx in range(len(self.f3_configs)):
+            configs.append((None, None, f3_idx, None))
+
+        print "generateSamples: configs: %s"%(len(configs))
+        for cf in configs:
+            p, pf = self.getSurfacePointsForConfig(cf, T_E_W)
+            points += p
+            points_forbidden += pf
+        return points, points_forbidden
+
 class VolumetricGrasp:
     def __init__(self):
         self.hand_config = None
@@ -123,14 +344,9 @@ class VolumetricGrasp:
     def calculateWrenches(self):
         contacts_cf_ori = {}
         wrenches_cf_ori = {}
-        # get contact points for each good grasp
-#        for cf in good_configs:
-#            ori_set = good_configs[cf]
-#            for ori in ori_set:
-        if True:
-            self.contacts_obj_reduced = []
-            self.wrenches = []
-            for cf_idx in range(len(self.contacts_obj)):
+        self.contacts_obj_reduced = []
+        self.wrenches = []
+        for cf_idx in range(len(self.contacts_obj)):
                 contacts = []
                 for pt_idx in range(len(self.contacts_obj[cf_idx])):
                     pt_E = self.contacts_obj[cf_idx][pt_idx]
@@ -179,24 +395,11 @@ Class for grasp learning.
         body.InitFromTrimesh(mesh, True)
         self.env.Add(body,True)
 
-    def KDLToOpenrave(self, T):
-        ret = numpy.array([
-        [T.M[0,0], T.M[0,1], T.M[0,2], T.p.x()],
-        [T.M[1,0], T.M[1,1], T.M[1,2], T.p.y()],
-        [T.M[2,0], T.M[2,1], T.M[2,2], T.p.z()],
-        [0, 0, 0, 1]])
-        return ret
-
-    def OpenraveToKDL(self, T):
-        rot = PyKDL.Rotation(T[0][0],T[0][1],T[0][2],T[1][0],T[1][1],T[1][2],T[2][0],T[2][1],T[2][2])
-        pos = PyKDL.Vector(T[0][3], T[1][3], T[2][3])
-        return PyKDL.Frame(rot, pos)
-
     def updatePose(self, name, T_Br_Bo):
         with self.env:
             body = self.env.GetKinBody(name)
             if body != None:
-                body.SetTransform(self.KDLToOpenrave(T_Br_Bo))
+                body.SetTransform(KDLToOpenrave(T_Br_Bo))
             else:
 #                print "openrave: could not find body: %s"%(name)
                 pass
@@ -231,14 +434,6 @@ Class for grasp learning.
                 print e
         return contacts,finalconfig,mindist,volume
 
-    def getGraspQHull(self, points):
-        try:
-            planes, faces, triangles = self.grasper.ConvexHull(np.array(points), returnplanes=True,returnfaces=False,returntriangles=False)
-        except AttributeError as e1:
-            print e1
-            return None
-        return planes
-
     def generateGWS(self, contacts, friction):
         qhullpoints = []
         qhullpoints_contact_idx = []
@@ -252,7 +447,7 @@ Class for grasp learning.
                 qhullpoints_contact_idx.append(contact_idx)
             contact_idx += 1
 
-        qhullplanes = self.getGraspQHull(qhullpoints)
+        qhullplanes = getGraspQHull(qhullpoints, self.grasper)
         qhullplanes_contacts = []
         contact_planes = []
         for pl in qhullplanes:
@@ -504,7 +699,7 @@ Class for grasp learning.
                           T_W_O = T_W_H * vol_obj.orientations[ori] * vol_obj.T_H_O
                           m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=0, g=1, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
 
-    def visualize2(self, T_W_E, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, pub_marker, joint_map):
+    def visualize2(self, T_W_E, good_grasps, vol_obj, gripper_model, pub_marker, joint_map):
         for grasp in good_grasps:
             cf = grasp.hand_config
             ori = grasp.obj_ori_idx
@@ -512,7 +707,7 @@ Class for grasp learning.
             TT_E_H = PyKDL.Frame(grasp.obj_pos_E)
             T_W_H = T_W_E * TT_E_H
 
-            self.openrave_robot.SetDOFValues([sp_configs[cf[0]]/180.0*math.pi,f1_configs[cf[1]]/180.0*math.pi,f3_configs[cf[2]]/180.0*math.pi,f2_configs[cf[3]]/180.0*math.pi])
+            self.openrave_robot.SetDOFValues([gripper_model.sp_configs[cf[0]]/180.0*math.pi,gripper_model.f1_configs[cf[1]]/180.0*math.pi,gripper_model.f3_configs[cf[2]]/180.0*math.pi,gripper_model.f2_configs[cf[3]]/180.0*math.pi])
             for i in range(0, 2):
                 # update the gripper visualization in ros
                 js = JointState()
@@ -633,7 +828,7 @@ Class for grasp learning.
                       points_for_config2[cf] = points_for_config[cf]
               return ori_for_config, points_for_config2
 
-    def joinFingersConfigurations(self, points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid):
+    def joinFingersConfigurations(self, points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, voxel_grid):
               # return value
               good_grasps = []
 
@@ -709,16 +904,16 @@ Class for grasp learning.
                                   norm, type_surf = vol_sample[ori_idx]
                                   normal_obj_E = TR_E_O * norm
                                   # check the contact between two surfaces
-                                  if surface_points[f_pt[3]].is_plane and type_surf==0:
+                                  if f_pt[3] == 0 and type_surf==0:
                                       if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.8:
                                           ori_ok = True
-                                  elif (surface_points[f_pt[3]].is_plane and type_surf==2) or (surface_points[f_pt[3]].is_point and type_surf==0):
+                                  elif (f_pt[3] == 0 and type_surf==2) or (f_pt[3] == 2 and type_surf==0):
                                       if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
                                           ori_ok = True
-                                  elif (surface_points[f_pt[3]].is_plane and type_surf==1) or (surface_points[f_pt[3]].is_edge and type_surf==0):
+                                  elif (f_pt[3] == 0 and type_surf==1) or (f_pt[3] == 1 and type_surf==0):
                                       if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
                                           ori_ok = True
-                                  elif surface_points[f_pt[3]].is_edge and type_surf==1:
+                                  elif f_pt[3] == 1 and type_surf==1:
                                       if PyKDL.dot(normal_obj_E, f_pt[2]) < -0.3:
                                           ori_ok = True
 
@@ -751,8 +946,8 @@ Class for grasp learning.
 
                           # check if there is a collision of the gripper with the other part of the object
                           collision = False
-                          for disabled_pt_idx in sampled_points2_obj:
-                              pt_O = surface_points_obj[disabled_pt_idx].pos
+                          for disabled_pt_idx in vol_obj.sampled_points2_obj:
+                              pt_O = vol_obj.surface_points_obj[disabled_pt_idx].pos
                               pt_E = TT_E_H * vol_obj.orientations[ori_idx] * vol_obj.T_H_O * pt_O
                               xi, yi, zi = voxel_grid.getPointIndex(pt_E)
                               if xi >= voxel_grid.grid_size[0] or xi < 0 or yi >= voxel_grid.grid_size[1] or yi < 0 or zi >= voxel_grid.grid_size[2] or zi < 0:
@@ -770,9 +965,6 @@ Class for grasp learning.
 
                       for ori_idx in ori_set_ok:
                           grasp = VolumetricGrasp()
-#                          if (cf,ori_idx) in good_grasps:
-#                              print "ERROR: (cf,ori_idx) in good_grasps"
-#                              return None
 
                           grasp.hand_config = cf
                           grasp.obj_ori_idx = ori_idx
@@ -790,14 +982,15 @@ Class for grasp learning.
 
               return good_grasps
 
-    def getGraspsForPosition(self, pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts):
+    def getGraspsForPosition(self, pos, vol_obj, voxel_grid, self_collisions_configs, gripper_model, normals_sphere_contacts):
 
                 points_in_sphere, points_f_in_sphere, valid_configurations = voxel_grid.getPointsAtPoint(pos, vol_obj.vol_radius)
 
+#                print "points_in_sphere: %s  %s  %s"%(len(points_in_sphere), len(points_f_in_sphere), len(valid_configurations))
                 points_for_config, points_f_for_config = self.sortPointsByConfig(points_in_sphere, points_f_in_sphere, valid_configurations)
 
-                print "configs: %s"%(len(points_for_config))
-                print "configs_f: %s"%(len(points_f_for_config))
+#                print "configs: %s"%(len(points_for_config))
+#                print "configs_f: %s"%(len(points_f_for_config))
 
                 if len(points_for_config) == 0:
                     return None
@@ -817,7 +1010,7 @@ Class for grasp learning.
 #                    exit(0)
 
                 print "joining fingers configurations..."
-                good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, surface_points, sampled_points2_obj, surface_points_obj, voxel_grid)
+                good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, voxel_grid)
                 print "done."
 
 
@@ -855,14 +1048,9 @@ Class for grasp learning.
                 return good_grasps2
 
     def graspingThread(self, args, queue):
-#        print offset_idx
-#        time.sleep(random.randint(1,3))
-
-        pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts = args
-        good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts)
-
+        pos, vol_obj, voxel_grid, self_collisions_configs, gripper_model, normals_sphere_contacts = args
+        good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, gripper_model, normals_sphere_contacts)
         queue.put(good_grasps)
-#        print "th_idx: %s  good_grasps: %s"%(th_idx,len(good_grasps))
 
     def spin(self):
         m_id = 0
@@ -938,158 +1126,26 @@ Class for grasp learning.
 
         if True:
             #
-            # generate the set of orientations
-            #
-#            normals_sphere = velmautils.generateNormalsSphere(10.0/180.0*math.pi)
-
-#            print "normals_sphere: %s"%(len(normals_sphere))
-#            orientations = velmautils.generateFramesForNormals(10.0/180.0*math.pi, normals_sphere)
-#            orientations2 = []
-#            for ori in orientations:
-#                x_axis = ori * PyKDL.Vector(1,0,0)
-#                if x_axis.z() > 0.0:
-#                    orientations2.append(ori)
-#            orientations = orientations2
-#            orientations = {}
-#            for ori_idx in range(len(orientations2)):
-#                orientations[ori_idx] = orientations2[ori_idx]
-#            print "orientations set size: %s"%(len(orientations))
-            T_O_H = PyKDL.Frame(PyKDL.Vector(-0.0215,0,0))
-            T_H_O = T_O_H.Inverse()
-
-#            # visualization of orientations
-#            if False:
-#                m_id = 0
-#                for fr in orientations:
-#                    T_W_O = PyKDL.Frame(PyKDL.Vector(0,0,0.5)) * fr * T_H_O
-#                    # publish the mesh of the object
-#                    m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
-#                raw_input("Press ENTER to continue...")
-#                exit(0)
-
-            #
             # create normals set for the contact point forces verification procedure
             #
             normals_sphere_contacts = velmautils.generateNormalsSphere(20.0/180.0*math.pi)
             print "normals_sphere_contacts: %s"%(len(normals_sphere_contacts))
 
             #
-            # object
+            # create volumetric model of the key handle
             #
             print "sampling the surface of the object..."
             vertices_obj, faces_obj = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
-            surface_points_obj = surfaceutils.sampleMeshDetailedRays(vertices_obj, faces_obj, 0.0015)
-            print "surface of the object has %s points"%(len(surface_points_obj))
 
-            # disallow contact with the surface points beyond the key handle
-            for p in surface_points_obj:
-                if p.pos.x() > -0.005:
-                    p.allowed = False
+            T_O_H = PyKDL.Frame(PyKDL.Vector(-0.0215,0,0))
+            T_H_O = T_O_H.Inverse()
 
-            surface_points_obj_init = []
-            surface_points2_obj_init = []
-            for sp in surface_points_obj:
-                if sp.allowed:
-                    surface_points_obj_init.append(sp)
-                else:
-                    surface_points2_obj_init.append(sp)
-
-            print "generating a subset of surface points of the object..."
-
-            while True:
-                p_idx = random.randint(0, len(surface_points_obj)-1)
-                if surface_points_obj[p_idx].allowed:
-                    break
-            p_dist = 0.003
-
-            sampled_points_obj = []
-            while True:
-                sampled_points_obj.append(p_idx)
-                surface_points_obj2 = []
-                for sp in surface_points_obj_init:
-                    if (sp.pos-surface_points_obj[p_idx].pos).Norm() > p_dist:
-                        surface_points_obj2.append(sp)
-                if len(surface_points_obj2) == 0:
-                    break
-                surface_points_obj_init = surface_points_obj2
-                p_idx = surface_points_obj_init[0].id
-
-            print "subset size: %s"%(len(sampled_points_obj))
-
-            print "generating a subset of other surface points of the object..."
-
-            p_dist2 = 0.006
-
-            while True:
-                p_idx = random.randint(0, len(surface_points_obj)-1)
-                if not surface_points_obj[p_idx].allowed:
-                    break
-
-            sampled_points2_obj = []
-            while True:
-                sampled_points2_obj.append(p_idx)
-                surface_points2_obj2 = []
-                for sp in surface_points2_obj_init:
-                    if (sp.pos-surface_points_obj[p_idx].pos).Norm() > p_dist2:
-                        surface_points2_obj2.append(sp)
-                if len(surface_points2_obj2) == 0:
-                    break
-                surface_points2_obj_init = surface_points2_obj2
-                p_idx = surface_points2_obj_init[0].id
-
-            # test volumetric model
-            if False:
-                for pt_idx in sampled_points2_obj:
-                    pt = surface_points_obj[pt_idx]
-                    m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
-                    rospy.sleep(0.001)
-
-                for pt_idx in sampled_points_obj:
-                    pt = surface_points_obj[pt_idx]
-                    m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
-                    rospy.sleep(0.001)
-
-            print "subset size: %s"%(len(sampled_points2_obj))
-
-            print "calculating surface curvature at sampled points of the obj..."
-            m_id = 0
-            planes = 0
-            edges = 0
-            points = 0
-            for pt_idx in range(len(surface_points_obj)):#sampled_points_obj
-                indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(surface_points_obj, pt_idx, 5, 0.003)
-#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_obj[pt_idx].pos, self.T_W_O * (surface_points_obj[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
-#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points_obj[pt_idx].pos, self.T_W_O * (surface_points_obj[pt_idx].pos + surface_points_obj[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
-                surface_points_obj[pt_idx].frame = PyKDL.Frame(PyKDL.Rotation(nx, surface_points_obj[pt_idx].normal * nx, surface_points_obj[pt_idx].normal), surface_points_obj[pt_idx].pos)
-                surface_points_obj[pt_idx].pc1 = pc1
-                surface_points_obj[pt_idx].pc2 = pc2
-                if pc1 < 0.2:
-                    surface_points_obj[pt_idx].is_plane = True
-                    surface_points_obj[pt_idx].is_edge = False
-                    surface_points_obj[pt_idx].is_point = False
-                    planes += 1
-                elif pc2 < 0.2:
-                    surface_points_obj[pt_idx].is_plane = False
-                    surface_points_obj[pt_idx].is_edge = True
-                    surface_points_obj[pt_idx].is_point = False
-                    edges += 1
-                else:
-                    surface_points_obj[pt_idx].is_plane = False
-                    surface_points_obj[pt_idx].is_edge = False
-                    surface_points_obj[pt_idx].is_point = True
-                    points += 1
-
-            print "obj planes: %s  edges: %s  points: %s"%(planes, edges, points)
-
-            #
-            # create volumetric model of the key handle
-            #
-            vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O, orientations_angle = 10.0/180.0*math.pi)
+            vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O, orientations_angle = 10.0/180.0*math.pi, vertices_obj = vertices_obj, faces_obj = faces_obj)
 
             vol_map_filename = "vol_map.txt"
             if False:
-                print "generating volumetric map (%s iterations)..."%(len(vol_obj.orientations) * len(surface_points_obj))
-                vol_obj.generate(surface_points_obj)
+                print "generating volumetric map (%s iterations)..."%(len(vol_obj.orientations) * len(vol_obj.surface_points_obj))
+                vol_obj.generate()
                 print "done."
                 vol_obj.save(vol_map_filename)
             else:
@@ -1102,77 +1158,10 @@ Class for grasp learning.
                 exit(0)
 
             #
-            # link
+            # sample the surface of the gripper link
             #
-            link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleThreeLink")
-            col = link.GetCollisionData()
-            vertices = col.vertices
-            faces = col.indices
-
-            print "sampling the surface..."
-            surface_points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.0015)
-            print "surface has %s points"%(len(surface_points))
-
-            surface_points_init = []
-            for sp in surface_points:
-                surface_points_init.append(sp)
-
-            p_idx = random.randint(0, len(surface_points)-1)
-            p_dist = 0.004
-
-            print "generating a subset of surface points..."
-
-            sampled_points = []
-            while True:
-                sampled_points.append(p_idx)
-                surface_points2 = []
-                for sp in surface_points_init:
-                    if (sp.pos-surface_points[p_idx].pos).Norm() > p_dist:
-                        surface_points2.append(sp)
-                if len(surface_points2) == 0:
-                    break
-                surface_points_init = surface_points2
-                p_idx = surface_points_init[0].id
-
-            print "subset size: %s"%(len(sampled_points))
-
-
-            for pt_idx in sampled_points:
-                indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(surface_points, pt_idx, 5, 0.003)
-#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points[pt_idx].pos, self.T_W_O * (surface_points[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
-#                m_id = self.pub_marker.publishVectorMarker(self.T_W_O * surface_points[pt_idx].pos, self.T_W_O * (surface_points[pt_idx].pos + surface_points[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
-
-                surface_points[pt_idx].frame = PyKDL.Frame(PyKDL.Rotation(nx, surface_points[pt_idx].normal * nx, surface_points[pt_idx].normal), surface_points[pt_idx].pos)
-                surface_points[pt_idx].pc1 = pc1
-                surface_points[pt_idx].pc2 = pc2
-                if pc1 < 0.2:
-                    surface_points[pt_idx].is_plane = True
-                    surface_points[pt_idx].is_edge = False
-                    surface_points[pt_idx].is_point = False
-                elif pc2 < 0.2:
-                    surface_points[pt_idx].is_plane = False
-                    surface_points[pt_idx].is_edge = True
-                    surface_points[pt_idx].is_point = False
-                else:
-                    surface_points[pt_idx].is_plane = False
-                    surface_points[pt_idx].is_edge = False
-                    surface_points[pt_idx].is_point = True
-
-
-
-            interior_filename = "link_interior_points.txt"
-
-            print "generating a set of interior points..."
-            margin = 0.002
-#            vertices_min, vertices_max = velmautils.getMeshBB(vertices, faces)
-
-            points_in_link = []
-            for pt_idx in sampled_points:
-                if surface_points[pt_idx].pc1 > 0.2:
-                    continue
-                points_in_link.append(surface_points[pt_idx].pos - surface_points[pt_idx].normal*margin)
-
-            print "points_in_link: %s"%(len(points_in_link))
+            self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
+            gripper_model = GripperModel(self.openrave_robot, self.grasper)
 
             print "done."
 
@@ -1182,23 +1171,10 @@ Class for grasp learning.
             "right_HandFingerTwoKnuckleThreeLink",
             ]
 
-            T_W_E = self.OpenraveToKDL(self.openrave_robot.GetLink("right_HandPalmLink").GetTransform())
+            T_W_E = OpenraveToKDL(self.openrave_robot.GetLink("right_HandPalmLink").GetTransform())
             TR_W_E = PyKDL.Frame(T_W_E.M)
             T_E_W = T_W_E.Inverse()
 
-            #
-            # discretize the configuration of the gripper
-            #
-            sp_configs = []
-            f1_configs = []
-            f2_configs = []
-            f3_configs = []
-            for sp in np.linspace(0.01, 179.99, 12):
-                sp_configs.append(sp)
-            for fx in np.linspace(80.0, 130.0, 20):
-                f1_configs.append(fx)
-                f2_configs.append(fx)
-                f3_configs.append(fx)
 
             if False:
                 for fi in range(len(f1_configs)):
@@ -1217,57 +1193,15 @@ Class for grasp learning.
                 exit(0)
 
             # create the voxel map of the points from the inside of the gripper links
-
             # create the voxel map of the points from the surface of the gripper
-            points = []
-            points_forbidden = []
-            for sp_idx in range(len(sp_configs)):
-              sp = sp_configs[sp_idx]
-              for f1_idx in range(len(f1_configs)):
-                f1 = f1_configs[f1_idx]
-                self.openrave_robot.SetDOFValues([sp/180.0*math.pi, f1/180.0*math.pi, 0, 0])
-                link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleThreeLink")
-                T_E_L = T_E_W * self.OpenraveToKDL(link.GetTransform())
-                TR_E_L = PyKDL.Frame(T_E_L.M)
-                for pt_idx in sampled_points:
-                    pt_L = surface_points[pt_idx]
-                    pt_E = T_E_L * pt_L.pos
-                    n_E = TR_E_L * pt_L.normal
-                    points.append([0, pt_E, n_E, pt_idx, (sp_idx, f1_idx, None, None)])
-                for pt_L in points_in_link:
-                    pt_E = T_E_L * pt_L
-                    points_forbidden.append([0, pt_E, None, None, (sp_idx, f1_idx, None, None)])
+            points, points_forbidden = gripper_model.generateSamples()
 
-              for f2_idx in range(len(f2_configs)):
-                f2 = f2_configs[f2_idx]
-                self.openrave_robot.SetDOFValues([sp/180.0*math.pi, 0, 0, f2/180.0*math.pi])
-                link = self.openrave_robot.GetLink("right_HandFingerTwoKnuckleThreeLink")
-                T_E_L = T_E_W * self.OpenraveToKDL(link.GetTransform())
-                TR_E_L = PyKDL.Frame(T_E_L.M)
-                for pt_idx in sampled_points:
-                    pt_L = surface_points[pt_idx]
-                    pt_E = T_E_L * pt_L.pos
-                    n_E = TR_E_L * pt_L.normal
-                    points.append([1, pt_E, n_E, pt_idx, (sp_idx, None, None, f2_idx)])
-                for pt_L in points_in_link:
-                    pt_E = T_E_L * pt_L
-                    points_forbidden.append([0, pt_E, None, None, (sp_idx, None, None, f2_idx)])
+#            m_id = 0
+#            for i in range(3000):
+#                m_id = pub_marker.publishSinglePointMarker(T_W_E*points[i][1], m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
+#                rospy.sleep(0.001)
 
-            for f3_idx in range(len(f3_configs)):
-                f3 = f3_configs[f3_idx]
-                self.openrave_robot.SetDOFValues([sp/180.0*math.pi, 0, f3/180.0*math.pi, 0])
-                link = self.openrave_robot.GetLink("right_HandFingerThreeKnuckleThreeLink")
-                T_E_L = T_E_W * self.OpenraveToKDL(link.GetTransform())
-                TR_E_L = PyKDL.Frame(T_E_L.M)
-                for pt_idx in sampled_points:
-                    pt_L = surface_points[pt_idx]
-                    pt_E = T_E_L * pt_L.pos
-                    n_E = TR_E_L * pt_L.normal
-                    points.append([2, pt_E, n_E, pt_idx, (None, None, f3_idx, None)])
-                for pt_L in points_in_link:
-                    pt_E = T_E_L * pt_L
-                    points_forbidden.append([0, pt_E, None, None, (None, None, f3_idx, None)])
-
+#            exit(0)
             #
             # check self collisions of the gripper
             #
@@ -1292,16 +1226,13 @@ Class for grasp learning.
             print "max_points_in_voxel: %s"%(voxel_grid.max_points_in_voxel)
             print "max_points_in_voxel (f): %s"%(voxel_grid.max_points_in_voxel_f)
 
-            voxel = voxel_grid.grid[int(voxel_grid.grid_size[0]/2.0)][int(voxel_grid.grid_size[1]/2.0)][int(voxel_grid.grid_size[2]/2.0)]
-            print "voxel: %s"%(len(voxel))
 
-            # get the initial position
-            init_pos = voxel[0][1]
+            init_pos = PyKDL.Vector(0,0,0.14)
             print "pos: %s"%(init_pos)
 
-            # the BarrettHand gripper is symmetrical
+            # the BarrettHand gripper is symmetrical in x axis
             offsets = []
-            for x in np.linspace(-0.01, 0.01, 2):
+            for x in np.linspace(0.0, 0.01, 2):
               for y in np.linspace(-0.01, 0.01, 2):
                 for z in np.linspace(-0.01, 0.01, 2):
                   offsets.append(PyKDL.Vector(x,y,z))
@@ -1343,7 +1274,7 @@ Class for grasp learning.
                             print "ERROR: start_thread and stop"
                         print "starting thread %s for %s"%(th_idx, offset_idx)
                         pos = init_pos + offsets[offset_idx]
-                        args = (pos, vol_obj, voxel_grid, self_collisions_configs, sp_configs, f1_configs, f2_configs, f3_configs, surface_points, sampled_points2_obj, surface_points_obj, normals_sphere_contacts)
+                        args = (pos, vol_obj, voxel_grid, self_collisions_configs, gripper_model, normals_sphere_contacts)
                         p = Process(target=self.graspingThread, args=(args,threads_queues[th_idx]))
                         p.start()
 
@@ -1356,7 +1287,7 @@ Class for grasp learning.
 
             print "Ended."
 
-            self.visualize2(T_W_E, good_grasps, vol_obj, sp_configs, f1_configs, f2_configs, f3_configs, self.pub_marker, joint_map)
+            self.visualize2(T_W_E, good_grasps, vol_obj, gripper_model, self.pub_marker, joint_map)
 
 if __name__ == '__main__':
 

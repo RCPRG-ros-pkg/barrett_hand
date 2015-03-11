@@ -175,7 +175,7 @@ class VoxelGrid:
         return points_in_sphere, points_f_in_sphere, valid_configurations
 
 class VolumetricModel:
-    def __init__(self, vol_radius, vol_samples_count, T_H_O, orientations_angle):
+    def __init__(self, vol_radius, vol_samples_count, T_H_O, orientations_angle, vertices_obj, faces_obj):
         self.vol_radius = vol_radius
         self.vol_samples_count = vol_samples_count
         self.index_factor = float(self.vol_samples_count)/(2.0*self.vol_radius)
@@ -199,7 +199,6 @@ class VolumetricModel:
         self.orientations_angle = orientations_angle
         normals_sphere = velmautils.generateNormalsSphere(self.orientations_angle)
 
-#        print "normals_sphere: %s"%(len(normals_sphere))
         orientations1 = velmautils.generateFramesForNormals(self.orientations_angle, normals_sphere)
         orientations2 = []
         for ori in orientations1:
@@ -209,7 +208,120 @@ class VolumetricModel:
         self.orientations = {}
         for ori_idx in range(len(orientations2)):
             self.orientations[ori_idx] = orientations2[ori_idx]
-#        print "orientations set size: %s"%(len(self.orientations))
+
+        # generate a set of surface points
+        self.surface_points_obj = surfaceutils.sampleMeshDetailedRays(vertices_obj, faces_obj, 0.0015)
+        print "surface of the object has %s points"%(len(self.surface_points_obj))
+
+        # disallow contact with the surface points beyond the key handle
+        for p in self.surface_points_obj:
+            if p.pos.x() > 0.0:
+                p.allowed = False
+
+        surface_points_obj_init = []
+        surface_points2_obj_init = []
+        for sp in self.surface_points_obj:
+            if sp.allowed:
+                surface_points_obj_init.append(sp)
+            else:
+                surface_points2_obj_init.append(sp)
+
+        print "generating a subset of surface points of the object..."
+
+        while True:
+            p_idx = random.randint(0, len(self.surface_points_obj)-1)
+            if self.surface_points_obj[p_idx].allowed:
+                break
+        p_dist = 0.003
+
+        self.sampled_points_obj = []
+        while True:
+            self.sampled_points_obj.append(p_idx)
+            surface_points_obj2 = []
+            for sp in surface_points_obj_init:
+                if (sp.pos-self.surface_points_obj[p_idx].pos).Norm() > p_dist:
+                    surface_points_obj2.append(sp)
+            if len(surface_points_obj2) == 0:
+                break
+            surface_points_obj_init = surface_points_obj2
+            p_idx = surface_points_obj_init[0].id
+
+        print "subset size: %s"%(len(self.sampled_points_obj))
+
+        print "generating a subset of other surface points of the object..."
+
+        p_dist2 = 0.006
+
+        while True:
+            p_idx = random.randint(0, len(self.surface_points_obj)-1)
+            if not self.surface_points_obj[p_idx].allowed:
+                break
+
+        self.sampled_points2_obj = []
+        while True:
+            self.sampled_points2_obj.append(p_idx)
+            surface_points2_obj2 = []
+            for sp in surface_points2_obj_init:
+                if (sp.pos-self.surface_points_obj[p_idx].pos).Norm() > p_dist2:
+                    surface_points2_obj2.append(sp)
+            if len(surface_points2_obj2) == 0:
+                break
+            surface_points2_obj_init = surface_points2_obj2
+            p_idx = surface_points2_obj_init[0].id
+
+        # test volumetric model
+        if False:
+            for pt_idx in self.sampled_points2_obj:
+                pt = self.surface_points_obj[pt_idx]
+                m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
+                rospy.sleep(0.001)
+
+            for pt_idx in self.sampled_points_obj:
+                pt = self.surface_points_obj[pt_idx]
+                m_id = self.pub_marker.publishSinglePointMarker(pt.pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
+                rospy.sleep(0.001)
+
+        print "subset size: %s"%(len(self.sampled_points2_obj))
+
+        print "calculating surface curvature at sampled points of the obj..."
+        m_id = 0
+        planes = 0
+        edges = 0
+        points = 0
+        for pt_idx in range(len(self.surface_points_obj)):
+            indices, nx, pc1, pc2 = surfaceutils.pclPrincipalCurvaturesEstimation(self.surface_points_obj, pt_idx, 5, 0.003)
+#            m_id = self.pub_marker.publishVectorMarker(self.T_W_O * self.surface_points_obj[pt_idx].pos, self.T_W_O * (self.surface_points_obj[pt_idx].pos + nx*0.004), m_id, 1, 0, 0, frame='world', namespace='default', scale=0.0002)
+#            m_id = self.pub_marker.publishVectorMarker(self.T_W_O * self.surface_points_obj[pt_idx].pos, self.T_W_O * (self.surface_points_obj[pt_idx].pos + self.surface_points_obj[pt_idx].normal*0.004), m_id, 0, 0, 1, frame='world', namespace='default', scale=0.0002)
+            self.surface_points_obj[pt_idx].frame = PyKDL.Frame(PyKDL.Rotation(nx, self.surface_points_obj[pt_idx].normal * nx, self.surface_points_obj[pt_idx].normal), self.surface_points_obj[pt_idx].pos)
+            self.surface_points_obj[pt_idx].pc1 = pc1
+            self.surface_points_obj[pt_idx].pc2 = pc2
+            if pc1 < 0.2:
+                self.surface_points_obj[pt_idx].is_plane = True
+                self.surface_points_obj[pt_idx].is_edge = False
+                self.surface_points_obj[pt_idx].is_point = False
+                planes += 1
+            elif pc2 < 0.2:
+                self.surface_points_obj[pt_idx].is_plane = False
+                self.surface_points_obj[pt_idx].is_edge = True
+                self.surface_points_obj[pt_idx].is_point = False
+                edges += 1
+            else:
+                self.surface_points_obj[pt_idx].is_plane = False
+                self.surface_points_obj[pt_idx].is_edge = False
+                self.surface_points_obj[pt_idx].is_point = True
+                points += 1
+
+        print "obj planes: %s  edges: %s  points: %s"%(planes, edges, points)
+
+
+
+
+
+
+
+
+
+
 
     def getVolIndex(self, pt):
         xi = int(np.floor( self.index_factor*(pt[0]+self.vol_radius) ))
@@ -223,13 +335,13 @@ class VolumetricModel:
     def getVolPoint(self, xi,yi,zi):
         return PyKDL.Vector(-self.vol_radius + (xi+0.5) / self.index_factor, -self.vol_radius + (yi+0.5) / self.index_factor, -self.vol_radius + (zi+0.5) / self.index_factor)
 
-    def generate(self, surface_points_obj):
+    def generate(self):
 
         for ori_idx in range(len(orientations)):
                     T_H_Hd = orientations[ori_idx]
                     T_H_Od = T_H_Hd * self.T_H_O
-                    for surf_pt_idx in range(len(surface_points_obj)):
-                        surf_pt = surface_points_obj[surf_pt_idx]
+                    for surf_pt_idx in range(len(self.surface_points_obj)):
+                        surf_pt = self.surface_points_obj[surf_pt_idx]
                         if not surf_pt.allowed:
                             continue
                         pt = T_H_Od * surf_pt.pos
@@ -251,12 +363,12 @@ class VolumetricModel:
                           points = 0
                           norm = PyKDL.Vector()
                           for pt_id in self.vol_samples[xi][yi][zi][ori]:
-                              norm += surface_points_obj[pt_id].normal
-                              if surface_points_obj[pt_id].is_plane:
+                              norm += self.surface_points_obj[pt_id].normal
+                              if self.surface_points_obj[pt_id].is_plane:
                                   planes += 1
-                              if surface_points_obj[pt_id].is_edge:
+                              if self.surface_points_obj[pt_id].is_edge:
                                   edges += 1
-                              if surface_points_obj[pt_id].is_point:
+                              if self.surface_points_obj[pt_id].is_point:
                                   points += 1
                           norm.Normalize()
                           if planes >= edges and planes >= points:
