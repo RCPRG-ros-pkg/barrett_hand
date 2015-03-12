@@ -248,6 +248,9 @@ class GripperModel:
             self.f2_configs.append(fx)
             self.f3_configs.append(fx)
 
+        self.dof_configs = (self.sp_configs, self.f1_configs, self.f3_configs, self.f2_configs)
+        self.dof_limits = self.openrave_robot.GetDOFLimits()
+
     def getSurfacePointsForConfig(self, cf, T_E_W):
 
 
@@ -256,10 +259,13 @@ class GripperModel:
         config_link_map[(0,3)] = [1, ["right_HandFingerTwoKnuckleThreeLink", "right_HandFingerTwoKnuckleTwoLink"]]
         config_link_map[(2,)] = [2, [ "right_HandFingerThreeKnuckleThreeLink", "right_HandFingerThreeKnuckleTwoLink"]]
 
+        non_actuated_joints = (0,)
+
         points = []
         points_forbidden = []
 
-        cf_valid = [0,0,0,0]
+        cf_values = [0,0,0,0]
+        cf_values_add = [0,0,0,0]
         valid_values = None
         for cf_idx in range(len(cf)):
             if cf[cf_idx] != None:
@@ -267,22 +273,37 @@ class GripperModel:
                     valid_values = (cf_idx,)
                 else:
                     valid_values = valid_values + (cf_idx,)
-                cf_valid[cf_idx] = cf[cf_idx]
+                cf_values[cf_idx] = self.dof_configs[cf_idx][cf[cf_idx]]/180.0*math.pi
+                if cf_idx in non_actuated_joints:
+                    cf_values_add[cf_idx] = cf_values[cf_idx]
+                else:
+                    cf_values_add[cf_idx] = cf_values[cf_idx] + 0.01
+                    if cf_values_add[cf_idx] > self.dof_limits[1][cf_idx]:
+                        cf_values_add[cf_idx] = cf_values[cf_idx]
 
-        self.openrave_robot.SetDOFValues([self.sp_configs[cf_valid[0]]/180.0*math.pi, self.f1_configs[cf_valid[1]]/180.0*math.pi, self.f3_configs[cf_valid[2]]/180.0*math.pi, self.f2_configs[cf_valid[3]]/180.0*math.pi])
+        T_E_L = {}
+        T_L_E = {}
+        TR_E_L ={}
+        self.openrave_robot.SetDOFValues(cf_values)
         for link_name in config_link_map[valid_values][1]:
             link = self.openrave_robot.GetLink(link_name)
-            T_E_L = T_E_W * OpenraveToKDL(link.GetTransform())
-            TR_E_L = PyKDL.Frame(T_E_L.M)
+            T_E_L[link_name] = T_E_W * OpenraveToKDL(link.GetTransform())
+            T_L_E[link_name] = T_E_L[link_name].Inverse()
+            TR_E_L[link_name] = PyKDL.Frame(T_E_L[link_name].M)
+
+        T_E_L_next = {}
+        self.openrave_robot.SetDOFValues(cf_values_add)
+        for link_name in config_link_map[valid_values][1]:
+            link = self.openrave_robot.GetLink(link_name)
+            T_E_L_next[link_name] = T_E_W * OpenraveToKDL(link.GetTransform())
+
+        for link_name in config_link_map[valid_values][1]:
             for pt_idx in self.links[link_name].link_geom.sampled_points:
                 pt_L = self.links[link_name].link_geom.surface_points[pt_idx]
-                pt_E = T_E_L * pt_L.pos
+                pt_E = T_E_L[link_name] * pt_L.pos
                 pt_remove = True
                 for int_name in self.links[link_name].intersecting_links:
-                    int_link = self.openrave_robot.GetLink(int_name)
-                    int_T_E_L = T_E_W * OpenraveToKDL(int_link.GetTransform())
-                    int_T_L_E = int_T_E_L.Inverse()
-                    pt_L_int = int_T_L_E * pt_E
+                    pt_L_int = T_L_E[int_name] * pt_E
                     for pl in self.links[int_name].link_geom.qhull_planes:
                         if pt_L_int[0] * pl[0] + pt_L_int[1] * pl[1] + pt_L_int[2] * pl[2] + pl[3] > 0:
                              pt_remove = False
@@ -291,7 +312,17 @@ class GripperModel:
                         break
                 if pt_remove:
                     continue
-                n_E = TR_E_L * pt_L.normal
+                pt_E_next = T_E_L_next[link_name] * pt_L.pos
+                v_E = pt_E_next - pt_E
+                v_E.Normalize()
+                n_E = TR_E_L[link_name] * pt_L.normal
+                if PyKDL.dot(v_E, n_E) > 0.5:
+                    direction = 1
+                elif PyKDL.dot(v_E, n_E) < -0.5:
+                    direction = -1
+                else:
+                    direction = 0
+
                 if pt_L.is_plane == True:
                     surf_type = 0
                 elif pt_L.is_edge == True:
@@ -300,10 +331,10 @@ class GripperModel:
                     surf_type = 2
                 else:
                     print "ERROR: getSurfacePointsForConfig: unknown surface type"
-                points.append([config_link_map[valid_values][0], pt_E, n_E, surf_type, cf])
+                points.append( (config_link_map[valid_values][0], pt_E, n_E, surf_type, cf, direction) )
             for pt_L in self.links[link_name].link_geom.points_in_link:
-                pt_E = T_E_L * pt_L
-                points_forbidden.append([config_link_map[valid_values][0], pt_E, None, None, cf])
+                pt_E = T_E_L[link_name] * pt_L
+                points_forbidden.append( (config_link_map[valid_values][0], pt_E, None, None, cf, None) )
         return points, points_forbidden
 
     def generateSamples(self):
@@ -340,6 +371,8 @@ class VolumetricGrasp:
         self.contacts_obj_reduced = None
         self.wrenches = None
         self.obj_pos_E = None
+        self.normals_link = None
+        self.dof_directions = None
 
     def calculateWrenches(self):
         contacts_cf_ori = {}
@@ -362,6 +395,49 @@ class VolumetricGrasp:
                 self.wrenches.append([])
                 for c in contacts:
                     self.wrenches[-1] += contactToWrenches(c[0]-self.obj_pos_E, c[1], 0, 1)
+
+    def saveToFile(self, file_instance):
+        def writePoints(points_tuple, file_instance):
+            for points in points_tuple:
+                for pt in points:
+                    file_instance.write( str(pt[0]) + " " + str(pt[1]) + " " + str(pt[2]) + " ")
+                file_instance.write("\n")
+
+        file_instance.write( str(self.hand_config[0]) + " " + str(self.hand_config[1]) + " " + str(self.hand_config[2]) + " " + str(self.hand_config[3]) +
+        " " + str(self.obj_ori_idx) + " " + str(self.obj_pos_E[0]) + " " + str(self.obj_pos_E[1]) + " " + str(self.obj_pos_E[2]) + 
+        " " + str(self.dof_directions[0]) + " " + str(self.dof_directions[1]) + " " + str(self.dof_directions[2]) + "\n")
+
+        writePoints(self.contacts_obj, file_instance)
+        writePoints(self.contacts_link, file_instance)
+        writePoints(self.normals_obj, file_instance)
+        writePoints(self.normals_link, file_instance)
+
+    def loadFromFile(self, file_instance):
+        def readPoints(file_instance):
+            points = []
+            for cf_idx in range(3):
+                points.append([])
+                line = file_instance.readline().split()
+                for i in range(0, len(line), 3):
+                    points[-1].append( PyKDL.Vector(float(line[i+0]), float(line[i+1]), float(line[i+2])) )
+            return (points[0], points[1], points[2])
+
+        line = file_instance.readline().split()
+        if len(line) < 11:
+            return False
+
+        self.hand_config = (int(line[0]), int(line[1]), int(line[2]), int(line[3]))
+        self.obj_ori_idx = int(line[4])
+        self.obj_pos_E = PyKDL.Vector(float(line[5]), float(line[6]), float(line[7]))
+        self.dof_directions = (int(line[8]), int(line[9]), int(line[10]))
+
+        self.contacts_obj = readPoints(file_instance)
+        self.contacts_link = readPoints(file_instance)
+        self.normals_obj = readPoints(file_instance)
+        self.normals_link = readPoints(file_instance)
+
+        self.calculateWrenches()
+        return True
 
 class GraspingTask:
     """
@@ -728,7 +804,16 @@ Class for grasp learning.
 
             for cf_idx in range(len(grasp.contacts_link)):
                 for pt in grasp.contacts_link[cf_idx]:
-                    m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
+                    if grasp.dof_directions[cf_idx] == 1:
+                        color = (0,1,0)
+                    elif grasp.dof_directions[cf_idx] == -1:
+                        color = (1,0,0)
+                    elif grasp.dof_directions[cf_idx] == 0:
+                        color = (1,1,1)
+                    else:
+                        print "ERROR: direction: %s"%(grasp.dof_directions[cf_idx])
+                        color = (0,0,0)
+                    m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=color[0], g=color[1], b=color[2], namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
 
             raw_input("Press ENTER to continue...")
 
@@ -863,6 +948,8 @@ Class for grasp learning.
               normals_for_config = {}
               contacts_obj_for_config = {}
               contacts_link_for_config = {}
+              normals_link_for_config = {}
+              dir_link_for_config = {}
               is_plane_obj_config = {}
 
               # iterate through all locally possible hand configs
@@ -920,18 +1007,32 @@ Class for grasp learning.
                                   if ori_ok:
 
                                       if not (cfx,ori_idx) in contacts_link_for_config:
-                                          contacts_link_for_config[(cfx,ori_idx)] = [f_pt[1]]
-                                      else:
-                                          contacts_link_for_config[(cfx,ori_idx)].append(f_pt[1])
-                                      if not (cfx,ori_idx) in contacts_obj_for_config:
                                           contacts_obj_for_config[(cfx,ori_idx)] = [pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
+                                          normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
+                                          contacts_link_for_config[(cfx,ori_idx)] = [f_pt[1]]
+                                          normals_link_for_config[(cfx,ori_idx)] = [f_pt[2]]
+                                          dir_link_for_config[(cfx,ori_idx)] = [f_pt[5]]
+                                          is_plane_obj_config[(cfx,ori_idx)] = 0
                                       else:
                                           contacts_obj_for_config[(cfx,ori_idx)].append(pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
-                                      if not (cfx,ori_idx) in normals_for_config:
-                                          normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
-                                      else:
+                                          contacts_link_for_config[(cfx,ori_idx)].append(f_pt[1])
+                                          normals_link_for_config[(cfx,ori_idx)].append(f_pt[2])
+                                          dir_link_for_config[(cfx,ori_idx)].append(f_pt[5])
                                           normals_for_config[(cfx,ori_idx)].append(normal_obj_E)
-                                      is_plane_obj_config[(cfx,ori_idx)] = type_surf==0
+
+                                      if type_surf == 0:
+                                          is_plane_obj_config[(cfx,ori_idx)] += 1
+
+
+#                                      if not (cfx,ori_idx) in contacts_obj_for_config:
+#                                          contacts_obj_for_config[(cfx,ori_idx)] = [pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2])]
+#                                      else:
+#                                          contacts_obj_for_config[(cfx,ori_idx)].append(pos + vol_obj.getVolPoint(vol_idx[0],vol_idx[1],vol_idx[2]))
+#                                      if not (cfx,ori_idx) in normals_for_config:
+#                                          normals_for_config[(cfx,ori_idx)] = [normal_obj_E]
+#                                      else:
+#                                          normals_for_config[(cfx,ori_idx)].append(normal_obj_E)
+#                                      is_plane_obj_config[(cfx,ori_idx)] = type_surf==0
                                   else:
                                       forbidden_cf_ori[cfx].add(ori_idx)
                                       break
@@ -962,6 +1063,8 @@ Class for grasp learning.
                               contacts_obj_for_config[(cf,ori_idx)] = (contacts_obj_for_config[(cf1,ori_idx)], contacts_obj_for_config[(cf2,ori_idx)], contacts_obj_for_config[(cf3,ori_idx)])
                               contacts_link_for_config[(cf,ori_idx)] = (contacts_link_for_config[(cf1,ori_idx)], contacts_link_for_config[(cf2,ori_idx)], contacts_link_for_config[(cf3,ori_idx)])
                               normals_for_config[(cf,ori_idx)] = (normals_for_config[(cf1,ori_idx)], normals_for_config[(cf2,ori_idx)], normals_for_config[(cf3,ori_idx)])
+                              normals_link_for_config[(cf,ori_idx)] = (normals_link_for_config[(cf1,ori_idx)], normals_link_for_config[(cf2,ori_idx)], normals_link_for_config[(cf3,ori_idx)])
+                              dir_link_for_config[(cf,ori_idx)] = (dir_link_for_config[(cf1,ori_idx)], dir_link_for_config[(cf2,ori_idx)], dir_link_for_config[(cf3,ori_idx)])
 
                       for ori_idx in ori_set_ok:
                           grasp = VolumetricGrasp()
@@ -971,6 +1074,30 @@ Class for grasp learning.
                           grasp.contacts_obj = contacts_obj_for_config[(cf,ori_idx)]
                           grasp.contacts_link = contacts_link_for_config[(cf,ori_idx)]
                           grasp.normals_obj = normals_for_config[(cf,ori_idx)]
+                          grasp.normals_link = normals_link_for_config[(cf,ori_idx)]
+                          grasp.dof_directions = []
+                          for cf_idx in range(len(dir_link_for_config[(cf,ori_idx)])):
+                              total_d_plus = 0
+                              total_d_minus = 0
+                              total_d_zero = 0
+                              for d in dir_link_for_config[(cf,ori_idx)][cf_idx]:
+                                  if d == 1:
+                                      total_d_plus += 1
+                                  elif d == -1:
+                                      total_d_minus += 1
+                                  elif d == 0:
+                                      total_d_zero += 1
+                                  else:
+                                      print "ERROR: joinFingersConfigurations: direction: %s"%(d)
+                              total_d_idx = np.argmax( (total_d_plus, total_d_minus, total_d_zero) )
+                              if total_d_idx == 0:
+                                  total_d = 1
+                              elif total_d_idx == 1:
+                                  total_d = -1
+                              else:
+                                  total_d = 0
+                              grasp.dof_directions.append(total_d)
+
                           grasp.obj_pos_E = pos
                           grasp.calculateWrenches()
 #                          good_grasps[(cf,ori_idx)] = grasp
@@ -1050,6 +1177,8 @@ Class for grasp learning.
     def graspingThread(self, args, queue):
         pos, vol_obj, voxel_grid, self_collisions_configs, gripper_model, normals_sphere_contacts = args
         good_grasps = self.getGraspsForPosition(pos, vol_obj, voxel_grid, self_collisions_configs, gripper_model, normals_sphere_contacts)
+        if good_grasps == None:
+            good_grasps = []
         queue.put(good_grasps)
 
     def spin(self):
@@ -1123,59 +1252,57 @@ Class for grasp learning.
 
         self.pub_js = rospy.Publisher("/joint_states", JointState)
 
+        #
+        # create normals set for the contact point forces verification procedure
+        #
+        normals_sphere_contacts = velmautils.generateNormalsSphere(20.0/180.0*math.pi)
+        print "normals_sphere_contacts: %s"%(len(normals_sphere_contacts))
 
-        if True:
-            #
-            # create normals set for the contact point forces verification procedure
-            #
-            normals_sphere_contacts = velmautils.generateNormalsSphere(20.0/180.0*math.pi)
-            print "normals_sphere_contacts: %s"%(len(normals_sphere_contacts))
+        #
+        # create volumetric model of the key handle
+        #
+        print "sampling the surface of the object..."
+        vertices_obj, faces_obj = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
 
-            #
-            # create volumetric model of the key handle
-            #
-            print "sampling the surface of the object..."
-            vertices_obj, faces_obj = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+        T_O_H = PyKDL.Frame(PyKDL.Vector(-0.0215,0,0))
+        T_H_O = T_O_H.Inverse()
 
-            T_O_H = PyKDL.Frame(PyKDL.Vector(-0.0215,0,0))
-            T_H_O = T_O_H.Inverse()
+        vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O, orientations_angle = 10.0/180.0*math.pi, vertices_obj = vertices_obj, faces_obj = faces_obj)
 
-            vol_obj = volumetricutils.VolumetricModel(vol_radius = 0.022, vol_samples_count = 16, T_H_O = T_H_O, orientations_angle = 10.0/180.0*math.pi, vertices_obj = vertices_obj, faces_obj = faces_obj)
-
-            vol_map_filename = "vol_map.txt"
-            if False:
-                print "generating volumetric map (%s iterations)..."%(len(vol_obj.orientations) * len(vol_obj.surface_points_obj))
-                vol_obj.generate()
-                print "done."
-                vol_obj.save(vol_map_filename)
-            else:
-                print "reading the volumetric map from file %s"%(vol_map_filename)
-                vol_obj.load(vol_map_filename)
-
-            # test volumetric model
-            if False:
-                vol_obj.test1(self.pub_marker, PyKDL.Frame(PyKDL.Vector(0,0,0.5)))
-                exit(0)
-
-            #
-            # sample the surface of the gripper link
-            #
-            self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
-            gripper_model = GripperModel(self.openrave_robot, self.grasper)
-
+        vol_map_filename = "vol_map.txt"
+        if False:
+            print "generating volumetric map (%s iterations)..."%(len(vol_obj.orientations) * len(vol_obj.surface_points_obj))
+            vol_obj.generate()
             print "done."
+            vol_obj.save(vol_map_filename)
+        else:
+            print "reading the volumetric map from file %s"%(vol_map_filename)
+            vol_obj.load(vol_map_filename)
 
-            checked_links = [
-            "right_HandFingerOneKnuckleThreeLink",
-            "right_HandFingerThreeKnuckleThreeLink",
-            "right_HandFingerTwoKnuckleThreeLink",
-            ]
+        # test volumetric model
+        if False:
+            vol_obj.test1(self.pub_marker, PyKDL.Frame(PyKDL.Vector(0,0,0.5)))
+            exit(0)
 
-            T_W_E = OpenraveToKDL(self.openrave_robot.GetLink("right_HandPalmLink").GetTransform())
-            TR_W_E = PyKDL.Frame(T_W_E.M)
-            T_E_W = T_W_E.Inverse()
+        #
+        # sample the surface of the gripper link
+        #
+        self.grasper = interfaces.Grasper(self.openrave_robot,friction=1.0 )
+        gripper_model = GripperModel(self.openrave_robot, self.grasper)
 
+        print "done."
 
+        checked_links = [
+        "right_HandFingerOneKnuckleThreeLink",
+        "right_HandFingerThreeKnuckleThreeLink",
+        "right_HandFingerTwoKnuckleThreeLink",
+        ]
+
+        T_W_E = OpenraveToKDL(self.openrave_robot.GetLink("right_HandPalmLink").GetTransform())
+        TR_W_E = PyKDL.Frame(T_W_E.M)
+        T_E_W = T_W_E.Inverse()
+
+        if False:
             if False:
                 for fi in range(len(f1_configs)):
                     cf = [5, fi, 0, 0]
@@ -1232,9 +1359,9 @@ Class for grasp learning.
 
             # the BarrettHand gripper is symmetrical in x axis
             offsets = []
-            for x in np.linspace(0.0, 0.01, 2):
-              for y in np.linspace(-0.01, 0.01, 2):
-                for z in np.linspace(-0.01, 0.01, 2):
+            for x in np.linspace(0.0, 0.02, 5):
+              for y in np.linspace(-0.02, 0.02, 10):
+                for z in np.linspace(-0.02, 0.02, 10):
                   offsets.append(PyKDL.Vector(x,y,z))
 
             print "number of candidate positions: %s"%(len(offsets))
@@ -1286,8 +1413,23 @@ Class for grasp learning.
                 rospy.sleep(0.1)
 
             print "Ended."
+            with open("grasps.txt", 'w') as f:
+                for grasp in good_grasps:
+                    grasp.saveToFile(f)
 
-            self.visualize2(T_W_E, good_grasps, vol_obj, gripper_model, self.pub_marker, joint_map)
+        else:
+            good_grasps = []
+            with open("grasps.txt", 'r') as f:
+                while True:
+                    grasp = VolumetricGrasp()
+                    if grasp.loadFromFile(f):
+                        good_grasps.append(grasp)
+                    else:
+                        break
+
+        print "good grasps: %s"%(len(good_grasps))
+
+        self.visualize2(T_W_E, good_grasps, vol_obj, gripper_model, self.pub_marker, joint_map)
 
 if __name__ == '__main__':
 
