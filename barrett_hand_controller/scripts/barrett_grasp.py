@@ -84,6 +84,12 @@ import volumetricutils
 
 from multiprocessing import Process, Queue
 
+from sklearn.cluster import DBSCAN
+from sklearn import metrics
+from sklearn.datasets.samples_generator import make_blobs
+from sklearn.preprocessing import StandardScaler
+
+
 def contactToWrenches(pos, normal, friction, Nconepoints):
             wrenches = []
             fdeltaang = 2.0*math.pi/float(Nconepoints)
@@ -373,6 +379,8 @@ class VolumetricGrasp:
         self.obj_pos_E = None
         self.normals_link = None
         self.dof_directions = None
+        self.contacts_link_reduced = None
+        self.wrenches_link = None
 
     def calculateWrenches(self):
         contacts_cf_ori = {}
@@ -395,6 +403,28 @@ class VolumetricGrasp:
                 self.wrenches.append([])
                 for c in contacts:
                     self.wrenches[-1] += contactToWrenches(c[0]-self.obj_pos_E, c[1], 0, 1)
+
+    def calculateWrenchesOnLink(self):
+        contacts_cf_ori = {}
+        wrenches_cf_ori = {}
+        self.contacts_link_reduced = []
+        self.wrenches_link = []
+        for cf_idx in range(len(self.contacts_link)):
+                contacts = []
+                for pt_idx in range(len(self.contacts_link[cf_idx])):
+                    pt_E = self.contacts_link[cf_idx][pt_idx]
+                    norm_E = self.normals_link[cf_idx][pt_idx]
+                    similar = False
+                    for c in contacts:
+                        if (c[0]-pt_E).Norm() < 0.003 and velmautils.getAngle(c[1],norm_E) < 20.0/180.0*math.pi:
+                            similar = True
+                            break
+                    if not similar:
+                        contacts.append((pt_E, norm_E))
+                self.contacts_link_reduced.append(contacts)
+                self.wrenches_link.append([])
+                for c in contacts:
+                    self.wrenches_link[-1] += contactToWrenches(c[0]-self.obj_pos_E, c[1], 0, 1)
 
     def saveToFile(self, file_instance):
         def writePoints(points_tuple, file_instance):
@@ -1140,7 +1170,6 @@ Class for grasp learning.
                 good_grasps = self.joinFingersConfigurations(points_for_config2, ori_for_config, self_collisions_configs, pos, vol_obj, voxel_grid)
                 print "done."
 
-
                 # initial selection of grasps based on contact forces analysis
                 print "initial selection of grasps based on contact forces analysis..."
                 good_grasps2 = []
@@ -1182,6 +1211,12 @@ Class for grasp learning.
         queue.put(good_grasps)
 
     def spin(self):
+
+#        y_values = np.linspace(-0.06, 0.06, 28)
+#        print y_values
+#        exit(0)
+
+
         m_id = 0
         self.pub_marker.eraseMarkers(0,3000, frame_id='world')
 
@@ -1360,15 +1395,18 @@ Class for grasp learning.
             # the BarrettHand gripper is symmetrical in x axis
             offsets = []
             for x in np.linspace(0.0, 0.02, 5):
-              for y in np.linspace(-0.02, 0.02, 10):
-                for z in np.linspace(-0.02, 0.02, 10):
+#              for y in np.linspace(-0.06, -0.02, 10)[:-1]:  # 9
+#              for y in np.linspace(-0.02, 0.02, 10):        # 10
+#              for y in np.linspace(0.02, 0.06, 10)[1:]:     # 9
+              for y in np.linspace(-0.06, 0.06, 28):
+                for z in np.linspace(-0.02, 0.06, 19):
                   offsets.append(PyKDL.Vector(x,y,z))
 
             print "number of candidate positions: %s"%(len(offsets))
             valid_positions = []
 
             # multiprocessing
-            good_grasps = []
+            good_grasps = 0
             threads_queues = [None, None, None, None]
             offset_idx = 0
             stop = False
@@ -1385,17 +1423,23 @@ Class for grasp learning.
                     elif not threads_queues[th_idx].empty():
                         if stop:
                             grasps = threads_queues[th_idx].get()
-                            good_grasps += grasps
+                            good_grasps += len(grasps)
                             print "thread %s grasps: %s"%(th_idx, len(grasps))
-                            print "total grasps: %s"%(len(good_grasps))
+                            print "total grasps: %s"%(good_grasps)
+                            with open("grasps02.txt", 'a') as f:
+                                for grasp in grasps:
+                                    grasp.saveToFile(f)
+
                             threads_queues[th_idx] = None
                         else:
                             start_thread = True
                             grasps = threads_queues[th_idx].get()
-                            good_grasps += grasps
+                            good_grasps += len(grasps)
                             print "thread %s grasps: %s"%(th_idx, len(grasps))
-                            print "total grasps: %s"%(len(good_grasps))
-
+                            print "total grasps: %s"%(good_grasps)
+                            with open("grasps02.txt", 'a') as f:
+                                for grasp in grasps:
+                                    grasp.saveToFile(f)
                     if start_thread:
                         if stop:
                             print "ERROR: start_thread and stop"
@@ -1413,13 +1457,14 @@ Class for grasp learning.
                 rospy.sleep(0.1)
 
             print "Ended."
-            with open("grasps.txt", 'w') as f:
-                for grasp in good_grasps:
-                    grasp.saveToFile(f)
+#            with open("grasps02.txt", 'w') as f:
+#                for grasp in good_grasps:
+#                    grasp.saveToFile(f)
 
         else:
             good_grasps = []
-            with open("grasps.txt", 'r') as f:
+            print "reading grasps from file..."
+            with open("grasps03.txt", 'r') as f:
                 while True:
                     grasp = VolumetricGrasp()
                     if grasp.loadFromFile(f):
@@ -1428,6 +1473,121 @@ Class for grasp learning.
                         break
 
         print "good grasps: %s"%(len(good_grasps))
+
+        if False:
+            good_grasps2 = []
+            for grasp in good_grasps:
+                if grasp.dof_directions == (0,0,0):
+                    continue
+                good_grasps2.append(grasp)
+
+            good_grasps = good_grasps2
+            print "good grasps: %s"%(len(good_grasps))
+
+            # initial selection of grasps based on contact forces analysis
+            print "initial selection of grasps based on contact forces analysis..."
+            good_grasps2 = []
+            for grasp in good_grasps:
+                    grasp.calculateWrenchesOnLink()
+                    grasp_ok = True
+                    for n in normals_sphere_contacts:
+                        min_f = None
+                        max_f = None
+                        min_t = None
+                        max_t = None
+                        for cf_idx in range(len(grasp.wrenches_link)):
+                            for wr in grasp.wrenches_link[cf_idx]:
+                                f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
+                                t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
+                                if min_f == None or min_f > f:
+                                    min_f = f
+                                if max_f == None or max_f < f:
+                                    max_f = f
+                                if min_t == None or min_t > t:
+                                    min_t = t
+                                if max_t == None or max_t < t:
+                                    max_t = t
+                        if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
+                            grasp_ok = False
+                            break
+                    if grasp_ok:
+                        good_grasps2.append(grasp)
+
+            good_grasps = good_grasps2
+            print "good grasps: %s"%(len(good_grasps))
+
+            with open("grasps03.txt", 'w') as f:
+                for grasp in good_grasps:
+                    grasp.saveToFile(f)
+
+
+        ##############################################################################
+        # Generate sample data
+#        centers = [[1, 1], [-1, -1], [1, -1]]
+#        X, labels_true = make_blobs(n_samples=5, centers=centers, cluster_std=0.4,
+#                            random_state=0)
+
+        grasps_dir = {}
+        for grasp in good_grasps:
+            if not grasp.dof_directions in grasps_dir:
+                grasps_dir[grasp.dof_directions] = [grasp]
+            else:
+                grasps_dir[grasp.dof_directions].append(grasp)
+
+        print "closing directions: %s"%(len(grasps_dir))
+
+        for dof_dir in grasps_dir:
+            X = []
+            grasps = grasps_dir[dof_dir]
+            for grasp in grasps:
+                rot = vol_obj.orientations[grasp.obj_ori_idx].M.GetRot()
+#                X.append( [grasp.hand_config[0], grasp.hand_config[1], grasp.hand_config[2], grasp.hand_config[3], grasp.obj_pos_E[0], grasp.obj_pos_E[1], grasp.obj_pos_E[2], rot[0], rot[1], rot[2]] )
+                X.append( [grasp.obj_pos_E[0], grasp.obj_pos_E[1], grasp.obj_pos_E[2], rot[0], rot[1], rot[2]] )
+
+            X = StandardScaler().fit_transform(X)
+            db = DBSCAN(eps=0.3, min_samples=10).fit(X)
+            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+            core_samples_mask[db.core_sample_indices_] = True
+            labels = db.labels_
+
+            # Number of clusters in labels, ignoring noise if present.
+            n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
+            print "dir: %s %s %s   X: %s    n_clusters: %s"%(dof_dir[0], dof_dir[1], dof_dir[2], len(X), n_clusters_)
+
+            grasps_labeled = {}
+            for gr_idx in range(len(labels)):
+                label = labels[gr_idx]
+                if not label in grasps_labeled:
+                    grasps_labeled[label] = [grasps[gr_idx]]
+                else:
+                    grasps_labeled[label].append(grasps[gr_idx])
+
+            for label in grasps_labeled:
+                print "label: %s    grasps: %s"%(label, len(grasps_labeled[label]))
+                if label < 0:
+                    continue
+                self.visualize2(T_W_E, [grasps_labeled[label][0]], vol_obj, gripper_model, self.pub_marker, joint_map)
+
+        # sort grasps by their positions
+        grasps_pos = {}
+        max_grasps_at_pos = 0
+        for grasp in good_grasps:
+            pos_idx = (int(grasp.obj_pos_E[0]*1000.0), int(grasp.obj_pos_E[1]*1000.0), int(grasp.obj_pos_E[2]*1000.0))
+            if not pos_idx in grasps_pos:
+                grasps_pos[pos_idx] = [grasp]
+            else:
+                grasps_pos[pos_idx].append(grasp)
+            if len(grasps_pos[pos_idx]) > max_grasps_at_pos:
+                max_grasps_at_pos = len(grasps_pos[pos_idx])
+
+        print "max_grasps_at_pos: %d"%(max_grasps_at_pos)
+        m_id = 0
+        for pos_idx in grasps_pos:
+            pos = PyKDL.Vector(float(pos_idx[0])/1000.0, float(pos_idx[1])/1000.0, float(pos_idx[2])/1000.0)
+            size = 0.002 * float(len(grasps_pos[pos_idx]))/max_grasps_at_pos
+            m_id = pub_marker.publishSinglePointMarker(pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(size, size, size), T=T_W_E)
+            rospy.sleep(0.001)
+        exit(0)
 
         self.visualize2(T_W_E, good_grasps, vol_obj, gripper_model, self.pub_marker, joint_map)
 

@@ -81,6 +81,9 @@ class VoxelGrid:
     def getPointIndex(self, pt):
         return (int((pt[0] - self.dim_min[0])/(self.voxel_size)), int((pt[1] - self.dim_min[1])/(self.voxel_size)), int((pt[2] - self.dim_min[2])/(self.voxel_size)))
 
+    def getPointIndexList(self, pt):
+        return [int((pt[0] - self.dim_min[0])/(self.voxel_size)), int((pt[1] - self.dim_min[1])/(self.voxel_size)), int((pt[2] - self.dim_min[2])/(self.voxel_size))]
+
     def __init__(self, voxel_size):
         self.voxel_size = voxel_size
         self.voxel_max_radius = math.sqrt(3)/2.0 * self.voxel_size
@@ -131,8 +134,8 @@ class VoxelGrid:
                 self.max_points_in_voxel_f = voxel_points_count
 
     def getPointsAtPoint(self, pos, radius):
-        min_index = self.getPointIndex(pos - PyKDL.Vector(radius, radius, radius))
-        max_index = self.getPointIndex(pos + PyKDL.Vector(radius, radius, radius))
+        min_index = self.getPointIndexList(pos - PyKDL.Vector(radius, radius, radius))
+        max_index = self.getPointIndexList(pos + PyKDL.Vector(radius, radius, radius))
         for dof in range(3):
             if min_index[dof] < 0:
                 min_index[dof] = 0
