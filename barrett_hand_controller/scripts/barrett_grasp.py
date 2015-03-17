@@ -249,13 +249,17 @@ class GripperModel:
         self.f3_configs = []
         for sp in np.linspace(0.01, 179.99, 12):
             self.sp_configs.append(sp)
-        for fx in np.linspace(80.0, 130.0, 20):
+#        for fx in np.linspace(80.0, 130.0, 20):
+        for fx in np.linspace(80.0, 130.0, 40):
             self.f1_configs.append(fx)
             self.f2_configs.append(fx)
             self.f3_configs.append(fx)
 
         self.dof_configs = (self.sp_configs, self.f1_configs, self.f3_configs, self.f2_configs)
         self.dof_limits = self.openrave_robot.GetDOFLimits()
+
+    def getAnglesForConfigIdx(self, cf_idx):
+        return np.array( [ self.sp_configs[cf_idx[0]], self.f1_configs[cf_idx[1]], self.f3_configs[cf_idx[2]], self.f2_configs[cf_idx[3]] ] )
 
     def getSurfacePointsForConfig(self, cf, T_E_W):
 
@@ -367,6 +371,22 @@ class GripperModel:
             points_forbidden += pf
         return points, points_forbidden
 
+    def generateSelfCollisionData(self):
+        self_collisions_configs = set()
+        for sp_idx in range(len(self.sp_configs)):
+            print "%s / %s"%(sp_idx, len(self.sp_configs))
+            sp = self.sp_configs[sp_idx]
+            for f1_idx in range(len(self.f1_configs)):
+                f1 = self.f1_configs[f1_idx]
+                for f2_idx in range(len(self.f2_configs)):
+                    f2 = self.f2_configs[f2_idx]
+                    for f3_idx in range(len(self.f3_configs)):
+                        f3 = self.f3_configs[f3_idx]
+                        self.openrave_robot.SetDOFValues([sp/180.0*math.pi, f1/180.0*math.pi, f3/180.0*math.pi, f2/180.0*math.pi])
+                        if self.openrave_robot.CheckSelfCollision():
+                            self_collisions_configs.add( (sp_idx, f1_idx, f3_idx, f2_idx) )
+        return self_collisions_configs
+
 class VolumetricGrasp:
     def __init__(self):
         self.hand_config = None
@@ -466,7 +486,21 @@ class VolumetricGrasp:
         self.normals_obj = readPoints(file_instance)
         self.normals_link = readPoints(file_instance)
 
-        self.calculateWrenches()
+        return True
+
+    def loadFromFileFast(self, file_instance):
+        line = file_instance.readline().split()
+        if len(line) < 11:
+            return False
+
+        self.hand_config = (int(line[0]), int(line[1]), int(line[2]), int(line[3]))
+        self.obj_ori_idx = int(line[4])
+        self.obj_pos_E = PyKDL.Vector(float(line[5]), float(line[6]), float(line[7]))
+        self.dof_directions = (int(line[8]), int(line[9]), int(line[10]))
+
+        for i in range(12):
+            file_instance.readline()
+
         return True
 
 class GraspingTask:
@@ -733,22 +767,6 @@ Class for grasp learning.
                     mindist = dqp
         return mindist
 
-    def generateSelfCollisionData(self, sp_configs, f1_configs, f2_configs, f3_configs):
-        self_collisions_configs = set()
-        for sp_idx in range(len(sp_configs)):
-            print "%s / %s"%(sp_idx, len(sp_configs))
-            sp = sp_configs[sp_idx]
-            for f1_idx in range(len(f1_configs)):
-                f1 = f1_configs[f1_idx]
-                for f2_idx in range(len(f2_configs)):
-                    f2 = f2_configs[f2_idx]
-                    for f3_idx in range(len(f3_configs)):
-                        f3 = f3_configs[f3_idx]
-                        self.openrave_robot.SetDOFValues([sp/180.0*math.pi, f1/180.0*math.pi, f3/180.0*math.pi, f2/180.0*math.pi])
-                        if self.openrave_robot.CheckSelfCollision():
-                            self_collisions_configs.add( (sp_idx, f1_idx, f3_idx, f2_idx) )
-        return self_collisions_configs
-
     def saveSelfCollisionData(self, filename, self_collisions_configs):
         with open(filename, 'w') as f:
             for cf in self_collisions_configs:
@@ -846,6 +864,45 @@ Class for grasp learning.
                     m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=color[0], g=color[1], b=color[2], namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
 
             raw_input("Press ENTER to continue...")
+
+    def visualizeGrasp(self, T_W_E, grasp, vol_obj, gripper_model, pub_marker, joint_map):
+            cf = grasp.hand_config
+            ori = grasp.obj_ori_idx
+
+            TT_E_H = PyKDL.Frame(grasp.obj_pos_E)
+            T_W_H = T_W_E * TT_E_H
+
+            self.openrave_robot.SetDOFValues([gripper_model.sp_configs[cf[0]]/180.0*math.pi,gripper_model.f1_configs[cf[1]]/180.0*math.pi,gripper_model.f3_configs[cf[2]]/180.0*math.pi,gripper_model.f2_configs[cf[3]]/180.0*math.pi])
+            for i in range(0, 2):
+                # update the gripper visualization in ros
+                js = JointState()
+                js.header.stamp = rospy.Time.now()
+                for jn in joint_map:
+                    js.name.append(joint_map[jn])
+                    js.position.append(self.openrave_robot.GetJoint(jn).GetValue(0))
+                self.pub_js.publish(js)
+                rospy.sleep(0.1)
+            print cf, ori
+            pub_marker.eraseMarkers(0,2000, frame_id='world')
+            m_id = 0
+            T_W_O = T_W_H * vol_obj.orientations[ori] * vol_obj.T_H_O
+            m_id = pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_O)
+            for cf_idx in range(len(grasp.contacts_obj_reduced)):
+                for c in grasp.contacts_obj_reduced[cf_idx]:
+                    m_id = pub_marker.publishVectorMarker(T_W_E*c[0], T_W_E*(c[0]+c[1]*0.004), m_id, r=1, g=1, b=1, namespace='default', frame='world', scale=0.0005)
+
+            for cf_idx in range(len(grasp.contacts_link)):
+                for pt in grasp.contacts_link[cf_idx]:
+                    if grasp.dof_directions[cf_idx] == 1:
+                        color = (0,1,0)
+                    elif grasp.dof_directions[cf_idx] == -1:
+                        color = (1,0,0)
+                    elif grasp.dof_directions[cf_idx] == 0:
+                        color = (1,1,1)
+                    else:
+                        print "ERROR: direction: %s"%(grasp.dof_directions[cf_idx])
+                        color = (0,0,0)
+                    m_id = pub_marker.publishSinglePointMarker(pt, m_id, r=color[0], g=color[1], b=color[2], namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=T_W_E)
 
     def sortPointsByConfig(self, points_in_sphere, points_f_in_sphere, valid_configurations):
               # returned values
@@ -1128,14 +1185,12 @@ Class for grasp learning.
                                   total_d = 0
                               grasp.dof_directions.append(total_d)
 
+                          if grasp.dof_directions[0] == 0 and grasp.dof_directions[1] == 0 and grasp.dof_directions[2] == 0:
+                              continue
                           grasp.obj_pos_E = pos
                           grasp.calculateWrenches()
-#                          good_grasps[(cf,ori_idx)] = grasp
+                          grasp.calculateWrenchesOnLink()
                           good_grasps.append(grasp)
-
-#                      if len(ori_set_ok) > 0:
-#                          good_poses += len(ori_set_ok)
-#                          good_configs[(cf1[0], cf1[1], cf3[2], cf2[3])] = ori_set_ok
 
               return good_grasps
 
@@ -1145,9 +1200,6 @@ Class for grasp learning.
 
 #                print "points_in_sphere: %s  %s  %s"%(len(points_in_sphere), len(points_f_in_sphere), len(valid_configurations))
                 points_for_config, points_f_for_config = self.sortPointsByConfig(points_in_sphere, points_f_in_sphere, valid_configurations)
-
-#                print "configs: %s"%(len(points_for_config))
-#                print "configs_f: %s"%(len(points_f_for_config))
 
                 if len(points_for_config) == 0:
                     return None
@@ -1200,6 +1252,36 @@ Class for grasp learning.
                             break
                     if grasp_ok:
                         good_grasps2.append(grasp)
+
+                good_grasps = good_grasps2
+
+                # initial selection of grasps based on contact forces analysis
+                print "initial selection of grasps based on contact forces analysis (second pass)..."
+                good_grasps2 = []
+                for grasp in good_grasps:
+                        grasp_ok = True
+                        for n in normals_sphere_contacts:
+                            min_f = None
+                            max_f = None
+                            min_t = None
+                            max_t = None
+                            for cf_idx in range(len(grasp.wrenches_link)):
+                                for wr in grasp.wrenches_link[cf_idx]:
+                                    f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
+                                    t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
+                                    if min_f == None or min_f > f:
+                                        min_f = f
+                                    if max_f == None or max_f < f:
+                                        max_f = f
+                                    if min_t == None or min_t > t:
+                                        min_t = t
+                                    if max_t == None or max_t < t:
+                                        max_t = t
+                            if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
+                                grasp_ok = False
+                                break
+                        if grasp_ok:
+                            good_grasps2.append(grasp)
 
                 return good_grasps2
 
@@ -1358,6 +1440,8 @@ Class for grasp learning.
             # create the voxel map of the points from the surface of the gripper
             points, points_forbidden = gripper_model.generateSamples()
 
+            print "points: %s"%(len(points))
+
 #            m_id = 0
 #            for i in range(3000):
 #                m_id = pub_marker.publishSinglePointMarker(T_W_E*points[i][1], m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.003, 0.003, 0.003), T=None)
@@ -1367,17 +1451,16 @@ Class for grasp learning.
             #
             # check self collisions of the gripper
             #
-            self_collision_set_filename = "self_collision.txt"
+            self_collision_set_filename = "self_collision_40.txt"
             self_collisions_configs = set()
             if False:
-                print "checking self collision for %s configurations..."%(len(sp_configs) * len(f1_configs) * len(f2_configs) * len(f3_configs))
-                self_collisions_configs = self.generateSelfCollisionData(sp_configs, f1_configs, f2_configs, f3_configs)
+                print "checking self collision for all configurations..."
+                self_collisions_configs = gripper_model.generateSelfCollisionData()
                 print "done."
                 self.saveSelfCollisionData(self_collision_set_filename, self_collisions_configs)
             else:
                 self_collisions_configs = self.loadSelfCollisionData(self_collision_set_filename)
 
-            print "points: %s"%(len(points))
 
             voxel_grid = volumetricutils.VoxelGrid(0.005)
             voxel_grid.build(points, points_forbidden)
@@ -1394,12 +1477,12 @@ Class for grasp learning.
 
             # the BarrettHand gripper is symmetrical in x axis
             offsets = []
-            for x in np.linspace(0.0, 0.02, 5):
-#              for y in np.linspace(-0.06, -0.02, 10)[:-1]:  # 9
-#              for y in np.linspace(-0.02, 0.02, 10):        # 10
-#              for y in np.linspace(0.02, 0.06, 10)[1:]:     # 9
-              for y in np.linspace(-0.06, 0.06, 28):
-                for z in np.linspace(-0.02, 0.06, 19):
+#            for x in np.linspace(0.0, 0.02, 5):
+#              for y in np.linspace(-0.06, 0.06, 28):
+#                for z in np.linspace(-0.02, 0.06, 19):
+            for x in np.linspace(0.0, 0.02, 10):
+              for y in np.linspace(-0.06, 0.06, 60):
+                for z in np.linspace(-0.02, 0.06, 40):
                   offsets.append(PyKDL.Vector(x,y,z))
 
             print "number of candidate positions: %s"%(len(offsets))
@@ -1407,8 +1490,8 @@ Class for grasp learning.
 
             # multiprocessing
             good_grasps = 0
-            threads_queues = [None, None, None, None]
-            offset_idx = 0
+            threads_queues = [None, None, None]#, None]
+            offset_idx = 644
             stop = False
             while True:
                 stopped_threads = 0
@@ -1426,7 +1509,7 @@ Class for grasp learning.
                             good_grasps += len(grasps)
                             print "thread %s grasps: %s"%(th_idx, len(grasps))
                             print "total grasps: %s"%(good_grasps)
-                            with open("grasps02.txt", 'a') as f:
+                            with open("grasps05.txt", 'a') as f:
                                 for grasp in grasps:
                                     grasp.saveToFile(f)
 
@@ -1437,7 +1520,7 @@ Class for grasp learning.
                             good_grasps += len(grasps)
                             print "thread %s grasps: %s"%(th_idx, len(grasps))
                             print "total grasps: %s"%(good_grasps)
-                            with open("grasps02.txt", 'a') as f:
+                            with open("grasps05.txt", 'a') as f:
                                 for grasp in grasps:
                                     grasp.saveToFile(f)
                     if start_thread:
@@ -1460,65 +1543,129 @@ Class for grasp learning.
 #            with open("grasps02.txt", 'w') as f:
 #                for grasp in good_grasps:
 #                    grasp.saveToFile(f)
+            exit(0)
 
         else:
             good_grasps = []
+            index = 0
             print "reading grasps from file..."
-            with open("grasps03.txt", 'r') as f:
+            with open("grasps04.txt", 'r') as f:
                 while True:
                     grasp = VolumetricGrasp()
-                    if grasp.loadFromFile(f):
+                    if grasp.loadFromFileFast(f):
                         good_grasps.append(grasp)
                     else:
                         break
+                    index += 1
+                    if index % 100000 == 0:
+                        print index
 
         print "good grasps: %s"%(len(good_grasps))
 
-        if False:
-            good_grasps2 = []
-            for grasp in good_grasps:
-                if grasp.dof_directions == (0,0,0):
+        def getDirectionIndex(n):
+            min_angle = -45.0/180.0*math.pi
+            angle_range = 90.0/180.0*math.pi
+            angles_count = 2
+            angles_count2 = angles_count * angles_count
+            max_indices = angles_count2 * 6
+            if abs(n.x()) > abs(n.y()) and abs(n.x()) > abs(n.z()):
+                    if n.x() > 0:
+                        sec = 0
+                        a1 = math.atan2(n.y(), n.x())
+                        a2 = math.atan2(n.z(), n.x())
+                    else:
+                        sec = 1
+                        a1 = math.atan2(n.y(), -n.x())
+                        a2 = math.atan2(n.z(), -n.x())
+            elif abs(n.y()) > abs(n.x()) and abs(n.y()) > abs(n.z()):
+                if n.y() > 0:
+                    sec = 2
+                    a1 = math.atan2(n.x(), n.y())
+                    a2 = math.atan2(n.z(), n.y())
+                else:
+                    sec = 3
+                    a1 = math.atan2(n.x(), -n.y())
+                    a2 = math.atan2(n.z(), -n.y())
+            else:
+                if n.z() > 0:
+                    sec = 4
+                    a1 = math.atan2(n.x(), n.z())
+                    a2 = math.atan2(n.y(), n.z())
+                else:
+                    sec = 5
+                    a1 = math.atan2(n.x(), -n.z())
+                    a2 = math.atan2(n.y(), -n.z())
+
+            a1i = int(angles_count*(a1-min_angle)/angle_range)
+            a2i = int(angles_count*(a2-min_angle)/angle_range)
+            if a1i < 0:
+#                print sec, a1i, a2i
+                a1i = 0
+            if a1i >= angles_count:
+                a1i = angles_count-1
+            if a2i < 0:
+#                print sec, a1i, a2i
+                a2i = 0
+            if a2i >= angles_count:
+#                print sec, a1i, a2i
+                a2i = angles_count-1
+            return sec * angles_count2 + a1i * angles_count + a2i
+
+        grasps_grid = volumetricutils.GraspsVoxelGrid(0.002)
+        grasps_grid.build(good_grasps)
+        grasps_neighborhood = []
+        indices_ok = []
+        
+        for grasp_idx in range(len(good_grasps)):
+            grasp = good_grasps[grasp_idx]
+            grasp_cf = gripper_model.getAnglesForConfigIdx(grasp.hand_config)
+            close_grasps = grasps_grid.getPointsAtPoint(grasp.obj_pos_E, 0.003)
+#            neighborhood_size = 0
+            pos_indices = set()
+            rot_indices = set()
+            errors = []
+            for close_gr in close_grasps:
+                # check if the hand configuration is close
+                if max( np.fabs( grasp_cf - gripper_model.getAnglesForConfigIdx(close_gr.hand_config) ) ) > 20.0/180.0*math.pi:
                     continue
-                good_grasps2.append(grasp)
 
-            good_grasps = good_grasps2
-            print "good grasps: %s"%(len(good_grasps))
+                diff = PyKDL.diff(vol_obj.orientations[close_gr.obj_ori_idx], vol_obj.orientations[grasp.obj_ori_idx])
+                pos_diff = close_gr.obj_pos_E - grasp.obj_pos_E
+                rot_diff = diff.rot
+                if rot_diff.Norm() > 20.0/180.0*math.pi or math.isnan(rot_diff.Norm()):
+                    continue
+                
+                if grasp.dof_directions[0] * close_gr.dof_directions[0] < 0:
+                    continue
+                if grasp.dof_directions[1] * close_gr.dof_directions[1] < 0:
+                    continue
+                if grasp.dof_directions[2] * close_gr.dof_directions[2] < 0:
+                    continue
+                if pos_diff.Norm() > 0.0001:
+                    pos_indices.add( getDirectionIndex(pos_diff) )
+                    errors.append((pos_diff, rot_diff))
+                if rot_diff.Norm() > 0.0001:
+                    rot_indices.add( getDirectionIndex(rot_diff) )
+            print (grasp_idx, len(errors), len(pos_indices), len(rot_indices))
+            if len(errors) > 1 and len(rot_indices) > 4:
+                indices_ok.append(grasp_idx)
 
-            # initial selection of grasps based on contact forces analysis
-            print "initial selection of grasps based on contact forces analysis..."
-            good_grasps2 = []
-            for grasp in good_grasps:
-                    grasp.calculateWrenchesOnLink()
-                    grasp_ok = True
-                    for n in normals_sphere_contacts:
-                        min_f = None
-                        max_f = None
-                        min_t = None
-                        max_t = None
-                        for cf_idx in range(len(grasp.wrenches_link)):
-                            for wr in grasp.wrenches_link[cf_idx]:
-                                f = PyKDL.dot(PyKDL.Vector(wr[0], wr[1], wr[2]), n)
-                                t = PyKDL.dot(PyKDL.Vector(wr[3], wr[4], wr[5]), n)
-                                if min_f == None or min_f > f:
-                                    min_f = f
-                                if max_f == None or max_f < f:
-                                    max_f = f
-                                if min_t == None or min_t > t:
-                                    min_t = t
-                                if max_t == None or max_t < t:
-                                    max_t = t
-                        if max_f < 0.0 or min_f > 0.0 or max_t < 0.0 or min_t > 0.0:
-                            grasp_ok = False
-                            break
-                    if grasp_ok:
-                        good_grasps2.append(grasp)
 
-            good_grasps = good_grasps2
-            print "good grasps: %s"%(len(good_grasps))
+#        self.hand_config = None
+#        self.obj_ori_idx = None
+#        self.contacts_obj = None
+#        self.contacts_link = None
+#        self.normals_obj = None
+#        self.contacts_obj_reduced = None
+#        self.wrenches = None
+#        self.obj_pos_E = None
+#        self.normals_link = None
+#        self.dof_directions = None
+#        self.contacts_link_reduced = None
+#        self.wrenches_link = None
 
-            with open("grasps03.txt", 'w') as f:
-                for grasp in good_grasps:
-                    grasp.saveToFile(f)
+
+        exit(0)
 
 
         ##############################################################################
@@ -1536,6 +1683,7 @@ Class for grasp learning.
 
         print "closing directions: %s"%(len(grasps_dir))
 
+
         for dof_dir in grasps_dir:
             X = []
             grasps = grasps_dir[dof_dir]
@@ -1544,12 +1692,43 @@ Class for grasp learning.
 #                X.append( [grasp.hand_config[0], grasp.hand_config[1], grasp.hand_config[2], grasp.hand_config[3], grasp.obj_pos_E[0], grasp.obj_pos_E[1], grasp.obj_pos_E[2], rot[0], rot[1], rot[2]] )
                 X.append( [grasp.obj_pos_E[0], grasp.obj_pos_E[1], grasp.obj_pos_E[2], rot[0], rot[1], rot[2]] )
 
-            X = StandardScaler().fit_transform(X)
-            db = DBSCAN(eps=0.3, min_samples=10).fit(X)
-            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
-            core_samples_mask[db.core_sample_indices_] = True
-            labels = db.labels_
 
+
+            def graspDistanceMeasure(x, y):
+                pos_dist = (PyKDL.Vector(x[0], x[1], x[2]) - PyKDL.Vector(y[0], y[1], y[2])).Norm()
+                rot_dist = (PyKDL.Vector(x[3], x[4], x[5]) - PyKDL.Vector(y[3], y[4], y[5])).Norm()
+                # 0.005m ~ 20deg
+                dist = pos_dist / 0.005 + rot_dist / (20.0/180.0*math.pi)
+                return dist
+
+            # get two nonzero values and their indices for each feature
+            nonzero_features = []
+            features = len(X[0])
+            for i in range(features):
+                nonzero_features.append([])
+            for sample_idx in range(len(X)):
+                sample = X[sample_idx]
+                for feature_idx in range(features):
+                    if len(nonzero_features[feature_idx]) < 2 and abs(sample[feature_idx]) > 0.001:
+                        nonzero_features[feature_idx].append((sample[feature_idx], feature_idx))
+
+#            X_first = (X[0][0], X[0][1], X[0][2], X[0][3], X[0][4], X[0][5])
+            X = StandardScaler().fit_transform(X)
+
+#            a1 = nonzero_features[feature_idx][0][0]
+#            a1_ = X[nonzero_features[feature_idx][0][1]]
+#            a2 = nonzero_features[feature_idx][1][0]
+#            a2_ = X[nonzero_features[feature_idx][1][1]]
+#            c = a2_ - 
+#            transforms = ()
+
+#            db = DBSCAN(eps=0.5, min_samples=10, metric=graspDistanceMeasure).fit(X)
+#            core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+#            core_samples_mask[db.core_sample_indices_] = True
+#            labels = db.labels_
+
+            labels = db = DBSCAN(eps=0.5, min_samples=10, metric=graspDistanceMeasure).fit_predict(X)
+#, metric=graspDistanceMeasure
             # Number of clusters in labels, ignoring noise if present.
             n_clusters_ = len(set(labels)) - (1 if -1 in labels else 0)
             print "dir: %s %s %s   X: %s    n_clusters: %s"%(dof_dir[0], dof_dir[1], dof_dir[2], len(X), n_clusters_)
@@ -1566,7 +1745,11 @@ Class for grasp learning.
                 print "label: %s    grasps: %s"%(label, len(grasps_labeled[label]))
                 if label < 0:
                     continue
-                self.visualize2(T_W_E, [grasps_labeled[label][0]], vol_obj, gripper_model, self.pub_marker, joint_map)
+                for grasp in grasps_labeled[label]:
+                    self.visualizeGrasp(T_W_E, grasp, vol_obj, gripper_model, self.pub_marker, joint_map)
+                    ch = raw_input("press [n] and [ENTER] for next label...")
+                    if ch == 'n' or ch == 'N':
+                        break
 
         # sort grasps by their positions
         grasps_pos = {}

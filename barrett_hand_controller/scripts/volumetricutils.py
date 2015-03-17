@@ -76,6 +76,80 @@ import operator
 from optparse import OptionParser
 from openravepy.misc import OpenRAVEGlobalArguments
 
+class GraspsVoxelGrid:
+
+    def getPointIndex(self, pt):
+        return (int((pt[0] - self.dim_min[0])/(self.voxel_size)), int((pt[1] - self.dim_min[1])/(self.voxel_size)), int((pt[2] - self.dim_min[2])/(self.voxel_size)))
+
+    def getPointIndexList(self, pt):
+        return [int((pt[0] - self.dim_min[0])/(self.voxel_size)), int((pt[1] - self.dim_min[1])/(self.voxel_size)), int((pt[2] - self.dim_min[2])/(self.voxel_size))]
+
+    def __init__(self, voxel_size):
+        self.voxel_size = voxel_size
+        self.voxel_max_radius = math.sqrt(3)/2.0 * self.voxel_size
+        self.dim_min = [None, None, None]
+        self.dim_max = [None, None, None]
+
+    def build(self, grasps):
+        for grasp in grasps:
+            v = grasp.obj_pos_E
+            for dim in range(3):
+                if self.dim_min[dim] == None or self.dim_min[dim] > v[dim]:
+                    self.dim_min[dim] = v[dim]
+                if self.dim_max[dim] == None or self.dim_max[dim] < v[dim]:
+                    self.dim_max[dim] = v[dim]
+
+        self.grid_size = self.getPointIndex(self.dim_max)
+        self.grid_size = (self.grid_size[0] + 1, self.grid_size[1] + 1, self.grid_size[2] + 1)
+
+        self.grid = []
+        for x in range(self.grid_size[0]):
+            self.grid.append([])
+            for y in range(self.grid_size[1]):
+                self.grid[-1].append([])
+                for z in range(self.grid_size[2]):
+                    self.grid[-1][-1].append([])
+                    self.grid[-1][-1][-1] = []
+
+        # add all points to the voxel map
+        self.max_points_in_voxel = 0
+        for grasp in grasps:
+            idx = self.getPointIndex(grasp.obj_pos_E)
+            self.grid[idx[0]][idx[1]][idx[2]].append(grasp)
+            voxel_points_count = len(self.grid[idx[0]][idx[1]][idx[2]])
+            if voxel_points_count > self.max_points_in_voxel:
+                self.max_points_in_voxel = voxel_points_count
+
+    def getPointsAtPoint(self, pos, radius):
+        min_index = self.getPointIndexList(pos - PyKDL.Vector(radius, radius, radius))
+        max_index = self.getPointIndexList(pos + PyKDL.Vector(radius, radius, radius))
+        for dof in range(3):
+            if min_index[dof] < 0:
+                min_index[dof] = 0
+            if max_index[dof] >= self.grid_size[dof]:
+                max_index[dof] = self.grid_size[dof]-1
+
+        # get the indices of voxels around the current point
+        voxel_indices = []
+        for x in range(min_index[0], max_index[0]+1):
+            for y in range(min_index[1], max_index[1]+1):
+                for z in range(min_index[2], max_index[2]+1):
+                    voxel_center = PyKDL.Vector((x+0.5) * self.voxel_size + self.dim_min[0], (y+0.5) * self.voxel_size + self.dim_min[1], (z+0.5) * self.voxel_size + self.dim_min[2])
+                    if (voxel_center-pos).Norm() > self.voxel_max_radius + radius:
+                        continue
+                    voxel_indices.append((x,y,z))
+
+        grasps_in_sphere = []
+        for idx in voxel_indices:
+            x,y,z = idx
+            for grasp in self.grid[x][y][z]:
+                pt_diff = grasp.obj_pos_E-pos
+                dist = pt_diff.Norm()
+                if dist < radius:
+                    grasps_in_sphere.append(grasp)
+
+        return grasps_in_sphere
+
 class VoxelGrid:
 
     def getPointIndex(self, pt):

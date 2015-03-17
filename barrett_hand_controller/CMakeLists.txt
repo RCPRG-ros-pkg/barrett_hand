@@ -5,12 +5,19 @@ project(barrett_hand_controller)
 find_package(catkin REQUIRED COMPONENTS
   roscpp rtt_ros rtt_roscomm barrett_hand_controller_srvs geometry_msgs sensor_msgs cmake_modules)
 
-find_package(Xenomai REQUIRED)
+if(${OROCOS_TARGET} STREQUAL "xenomai" )
+  find_package(Xenomai REQUIRED)
+endif()
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
 
 orocos_component(barrett_hand_controller src/CANDev.cpp src/MotorController.cpp src/Tactile.cpp src/hand.cpp)
-target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES} ${Xenomai_RTDM_LIBRARIES})
+
+if(${OROCOS_TARGET} STREQUAL "xenomai" )
+  target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES} ${Xenomai_RTDM_LIBRARIES})
+else()
+  target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES})
+endif()
 
 #Start of user code user_build
 if(${OROCOS_TARGET} STREQUAL "xenomai" )
