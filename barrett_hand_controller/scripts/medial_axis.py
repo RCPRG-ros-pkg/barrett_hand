@@ -43,6 +43,12 @@ import random
 import velmautils
 from subprocess import call
 
+import surfaceutils
+
+from openravepy.misc import OpenRAVEGlobalArguments
+import openraveinstance
+from optparse import OptionParser
+
 class MedialAxisTest:
     """
 Class for medial axis computation test.
@@ -53,34 +59,29 @@ Class for medial axis computation test.
 
     def spin(self):
 
-        points = []
-        dimx = 0.2
-        dimy = 0.1
-        dimz = 0.1
-        step = 0.01
-        for x in np.arange(-dimx, dimx, step):
-            for y in np.arange(-dimy, dimy, step):
-                points.append(PyKDL.Vector(x,y,dimz))
-                points.append(PyKDL.Vector(x,y,-dimz))
-        for y in np.arange(-dimy, dimy, step):
-            for z in np.arange(-dimz, dimz, step):
-                points.append(PyKDL.Vector(dimx,y,z))
-                points.append(PyKDL.Vector(-dimx,y,z))
-        for z in np.arange(-dimz, dimz, step):
-            for x in np.arange(-dimx, dimx, step):
-                points.append(PyKDL.Vector(x,dimy,z))
-                points.append(PyKDL.Vector(x,-dimy,z))
+        parser = OptionParser(description='Openrave Velma interface')
+        OpenRAVEGlobalArguments.addOptions(parser)
+        (options, leftargs) = parser.parse_args()
+        self.env = OpenRAVEGlobalArguments.parseAndCreate(options)#,defaultviewer=True)
+        self.openrave_robot = self.env.ReadRobotXMLFile('robots/barretthand_ros.robot.xml')
 
-        for i in range(len(points)):
-            x = points[i].x()
-            y = points[i].y()
-            z = points[i].z()
-            points[i] = PyKDL.Vector(x,y,z+x*x)
+        link = self.openrave_robot.GetLink("right_HandFingerOneKnuckleThreeLink")
+        col = link.GetCollisionData()
+        vertices = col.vertices
+        faces = col.indices
+
+        print "sampling the surface..."
+        points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.001)
+        print "surface has %s points"%(len(points))
+
+#        vertices, faces = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+#        points = surfaceutils.sampleMeshDetailedRays(vertices, faces, 0.002)
 
         print len(points)
 
         with open('points.txt', 'w') as f:
-            for p in points:
+            for pt in points:
+                p = pt.pos
                 f.write(str(p.x()) + ' ' + str(p.y()) + ' ' + str(p.z()) + '\n')
 
         call(["touch","out_surf.off"])
@@ -101,12 +102,12 @@ Class for medial axis computation test.
                 if calc_radius:
                     radius = None
                     for pt in points:
-                        dist = (center-pt).Norm()
+                        dist = (center-pt.pos).Norm()
                         if radius == None or radius > dist:
                             radius = dist
                     points_medial.append([center, radius*2.0])
                 else:
-                    points_medial.append([center, 0.01])
+                    points_medial.append([center, 0.001])
 
         print len(points_medial)
 #        m_id = 0
@@ -118,7 +119,7 @@ Class for medial axis computation test.
 #            m_id = self.pub_marker.publishSinglePointMarker(p[0], m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, scale=Vector3(p[1],p[1],p[1]), T=None)
         m_id = 0
         m_id = self.pub_marker.publishMultiPointsMarkerWithSize(points_medial, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, T=None)
-#        m_id = self.pub_marker.publishMultiPointsMarker(points_medial, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, scale=Vector3(0.002, 0.002, 0.002), T=None)
+#        m_id = self.pub_marker.publishMultiPointsMarker(points_medial, m_id, r=1, g=0, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, scale=Vector3(0.0005, 0.0005, 0.0005), T=None)
         rospy.sleep(1)
 
         

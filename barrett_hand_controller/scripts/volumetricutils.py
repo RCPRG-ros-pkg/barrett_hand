@@ -92,7 +92,7 @@ class GraspsVoxelGrid:
 
     def build(self, grasps):
         for grasp in grasps:
-            v = grasp.obj_pos_E
+            v = grasp[0]
             for dim in range(3):
                 if self.dim_min[dim] == None or self.dim_min[dim] > v[dim]:
                     self.dim_min[dim] = v[dim]
@@ -114,7 +114,7 @@ class GraspsVoxelGrid:
         # add all points to the voxel map
         self.max_points_in_voxel = 0
         for grasp in grasps:
-            idx = self.getPointIndex(grasp.obj_pos_E)
+            idx = self.getPointIndex(grasp[0])
             self.grid[idx[0]][idx[1]][idx[2]].append(grasp)
             voxel_points_count = len(self.grid[idx[0]][idx[1]][idx[2]])
             if voxel_points_count > self.max_points_in_voxel:
@@ -142,11 +142,12 @@ class GraspsVoxelGrid:
         grasps_in_sphere = []
         for idx in voxel_indices:
             x,y,z = idx
-            for grasp in self.grid[x][y][z]:
-                pt_diff = grasp.obj_pos_E-pos
-                dist = pt_diff.Norm()
-                if dist < radius:
-                    grasps_in_sphere.append(grasp)
+            grasps_in_sphere += self.grid[x][y][z]
+#            for grasp in self.grid[x][y][z]:
+#                pt_diff = grasp[0]-pos
+#                dist = pt_diff.Norm()
+#                if dist < radius:
+#                    grasps_in_sphere.append(grasp)
 
         return grasps_in_sphere
 

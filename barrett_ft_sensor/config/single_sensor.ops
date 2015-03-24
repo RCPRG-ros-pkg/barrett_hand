@@ -1,0 +1,30 @@
+import("rtt_ros")
+import("rtt_roscomm");
+import("rtt_rosparam");
+ros.import("barrett_ft_sensor")
+
+## Load a FtSensor component
+loadComponent("FtSensor","FtSensorComponent")
+
+## Give it a periodic activity
+#setActivity("FtSensor",0.001,3,ORO_SCHED_RT)
+setActivity("FtSensor",0.01,3,ORO_SCHED_OTHER)
+FtSensor.loadService("rosparam");
+FtSensor.rosparam.getAll();
+
+## Create connections
+#stream("FtSensor.cmd", ros.comm.topic("cmd"))
+stream("FtSensor.accel", ros.comm.topic("accel"))
+stream("FtSensor.wrench", ros.comm.topic("wrench"))
+
+## Connect the 
+loadService("FtSensor","rosservice")
+FtSensor.rosservice.connect( "tare_ros", "tare", "std_srvs/Empty")
+
+## Configure the HelloRobot component
+FtSensor.configure()
+
+## Start it
+FtSensor.start()
+#waitForInterrupt()
+

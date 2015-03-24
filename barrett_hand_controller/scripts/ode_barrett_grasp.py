@@ -437,7 +437,7 @@ Class for grasp learning.
         self.getContactConstraintFn(surface_points, point_id, ref_force, ref_torque, max_force_dist, max_torque_dist, surface_points[point_id].pos)
         return self.getContactConstraint_min_dist
 
-    def getQualituMeasure(self, qhull):
+    def getQualityMeasure(self, qhull):
         if qhull == None:
             return 0.0
 
@@ -450,7 +450,7 @@ Class for grasp learning.
 
         return mindist
 
-    def getQualituMeasure2(self, qhull, wr):
+    def getQualityMeasure2(self, qhull, wr):
         if qhull == None:
             return 0.0
 
@@ -459,7 +459,7 @@ Class for grasp learning.
         for qp in qhull:
             n = np.array([qp[0],qp[1],qp[2],qp[3],qp[4],qp[5]])
             if np.dot(n,n) > 1.00001 or np.dot(n,n) < 0.9999:
-                print "ERROR: getQualituMeasure2: np.dot(n,n): %s"%(np.dot(n,n))
+                print "ERROR: getQualityMeasure2: np.dot(n,n): %s"%(np.dot(n,n))
                 exit(0)
             dot = np.dot(np.array(wr6), n)
             if dot > 0:
@@ -560,6 +560,19 @@ Class for grasp learning.
             j.attach(body1, body2)
 
     def spin(self):
+        if True:
+            # Create a world object
+            world = ode.World()
+#            world.setGravity( (0,0,-3.81) )
+            world.setGravity( (0,0,0) )
+            CFM = world.getCFM()
+            ERP = world.getERP()
+            print "CFM: %s  ERP: %s"%(CFM, ERP)
+#            world.setCFM(0.001)
+#            print "CFM: %s  ERP: %s"%(CFM, ERP)
+
+
+
         m_id = 0
         self.pub_marker.eraseMarkers(0,3000, frame_id='world')
 
@@ -2802,11 +2815,11 @@ Class for grasp learning.
 
             grasp_quality = None
             for wr in ext_wrenches:
-                wr_qual = self.getQualituMeasure2(gws, wr)
+                wr_qual = self.getQualityMeasure2(gws, wr)
                 if grasp_quality == None or wr_qual < grasp_quality:
                     grasp_quality = wr_qual
 
-            grasp_quality_classic = self.getQualituMeasure(gws)
+            grasp_quality_classic = self.getQualityMeasure(gws)
 
             print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
 
@@ -3152,11 +3165,11 @@ Class for grasp learning.
 
                 grasp_quality = None
                 for wr in ext_wrenches:
-                    wr_qual = self.getQualituMeasure2(gws, wr)
+                    wr_qual = self.getQualityMeasure2(gws, wr)
                     if grasp_quality == None or wr_qual < grasp_quality:
                         grasp_quality = wr_qual
 
-                grasp_quality_classic = self.getQualituMeasure(gws)
+                grasp_quality_classic = self.getQualityMeasure(gws)
 
                 print "grasp_quality_classic: %s     grasp_quality: %s"%(grasp_quality_classic, grasp_quality)
 

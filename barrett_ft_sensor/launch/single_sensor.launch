@@ -1,0 +1,37 @@
+<launch>
+  <arg name="PREFIX" default="right"/>
+  <arg name="DEVICE" default="rtcan1"/>
+  <arg name="LOG_LEVEL" default="error"/>
+  <arg name="DEBUG" default="false"/>
+
+  <!-- Orocos target (gnulinux, xenomai, etc) -->
+  <arg name="OROCOS_TARGET" default="$(optenv OROCOS_TARGET)"/>
+  <!-- Path to look for dynamically-loaded plugins and components (something like /lib/orocos) -->
+  <arg name="RTT_COMPONENT_PATH" default="$(env RTT_COMPONENT_PATH)"/>
+
+  <group ns="$(arg PREFIX)_hand">
+    <group ns="barrett_ft_sensor">
+      <param name="FtSensor/device_name" value="$(arg DEVICE)" />
+      <param name="FtSensor/prefix" value="$(arg PREFIX)" />
+    </group>
+
+<!--    <node
+      name="barrett_ft_sensor"
+      pkg="rtt_ros" type="rttscript"
+      args="-l $(arg LOG_LEVEL) -s $(find barrett_ft_sensor)/config/single_sensor.ops -(usunac ten tekst)-">
+      <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
+      <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
+    </node>-->
+
+    <node
+      name="barrett_ft_sensor"
+      pkg="rtt_ros" type="deployer"
+      args="--DeployerName barrett_ft_sensor -l $(arg LOG_LEVEL) -s $(find barrett_ft_sensor)/config/single_sensor.ops --" output="screen">
+      <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
+      <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
+    </node>
+
+  </group>
+
+</launch>
+
