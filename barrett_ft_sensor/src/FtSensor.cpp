@@ -145,7 +145,7 @@ void BarrettFtSensor::setPuckStatus(int32_t status) {
 	setProperty(FORCE_TORQUE_SENSOR_ID, PROP_STAT, status);
 }
 
-int32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, int16_t &tx, int16_t &ty, int16_t &tz) {
+uint32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, int16_t &tx, int16_t &ty, int16_t &tz) {
 	uint8_t data[8];
 
 	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_FT);
@@ -173,7 +173,7 @@ int32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, 
 	return NO_ERROR;
 }
 
-int32_t BarrettFtSensor::readAcceleration(int16_t &ax, int16_t &ay, int16_t &az) {
+uint32_t BarrettFtSensor::readAcceleration(int16_t &ax, int16_t &ay, int16_t &az) {
 	uint8_t data[8];
 	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_A);
 	int ret = dev.waitForReply(GROUP(FORCE_TORQUE_SENSOR_ID, GR_FT_SENSOR_ACCELERATION), data);

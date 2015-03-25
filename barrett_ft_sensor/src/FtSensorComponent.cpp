@@ -33,6 +33,7 @@
 
 #include "geometry_msgs/Vector3Stamped.h"
 #include "geometry_msgs/WrenchStamped.h"
+#include "std_msgs/UInt32.h"
 #include "std_srvs/Empty.h"
 
 #include "rtt_rosclock/rtt_rosclock.h"
@@ -55,10 +56,12 @@ private:
 
 	geometry_msgs::Vector3Stamped accel_;
 	geometry_msgs::WrenchStamped wrench_;
+	std_msgs::UInt32 status_;
 	bool tare_;
 
 	OutputPort<geometry_msgs::Vector3Stamped>	accel_out_;
 	OutputPort<geometry_msgs::WrenchStamped>	wrench_out_;
+	OutputPort<std_msgs::UInt32>			status_out_;
 	string dev_name_;
 	string prefix_;
 
@@ -69,11 +72,13 @@ public:
 		TaskContext(name, PreOperational),
 		accel_out_("accel"),
 		wrench_out_("wrench"),
+		status_out_("status"),
 		ctrl_(NULL),
 		tare_(false)
 	{
 		this->addPort(accel_out_).doc("Sends out the stamped acceleration");
 		this->addPort(wrench_out_).doc("Sends out the WrenchStamped");
+		this->addPort(status_out_).doc("Sends out the sensor status");
 
 		this->provides()->addOperation("tare",&FtSensorComponent::tare,this,RTT::OwnThread);
 		this->provides()->addOperation("tare_ros",&FtSensorComponent::tareRos,this,RTT::OwnThread);
@@ -127,8 +132,8 @@ public:
 	{
 		int16_t fx=0, fy=0, fz=0, tx=0, ty=0, tz=0;
 		int16_t ax=0, ay=0, az=0;
-		int32_t result_ft=0;
-		int32_t result_ac=0;
+		uint32_t result_ft=0;
+		uint32_t result_ac=0;
 
 		ros::Time time_now = rtt_rosclock::host_now();
 
@@ -156,8 +161,11 @@ public:
                 accel_.vector.y = static_cast<double>(ay)/1024.0;
                 accel_.vector.z = static_cast<double>(az)/1024.0;
 
+		status_.data = result_ft;
+
 		accel_out_.write(accel_);
 		wrench_out_.write(wrench_);
+		status_out_.write(status_);
 	}
 
 	bool tare()

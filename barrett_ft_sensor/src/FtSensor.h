@@ -39,8 +39,8 @@ public:
 	~BarrettFtSensor();
 	int32_t getPuckStatus();
 	void setPuckStatus(int32_t status);
-	int32_t readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, int16_t &tx, int16_t &ty, int16_t &tz);
-	int32_t readAcceleration(int16_t &ax, int16_t &ay, int16_t &az);
+	uint32_t readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, int16_t &tx, int16_t &ty, int16_t &tz);
+	uint32_t readAcceleration(int16_t &ax, int16_t &ay, int16_t &az);
 	void tare();
 	bool isDevOpened();
 protected:

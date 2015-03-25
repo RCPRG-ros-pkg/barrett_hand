@@ -16,6 +16,7 @@ FtSensor.rosparam.getAll();
 #stream("FtSensor.cmd", ros.comm.topic("cmd"))
 stream("FtSensor.accel", ros.comm.topic("accel"))
 stream("FtSensor.wrench", ros.comm.topic("wrench"))
+stream("FtSensor.status", ros.comm.topic("status"))
 
 ## Connect the 
 loadService("FtSensor","rosservice")
