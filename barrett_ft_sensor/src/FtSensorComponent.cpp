@@ -56,11 +56,13 @@ private:
 
 	geometry_msgs::Vector3Stamped accel_;
 	geometry_msgs::WrenchStamped wrench_;
+	geometry_msgs::WrenchStamped sg_;
 	std_msgs::UInt32 status_;
 	bool tare_;
 
 	OutputPort<geometry_msgs::Vector3Stamped>	accel_out_;
 	OutputPort<geometry_msgs::WrenchStamped>	wrench_out_;
+	OutputPort<geometry_msgs::WrenchStamped>	sg_out_;
 	OutputPort<std_msgs::UInt32>			status_out_;
 	string dev_name_;
 	string prefix_;
@@ -73,12 +75,14 @@ public:
 		accel_out_("accel"),
 		wrench_out_("wrench"),
 		status_out_("status"),
+		sg_out_("straingages"),
 		ctrl_(NULL),
 		tare_(false)
 	{
 		this->addPort(accel_out_).doc("Sends out the stamped acceleration");
 		this->addPort(wrench_out_).doc("Sends out the WrenchStamped");
 		this->addPort(status_out_).doc("Sends out the sensor status");
+		this->addPort(sg_out_).doc("Sends out the raw strain gages");
 
 		this->provides()->addOperation("tare",&FtSensorComponent::tare,this,RTT::OwnThread);
 		this->provides()->addOperation("tare_ros",&FtSensorComponent::tareRos,this,RTT::OwnThread);
@@ -134,6 +138,7 @@ public:
 		int16_t ax=0, ay=0, az=0;
 		uint32_t result_ft=0;
 		uint32_t result_ac=0;
+		int16_t sg1=0, sg2=0, sg3=0, sg4=0, sg5=0, sg6=0;
 
 		ros::Time time_now = rtt_rosclock::host_now();
 
@@ -145,6 +150,7 @@ public:
 
 		result_ac = ctrl_->readAcceleration(ax, ay, az);
 		result_ft = ctrl_->readForceTorque(fx, fy, fz, tx, ty, tz);
+		ctrl_->readStrainGages(sg1, sg2, sg3, sg4, sg5, sg6);
 
 		wrench_.header.stamp = time_now;
 		wrench_.header.frame_id = frame_id;
@@ -161,11 +167,20 @@ public:
                 accel_.vector.y = static_cast<double>(ay)/1024.0;
                 accel_.vector.z = static_cast<double>(az)/1024.0;
 
+		sg_.header.stamp = time_now;
+		sg_.wrench.force.x = static_cast<double>(sg1);
+		sg_.wrench.force.y = static_cast<double>(sg2);
+		sg_.wrench.force.z = static_cast<double>(sg3);
+		sg_.wrench.torque.x = static_cast<double>(sg4);
+		sg_.wrench.torque.y = static_cast<double>(sg5);
+		sg_.wrench.torque.z = static_cast<double>(sg6);
+
 		status_.data = result_ft;
 
 		accel_out_.write(accel_);
 		wrench_out_.write(wrench_);
 		status_out_.write(status_);
+		sg_out_.write(sg_);
 	}
 
 	bool tare()

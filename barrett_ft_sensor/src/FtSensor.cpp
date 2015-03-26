@@ -173,6 +173,35 @@ uint32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz,
 	return NO_ERROR;
 }
 
+uint32_t BarrettFtSensor::readStrainGages(int16_t &sg1, int16_t &sg2, int16_t &sg3, int16_t &sg4, int16_t &sg5, int16_t &sg6) {
+	int32_t value;
+	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG1);
+	recProperty(FORCE_TORQUE_SENSOR_ID, value);
+	sg1 = value;
+
+	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG2);
+	recProperty(FORCE_TORQUE_SENSOR_ID, value);
+	sg2 = value;
+
+	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG3);
+	recProperty(FORCE_TORQUE_SENSOR_ID, value);
+	sg3 = value;
+
+	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG4);
+	recProperty(FORCE_TORQUE_SENSOR_ID, value);
+	sg4 = value;
+
+	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG5);
+	recProperty(FORCE_TORQUE_SENSOR_ID, value);
+	sg5 = value;
+
+	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG6);
+	recProperty(FORCE_TORQUE_SENSOR_ID, value);
+	sg6 = value;
+
+	return NO_ERROR;
+}
+
 uint32_t BarrettFtSensor::readAcceleration(int16_t &ax, int16_t &ay, int16_t &az) {
 	uint8_t data[8];
 	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_A);

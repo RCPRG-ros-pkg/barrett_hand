@@ -40,6 +40,7 @@ public:
 	int32_t getPuckStatus();
 	void setPuckStatus(int32_t status);
 	uint32_t readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, int16_t &tx, int16_t &ty, int16_t &tz);
+	uint32_t readStrainGages(int16_t &sg1, int16_t &sg2, int16_t &sg3, int16_t &sg4, int16_t &sg5, int16_t &sg6);
 	uint32_t readAcceleration(int16_t &ax, int16_t &ay, int16_t &az);
 	void tare();
 	bool isDevOpened();
