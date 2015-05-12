@@ -33,6 +33,11 @@ Tactile::Tactile(int32_t median_filter_max_samples) :
 	median_filter_max_samples_(median_filter_max_samples),
 	tact_index_(0)
 {
+	for (int i = 0; i < 24; i++) {
+		offsets_[i] = 0.0;
+		field_[i] = 1.0;
+	}
+
 	calibration_counter_ = calibration_counter_max_;
 	tact_ = new TactileState[median_filter_max_samples_];
 	tab_ = new int32_t[median_filter_max_samples_];
@@ -57,11 +62,9 @@ void Tactile::setGeometry(std::string name, const Tactile::RawTactileData &cente
 	}
 }
 
-void Tactile::startCalibration()
-{
+void Tactile::startCalibration() {
 	calibration_counter_ = 0;
-	for (int i=0; i<24; ++i)
-	{
+	for (int i = 0; i < 24; i++) {
 		offsets_[i] = 0.0;
 	}
 }

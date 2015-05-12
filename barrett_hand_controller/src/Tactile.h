@@ -48,6 +48,7 @@ public:
 	int32_t getPressure(int i, int median_filter_samples);
 
 private:
+	Tactile(const Tactile &t);
 	std::string sensor_name_;
 	
 	geometry_msgs::Vector3 sensor_center_[24];

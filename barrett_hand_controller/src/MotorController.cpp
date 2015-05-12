@@ -137,7 +137,7 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 
 void MotorController::recTact(int id, int32_t &gr, int32_t &a, int32_t &b, int32_t &c, int32_t &d, int32_t &e) {
 	uint8_t data[8];
-	int ret = dev.waitForReply(GROUP(id, TACTILE_FULL_GROUP), data);
+	dev.waitForReply(GROUP(id, TACTILE_FULL_GROUP), data);
 
 	gr = (data[0]>>4)&0x0F;
 	a = ((data[0]&0x0F)<<8) | data[1];
@@ -257,7 +257,7 @@ void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int3
 
 void MotorController::getTactile(int id, tact_array_t &tact) {
 	setProperty(11 + id, PROP_TACT, 2);
-	int gr, a, b, c, d, e;
+	int gr;
 	recTact(11 + id, gr, tact[0], tact[1], tact[2], tact[3], tact[4]);
 	recTact(11 + id, gr, tact[5], tact[6], tact[7], tact[8], tact[9]);
 	recTact(11 + id, gr, tact[10], tact[11], tact[12], tact[13], tact[14]);

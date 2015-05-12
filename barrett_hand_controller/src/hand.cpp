@@ -125,6 +125,7 @@ public:
 		maxStaticTorque_(4700),
 		torqueSwitch_(-1),
 		ctrl_(NULL),
+		p1(0), p2(0), p3(0), jp1(0), jp2(0), jp3(0), jp4(0), s(0),
                 median_filter_samples_(1),
                 median_filter_max_samples_(8)
 	{
@@ -136,6 +137,11 @@ public:
 		ts_[1]->setGeometry("finger2_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[2]->setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[3]->setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
+
+		holdEnabled_ = false;
+		hold_ = true;
+		status_out_ = 0;
+		mp_in_ = 0;
 
 		tactile_out_.finger1_tip.resize(24);
 		tactile_out_.finger2_tip.resize(24);
