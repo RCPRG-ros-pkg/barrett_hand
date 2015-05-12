@@ -39,7 +39,7 @@
 
 #include "rtt_rosclock/rtt_rosclock.h"
 
-#include <iostream>
+#include <string>
 #include <math.h>
 #include "MotorController.h"
 #include "tactile_geometry.h"
@@ -52,14 +52,14 @@
 
 #include "Eigen/Dense"
 
-using namespace std;
+#define RAD2P(x) (static_cast<double>(x) * 180.0/3.1416 / 140.0 * 199111.1)
+#define RAD2S(x) (static_cast<double>(x) * 35840.0/M_PI)
 
-#define RAD2P(x) ((double)(x) * 180.0/3.1416 / 140.0 * 199111.1)
-#define RAD2S(x) ((double)(x) * 35840.0/M_PI)
+using std::string;
+using RTT::InputPort;
+using RTT::OutputPort;
 
-using namespace RTT;
-
-class BarrettHand : public RTT::TaskContext{
+class BarrettHand : public RTT::TaskContext {
 private:
         const int BH_DOF;
 	const int BH_JOINTS;
@@ -114,7 +114,7 @@ private:
         int32_t median_filter_samples_, median_filter_max_samples_;
 
 public:
-	BarrettHand(const std::string& name):
+	explicit BarrettHand(const string& name):
 		TaskContext(name, PreOperational),
 		BH_DOF(4),
 		BH_JOINTS(8),
@@ -290,7 +290,7 @@ public:
 		}
 
 		if (move_hand) {
-			status_out_ = 0;	// clear the status
+			status_out_ = 0;		// clear the status
 
 			for (int i=0; i<BH_DOF; i++) {
 				ctrl_->setMaxTorque(i, maxStaticTorque_);
@@ -307,8 +307,7 @@ public:
 		if (torqueSwitch_>0)
 		{
 			--torqueSwitch_;
-		}
-		else if (torqueSwitch_ == 0)
+		} else if (torqueSwitch_ == 0)
 		{
 			for (int i=0; i<BH_DOF; i++) {
 				ctrl_->setMaxTorque(i, t_in_[i]);
@@ -318,14 +317,14 @@ public:
 
 		// write current joint positions
 		ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
-		q_out_[0] = (double)s * M_PI/ 35840.0;
-		q_out_[1] = 2.0*M_PI/4096.0*(double)jp1/50.0;
-		q_out_[2] = 2.0*M_PI/4096.0*(double)p1*(1.0/125.0 + 1.0/375.0) - q_out_[1];
-		q_out_[3] = (double)s * M_PI/ 35840.0;
-		q_out_[4] = 2.0*M_PI*(double)jp2/4096.0/50.0;
-		q_out_[5] = 2.0*M_PI/4096.0*(double)p2*(1.0/125.0 + 1.0/375.0) - q_out_[4];
-		q_out_[6] = 2.0*M_PI*(double)jp3/4096.0/50.0;
-		q_out_[7] = 2.0*M_PI/4096.0*(double)p3*(1.0/125.0 + 1.0/375.0) - q_out_[6];
+		q_out_[0] = static_cast<double>(s) * M_PI/ 35840.0;
+		q_out_[1] = 2.0*M_PI/4096.0*static_cast<double>(jp1)/50.0;
+		q_out_[2] = 2.0*M_PI/4096.0*static_cast<double>(p1)*(1.0/125.0 + 1.0/375.0) - q_out_[1];
+		q_out_[3] = static_cast<double>(s) * M_PI/ 35840.0;
+		q_out_[4] = 2.0*M_PI*static_cast<double>(jp2)/4096.0/50.0;
+		q_out_[5] = 2.0*M_PI/4096.0*(double)(p2)*(1.0/125.0 + 1.0/375.0) - q_out_[4];
+		q_out_[6] = 2.0*M_PI*static_cast<double>(jp3)/4096.0/50.0;
+		q_out_[7] = 2.0*M_PI/4096.0*static_cast<double>(p3)*(1.0/125.0 + 1.0/375.0) - q_out_[6];
 		port_q_out_.write(q_out_);
 
 		// on 1, 101, 201, 301, 401, ... step
@@ -343,8 +342,7 @@ public:
 
 				if (temp[i] > TEMP_MAX_HI || therm[i] > TEMP_MAX_HI) {
 					oneTempTooHigh = true;
-				}
-				else if (temp[i] >= TEMP_MAX_LO || therm[i] >= TEMP_MAX_LO) {
+				} else if (temp[i] >= TEMP_MAX_LO || therm[i] >= TEMP_MAX_LO) {
 					allTempOk = false;
 				}
 				temp_out_.temp[i] = temp[i];
@@ -355,8 +353,7 @@ public:
 				hold_ = false;
 				ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 				RTT::log(RTT::Warning) << "Temperature is too high. Disabled spread hold." << RTT::endlog();
-			}
-			else if (!hold_ && allTempOk) {
+			} else if (!hold_ && allTempOk) {
 				hold_ = true;
 				ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 				RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
@@ -372,20 +369,17 @@ public:
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(0, tact);
 			ts_[0]->updatePressure(tact);
-		}
-		else if (i==6)
+		} else if (i==6)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(1, tact);
 			ts_[1]->updatePressure(tact);
-		}
-		else if (i==12)
+		} else if (i==12)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(2, tact);
 			ts_[2]->updatePressure(tact);
-		}
-		else if (i==18)
+		} else if (i==18)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(3, tact);
@@ -409,11 +403,9 @@ public:
 					ctrl_->stopFinger(i);
 					if (i==0) {
 						status_out_ |= STATUS_OVERPRESSURE1;
-					}
-					else if (i==1) {
+					} else if (i==1) {
 						status_out_ |= STATUS_OVERPRESSURE2;
-					}
-					else if (i==2) {
+					} else if (i==2) {
 						status_out_ |= STATUS_OVERPRESSURE3;
 					}
 					break;
@@ -421,48 +413,48 @@ public:
 			}
 		}
 
-		int32_t mode[4] = {0,0,0,0};
+		int32_t mode[4] = {0, 0, 0, 0};
 		ctrl_->getStatusAll(mode[0], mode[1], mode[2], mode[3]);
 
 		// chack for torque switch activation
-		if (abs(q_out_[2]*3.0-q_out_[1]) > 0.02) {
+		if (abs(q_out_[2]*3.0-q_out_[1]) > 0.03) {
 			status_out_ |= STATUS_TORQUESWITCH1;
 		}
-		if (abs(q_out_[5]*3.0-q_out_[4]) > 0.02) {
+		if (abs(q_out_[5]*3.0-q_out_[4]) > 0.03) {
 			status_out_ |= STATUS_TORQUESWITCH2;
 		}
-		if (abs(q_out_[7]*3.0-q_out_[6]) > 0.02) {
+		if (abs(q_out_[7]*3.0-q_out_[6]) > 0.03) {
 			status_out_ |= STATUS_TORQUESWITCH3;
 		}
 
 		if (mode[0] == 0) {
 			status_out_ |= STATUS_IDLE1;
-			if ((status_out_&STATUS_OVERPRESSURE1) == 0 && abs(q_in_[0]-q_out_[1]) > 0.02) {
+			if ((status_out_&STATUS_OVERPRESSURE1) == 0 && abs(q_in_[0]-q_out_[1]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT1;
 			}
 		}
 
 		if (mode[1] == 0) {
 			status_out_ |= STATUS_IDLE2;
-			if ((status_out_&STATUS_OVERPRESSURE2) == 0 && abs(q_in_[1]-q_out_[4]) > 0.02) {
+			if ((status_out_&STATUS_OVERPRESSURE2) == 0 && abs(q_in_[1]-q_out_[4]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT2;
 			}
 		}
 
 		if (mode[2] == 0) {
 			status_out_ |= STATUS_IDLE3;
-			if ((status_out_&STATUS_OVERPRESSURE3) == 0 && abs(q_in_[2]-q_out_[6]) > 0.02) {
+			if ((status_out_&STATUS_OVERPRESSURE3) == 0 && abs(q_in_[2]-q_out_[6]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT3;
 			}
 		}
 
-		if (mode[3] == 0) {
+		if (mode[3] == 0 || (holdEnabled_ && abs(q_in_[3]-q_out_[3]) < 0.05)) {
 			status_out_ |= STATUS_IDLE4;
-			if (abs(q_in_[3]-q_out_[3]) > 0.02) {
+			if (abs(q_in_[3]-q_out_[3]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT4;
 			}
 		}
-		double currents[4] = {0.0,0.0,0.0,0.0};
+		double currents[4] = {0.0, 0.0, 0.0, 0.0};
 		ctrl_->getCurrents(currents[0], currents[1], currents[2], currents[3]);
 		t_out_[0] = currents[3];
 		t_out_[1] = currents[0];
@@ -553,7 +545,6 @@ public:
 		res.result = setMedianFilter(req.samples);
 		return true;
 	}
-
 
 };
 ORO_CREATE_COMPONENT(BarrettHand)

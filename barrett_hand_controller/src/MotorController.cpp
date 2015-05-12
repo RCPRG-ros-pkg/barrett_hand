@@ -27,7 +27,7 @@
 
 #include "MotorController.h"
 
-#include <cstring>
+#include <string>
 
 // For commands w/o values: RESET,HOME,KEEP,PASS,LOOP,HI,IC,IO,TC,TO,C,O,T 5
 #define PROP_CMD 29
@@ -239,10 +239,10 @@ void MotorController::getCurrents(double &c1, double &c2, double &c3, double &c4
 	recProperty(12, current[1]);
 	recProperty(13, current[2]);
 	recProperty(14, current[3]);
-	c1 = c_factor*((double)current[0]-2048.0);
-	c2 = c_factor*((double)current[1]-2048.0);
-	c3 = c_factor*((double)current[2]-2048.0);
-	c4 = c_factor*((double)current[3]-2048.0);
+	c1 = c_factor*(static_cast<double>(current[0])-2048.0);
+	c2 = c_factor*(static_cast<double>(current[1])-2048.0);
+	c3 = c_factor*(static_cast<double>(current[2])-2048.0);
+	c4 = c_factor*(static_cast<double>(current[3])-2048.0);
 }
 
 void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int32_t &jp1, int32_t &jp2, int32_t &jp3, int32_t &s) {
@@ -254,8 +254,7 @@ void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int3
 	recEncoder2(11 + 3, s, jp);
 }
 
-void MotorController::getTactile(int id, tact_array_t &tact)
-{
+void MotorController::getTactile(int id, tact_array_t &tact) {
 	setProperty(11 + id, PROP_TACT, 2);
 	int gr, a, b, c, d, e;
 	recTact(11 + id, gr, tact[0], tact[1], tact[2], tact[3], tact[4]);
@@ -273,29 +272,24 @@ int32_t MotorController::getParameter(int32_t id, int32_t prop_id)
 	return value;
 }
 
-void MotorController::setParameter(int32_t id, int32_t prop_id, int32_t value, bool save)
-{
+void MotorController::setParameter(int32_t id, int32_t prop_id, int32_t value, bool save) {
 	setProperty(11 + id, prop_id, value);
-	if (save)
-	{
+	if (save) {
 		setProperty(11 + id, 30, prop_id);
 	}
 }
 
-void MotorController::getTemp(int id, int32_t &temp)
-{
+void MotorController::getTemp(int id, int32_t &temp) {
 	reqProperty(11+id, PROP_TEMP);
 	recProperty(11+id, temp);
 }
 
-void MotorController::getTherm(int id, int32_t &temp)
-{
+void MotorController::getTherm(int id, int32_t &temp) {
 	reqProperty(11+id, PROP_THERM);
 	recProperty(11+id, temp);
 }
 
-void MotorController::getCts(int id, int32_t &cts)
-{
+void MotorController::getCts(int id, int32_t &cts) {
 	int32_t cts1, cts2;
 	reqProperty(11+id, PROP_CTS);
 	recProperty(11+id, cts1);
@@ -306,16 +300,14 @@ void MotorController::getCts(int id, int32_t &cts)
 	cts = cts1 | (cts2<<16);
 }
 
-void MotorController::setHoldPosition(int id, bool hold)
-{
+void MotorController::setHoldPosition(int id, bool hold) {
 	int32_t value = 0;
 	if (hold)
 		value = 1;
 	setProperty(11 + id, PROP_HOLD, value);
 }
 
-bool MotorController::isDevOpened()
-{
+bool MotorController::isDevOpened() {
 	return dev.isOpened();
 }
 

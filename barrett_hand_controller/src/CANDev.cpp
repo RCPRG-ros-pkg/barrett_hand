@@ -35,6 +35,7 @@
 
 #include <iostream>
 #include <cstring>
+#include <string>
 
 #include "CANDev.h"
 
@@ -73,7 +74,7 @@ CANDev::~CANDev() {
   }
 }
 
-void CANDev::send(const uint32_t can_id, const uint8_t len, const uint8_t *data){
+void CANDev::send(const uint32_t can_id, const uint8_t len, const uint8_t *data) {
   struct can_frame frame;
   
   frame.can_id = can_id;
@@ -81,9 +82,9 @@ void CANDev::send(const uint32_t can_id, const uint8_t len, const uint8_t *data)
   
   memcpy(frame.data, data, len);
 #if !defined(HAVE_RTNET)
-  write(dev, (void *)&frame, sizeof(frame));
+  write(dev, reinterpret_cast<void*>(&frame), sizeof(frame));
 #else
-  rt_dev_send(dev, (void *)&frame, sizeof(frame), 0);
+  rt_dev_send(dev, reinterpret_cast<void*>(&frame), sizeof(frame), 0);
 #endif
 }
 
@@ -103,9 +104,9 @@ uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
   // wait for new data
   while(1) {
 #if !defined(HAVE_RTNET)
-    size_t ret = read(dev, (void *)&frame, sizeof(frame));
+    size_t ret = read(dev, reinterpret_cast<void*>(&frame), sizeof(frame));
 #else
-    size_t ret = rt_dev_recv(dev, (void *)&frame, sizeof(frame), 0);
+    size_t ret = rt_dev_recv(dev, reinterpret_cast<void*>(&frame), sizeof(frame), 0);
 #endif
     if(ret != sizeof(frame)) {
       continue;
@@ -121,8 +122,7 @@ uint32_t CANDev::waitForReply(uint32_t can_id, uint8_t *data) {
   }
 }
 
-bool CANDev::isOpened()
-{
+bool CANDev::isOpened() {
 	return dev != -1;
 }
 

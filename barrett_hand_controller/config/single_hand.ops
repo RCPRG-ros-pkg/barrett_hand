@@ -72,5 +72,5 @@ JntPub.configure()
 Hand.start()
 HandMoveAction.start()
 JntPub.start()
-#waitForInterrupt()
+waitForInterrupt()
 

@@ -39,6 +39,8 @@
 #include "rtt_rosclock/rtt_rosclock.h"
 
 #include <iostream>
+#include <string>
+#include <map>
 #include <math.h>
 #include "MotorController.h"
 #include "tactile_geometry.h"
@@ -51,11 +53,13 @@
 
 #include "Eigen/Dense"
 
-using namespace std;
+using std::string;
+using std::map;
 
-using namespace RTT;
+using RTT::InputPort;
+using RTT::OutputPort;
 
-class BarrettHandMoveAction : public RTT::TaskContext{
+class BarrettHandMoveAction : public RTT::TaskContext {
 private:
 	const int BH_DOF;
 	enum {STATUS_OVERCURRENT1 = 0x0001, STATUS_OVERCURRENT2 = 0x0002, STATUS_OVERCURRENT3 = 0x0004, STATUS_OVERCURRENT4 = 0x0008,
@@ -92,7 +96,7 @@ private:
 	int action_start_counter_;
 
 public:
-	BarrettHandMoveAction(const std::string& name):
+	explicit BarrettHandMoveAction(const string& name):
 		TaskContext(name, PreOperational),
 		BH_DOF(4)
 	{
@@ -110,17 +114,14 @@ public:
 		this->addProperty("prefix", prefix_);
 	}
 
-	~BarrettHandMoveAction()
-	{
+	~BarrettHandMoveAction() {
 	}
 
-	void cleanupHook()
-	{
+	void cleanupHook() {
 	}
 
 	// RTT configure hook
-	bool configureHook()
-	{
+	bool configureHook() {
 		if (!prefix_.empty()) {
 			dof_map[prefix_ + "_HandFingerOneKnuckleTwoJoint"] = 0;
 			dof_map[prefix_ + "_HandFingerTwoKnuckleTwoJoint"] = 1;
@@ -148,13 +149,12 @@ public:
 			return true;
 		}
 
-		cout << "ERROR: BarrettHandMoveAction: no prefix" << endl;
+		std::cout << "ERROR: BarrettHandMoveAction: no prefix" << std::endl;
 		return false;
 	}
 
 	// RTT start hook
-	bool startHook()
-	{
+	bool startHook() {
 		action_start_counter_ = 0;
 		if (as_.ready()) {
 			as_.start();
@@ -164,23 +164,20 @@ public:
 		return true;
 	}
 
-	void stopHook()
-	{
+	void stopHook() {
 	}
 
 	bool allPucksIdle(uint32_t status) {
 		return ((status & STATUS_IDLE1) != 0) && ((status & STATUS_IDLE2) != 0) && ((status & STATUS_IDLE3) != 0) && ((status & STATUS_IDLE4) != 0);
 	}
 
-	void updateHook()
-	{
+	void updateHook() {
 		// ignore the status at the beginning of the movement
 		action_start_counter_--;
 		if (action_start_counter_ > 0)
 			return;
 
 		if (port_status_in_.readNewest(status_in_) == RTT::NewData && active_goal_.isValid() && (active_goal_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE)) {
-
 			ros::Time now = rtt_rosclock::host_now();
 
 			feedback_.header.stamp = now;
@@ -227,8 +224,7 @@ public:
 	}
 
 private:
-	void goalCB(GoalHandle gh)
-	{
+	void goalCB(GoalHandle gh) {
 		// cancel active goal
 		if (active_goal_.isValid() && (active_goal_.getGoalStatus().status == actionlib_msgs::GoalStatus::ACTIVE)) {
 			active_goal_.setCanceled();
@@ -244,7 +240,7 @@ private:
 			return;
 		}
 
-                for (int i=0; i<g->name.size(); i++) {
+                for (int i = 0; i < g->name.size(); i++) {
 			map<string, int>::iterator dof_idx_it = dof_map.find(g->name[i]);
 			if (dof_idx_it == dof_map.end()) {
 				barrett_hand_controller_srvs::BHMoveResult res;
@@ -271,13 +267,11 @@ private:
 		active_goal_ = gh;
 	}
 
-	void cancelCB(GoalHandle gh)
-	{
+	void cancelCB(GoalHandle gh) {
 		if (active_goal_ == gh) {
 			active_goal_.setCanceled();
 		}
 	}
-
 };
 ORO_CREATE_COMPONENT(BarrettHandMoveAction)
 
