@@ -28,6 +28,7 @@
 #include "MotorController.h"
 
 #include <string>
+#include <cstring>
 
 // For commands w/o values: RESET,HOME,KEEP,PASS,LOOP,HI,IC,IO,TC,TO,C,O,T 5
 #define PROP_CMD 29
