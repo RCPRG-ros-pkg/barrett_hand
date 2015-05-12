@@ -55,6 +55,11 @@
 #define PROP_HOLD 77
 // Max torque
 #define PROP_MT 43
+// 32-Bit Counts per revolution
+#define PROP_CTS 68
+#define PROP_CTS2 69
+// Motor current (2048+205/1A)
+#define PROP_IMOTOR 22
 
 const int MODE_IDLE      = 0;
 const int MODE_TORQUE    = 2;
@@ -121,7 +126,8 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 	} else if (ret == 3) {
 		p = (int32_t(0x3F & data[0]) << 16) | ((int32_t)data[1] << 8) | (int32_t)data[2];
 	}
-	
+
+	// this is necessary around encoder zero
 	if(p > 0x200000)
 		p = 0x3FFFFF - p;
 	if(jp > 0x200000)
@@ -161,6 +167,10 @@ void MotorController::initHand() {
 
 void MotorController::stopHand() {
 	setProperty(GROUP(0, HAND_GROUP), PROP_CMD, CMD_STOP);
+}
+
+void MotorController::stopFinger(int32_t id) {
+	setProperty(11 + id, PROP_CMD, CMD_STOP);
 }
 
 void MotorController::setOpenTarget(int id, uint32_t ot) {
@@ -221,6 +231,20 @@ void MotorController::getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode
 	recProperty(14, mode4);
 }
 
+void MotorController::getCurrents(double &c1, double &c2, double &c3, double &c4) {
+	const double c_factor = 1.0/205.0;
+	int32_t current[4] = {2048, 2048, 2048, 2048};
+	reqProperty(GROUP(0, HAND_GROUP), PROP_IMOTOR);
+	recProperty(11, current[0]);
+	recProperty(12, current[1]);
+	recProperty(13, current[2]);
+	recProperty(14, current[3]);
+	c1 = c_factor*((double)current[0]-2048.0);
+	c2 = c_factor*((double)current[1]-2048.0);
+	c3 = c_factor*((double)current[2]-2048.0);
+	c4 = c_factor*((double)current[3]-2048.0);
+}
+
 void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int32_t &jp1, int32_t &jp2, int32_t &jp3, int32_t &s) {
 	int32_t jp;
 	reqProperty(GROUP(0, HAND_GROUP), PROP_P);
@@ -268,6 +292,18 @@ void MotorController::getTherm(int id, int32_t &temp)
 {
 	reqProperty(11+id, PROP_THERM);
 	recProperty(11+id, temp);
+}
+
+void MotorController::getCts(int id, int32_t &cts)
+{
+	int32_t cts1, cts2;
+	reqProperty(11+id, PROP_CTS);
+	recProperty(11+id, cts1);
+
+	reqProperty(11+id, PROP_CTS2);
+	recProperty(11+id, cts2);
+
+	cts = cts1 | (cts2<<16);
 }
 
 void MotorController::setHoldPosition(int id, bool hold)

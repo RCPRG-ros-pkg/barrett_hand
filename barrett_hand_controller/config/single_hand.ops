@@ -1,35 +1,76 @@
 import("rtt_ros")
 import("rtt_roscomm");
 import("rtt_rosparam");
-ros.import("barrett_hand_controller")
+
+ros.import("rtt_actionlib");
+ros.import("barrett_hand_controller");
+ros.import("rtt_barrett_hand_controller_srvs");
+ros.import("oro_joint_state_publisher");
 
 ## Load a BarrettHand component
 loadComponent("Hand","BarrettHand")
 
 ## Give it a periodic activity
 setActivity("Hand",0.001,3,ORO_SCHED_RT)
-#setActivity("Hand",0.001,3,ORO_SCHED_OTHER)
 Hand.loadService("rosparam");
 Hand.rosparam.getAll();
 
 ## Create connections
-stream("Hand.BHCmd", ros.comm.topic("BHCmdx"))
 stream("Hand.BHTemp", ros.comm.topic("BHTemp"))
-stream("Hand.joint_states", ros.comm.topic("/joint_states"))
 stream("Hand.BHPressureState", ros.comm.topic("BHPressureState"))
 
-## Connect the 
+## Connect the services
 loadService("Hand","rosservice")
 Hand.rosservice.connect( "get_pressure_info_ros", "get_pressure_info", "barrett_hand_controller_srvs/BHGetPressureInfo")
 Hand.rosservice.connect( "calibrate_ros", "calibrate_tactile_sensors", "barrett_hand_controller_srvs/Empty")
 Hand.rosservice.connect( "reset_fingers_ros", "reset_fingers", "barrett_hand_controller_srvs/Empty")
-Hand.rosservice.connect( "move_hand_ros", "move_hand", "barrett_hand_controller_srvs/BHMoveHand")
 Hand.rosservice.connect( "set_median_filter_ros", "set_median_filter", "barrett_hand_controller_srvs/BHSetMedianFilter")
 
-## Configure the HelloRobot component
+## Configure the Hand component
 Hand.configure()
+
+//------------------------------------------------------------------------------
+//-- ROS Command interface
+//------------------------------------------------------------------------------
+## Load a BarrettHand component
+loadComponent("HandMoveAction","BarrettHandMoveAction")
+
+## Give it a periodic activity
+setActivityOnCPU("HandMoveAction", 0.01, 1, ORO_SCHED_RT, 0);
+HandMoveAction.loadService("rosparam");
+HandMoveAction.rosparam.getAll();
+
+connect("HandMoveAction.q_out", "Hand.q_in", ConnPolicy());
+connect("HandMoveAction.v_out", "Hand.v_in", ConnPolicy());
+connect("HandMoveAction.t_out", "Hand.t_in", ConnPolicy());
+connect("HandMoveAction.mp_out", "Hand.mp_in", ConnPolicy());
+connect("HandMoveAction.hold_out", "Hand.hold_in", ConnPolicy());
+
+connect("Hand.status_out", "HandMoveAction.status_in", ConnPolicy());
+
+HandMoveAction.configure();
+HandMoveAction.loadService("actionlib");
+HandMoveAction.actionlib.connect("/right_hand/move_hand");
+
+//------------------------------------------------------------------------------
+//-- ROS Command interface
+//------------------------------------------------------------------------------
+loadComponent("JntPub", "JointStatePublisher");
+setActivityOnCPU("JntPub", 0.005, 2, ORO_SCHED_RT, 0);
+JntPub.loadService("rosparam");
+JntPub.rosparam.getAll();
+
+connect("Hand.q_out", "JntPub.JointPosition", ConnPolicy());
+connect("Hand.q_out", "JntPub.JointVelocity", ConnPolicy());
+connect("Hand.t_out", "JntPub.JointEffort", ConnPolicy());
+
+stream("JntPub.joint_state", ros.comm.topic("/joint_states"));
+
+JntPub.configure()
 
 ## Start it
 Hand.start()
-waitForInterrupt()
+HandMoveAction.start()
+JntPub.start()
+#waitForInterrupt()
 

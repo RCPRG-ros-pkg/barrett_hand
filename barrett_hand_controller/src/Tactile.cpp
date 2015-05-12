@@ -104,15 +104,17 @@ void Tactile::updatePressure(const MotorController::tact_array_t &tact)
 	{
 		for (int i=0; i<24; ++i)
 		{
-			offsets_[i] += tact_[tact_index_][i];
+			if (tact_[tact_index_][i] > offsets_[i])
+				offsets_[i] = tact_[tact_index_][i];
+//			offsets_[i] += tact_[tact_index_][i];
 		}
 		++calibration_counter_;
 		if (calibration_counter_ >= calibration_counter_max_)
 		{
-			for (int i=0; i<24; ++i)
-			{
-				offsets_[i] /= (double)calibration_counter_max_;
-			}
+//			for (int i=0; i<24; ++i)
+//			{
+//				offsets_[i] /= (double)calibration_counter_max_;
+//			}
 		}
 	}
 }

@@ -25,27 +25,18 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <barrett_hand_controller_srvs/BHCmd.h>
 #include <barrett_hand_controller_srvs/BHPressureState.h>
-#include <barrett_hand_controller_srvs/BHPressureInfo.h>
-#include <barrett_hand_controller_srvs/BHPressureInfoElement.h>
 #include <barrett_hand_controller_srvs/BHTemp.h>
 #include <barrett_hand_controller_srvs/Empty.h>
 #include <barrett_hand_controller_srvs/BHGetPressureInfo.h>
-#include <barrett_hand_controller_srvs/BHMoveHand.h>
 #include <barrett_hand_controller_srvs/BHSetMedianFilter.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
 #include <rtt/RTT.hpp>
-#include <std_msgs/Float64.h>
-#include <std_msgs/String.h>
 #include <rtt/Component.hpp>
 #include <ros/ros.h>
 
-#include "tf/transform_datatypes.h"
-#include "sensor_msgs/JointState.h"
-#include "geometry_msgs/Vector3.h"
 #include "rtt_rosclock/rtt_rosclock.h"
 
 #include <iostream>
@@ -59,10 +50,9 @@
 #include <sys/stat.h>
 #include "Tactile.h"
 
-using namespace std;
+#include "Eigen/Dense"
 
-#define JP2RAD(x) ((double)(x) * 1.0/4096.0 * 1.0/50.0 * 2 * M_PI)
-#define P2RAD(x) ((double)(x) * 1.0/4096.0 * 1.0/(125*2.5) * 2 * M_PI)
+using namespace std;
 
 #define RAD2P(x) ((double)(x) * 180.0/3.1416 / 140.0 * 199111.1)
 #define RAD2S(x) ((double)(x) * 35840.0/M_PI)
@@ -71,75 +61,69 @@ using namespace RTT;
 
 class BarrettHand : public RTT::TaskContext{
 private:
+        const int BH_DOF;
+	const int BH_JOINTS;
 	const int TEMP_MAX_HI;
 	const int TEMP_MAX_LO;
+	enum {STATUS_OVERCURRENT1 = 0x0001, STATUS_OVERCURRENT2 = 0x0002, STATUS_OVERCURRENT3 = 0x0004, STATUS_OVERCURRENT4 = 0x0008,
+		STATUS_OVERPRESSURE1 = 0x0010, STATUS_OVERPRESSURE2 = 0x0020, STATUS_OVERPRESSURE3 = 0x0040,
+		STATUS_TORQUESWITCH1 = 0x0100, STATUS_TORQUESWITCH2 = 0x0200, STATUS_TORQUESWITCH3 = 0x0400,
+		STATUS_IDLE1 = 0x1000, STATUS_IDLE2 = 0x2000, STATUS_IDLE3 = 0x4000, STATUS_IDLE4 = 0x8000 };
+
 	int32_t loop_counter_;
 	MotorController *ctrl_;
 
 	int32_t maxStaticTorque_;
-	int32_t maxDynamicTorque_;
 	int torqueSwitch_;
 
 	Tactile *ts_[4];
-	barrett_hand_controller_srvs::BHCmd cmd_;
-	barrett_hand_controller_srvs::BHTemp temp_;
-	sensor_msgs::JointState joint_states_;
-	barrett_hand_controller_srvs::BHPressureState pressure_states_;
-	ros::Time last_tact_read_;
 	bool hold_;
 	bool holdEnabled_;
 
-	InputPort<barrett_hand_controller_srvs::BHCmd>		cmd_in_;
-	OutputPort<barrett_hand_controller_srvs::BHTemp>		temp_out_;
-	OutputPort<sensor_msgs::JointState>			joint_out_;
-	OutputPort<barrett_hand_controller_srvs::BHPressureState>	tactile_out_;
+	// port variables
+	Eigen::VectorXd q_in_;
+	Eigen::VectorXd v_in_;
+	Eigen::VectorXd t_in_;
+	int32_t mp_in_;
+	int32_t hold_in_;
+	uint32_t status_out_;
+	Eigen::VectorXd q_out_;
+	Eigen::VectorXd t_out_;
+	barrett_hand_controller_srvs::BHTemp temp_out_;
+	barrett_hand_controller_srvs::BHPressureState tactile_out_;
+
+	// OROCOS ports
+	InputPort<Eigen::VectorXd> port_q_in_;
+	InputPort<Eigen::VectorXd> port_v_in_;
+	InputPort<Eigen::VectorXd> port_t_in_;
+	InputPort<int32_t> port_mp_in_;
+	InputPort<int32_t> port_hold_in_;
+	OutputPort<uint32_t> port_status_out_;
+	OutputPort<Eigen::VectorXd> port_q_out_;
+	OutputPort<Eigen::VectorXd> port_t_out_;
+	OutputPort<barrett_hand_controller_srvs::BHTemp> port_temp_out_;
+	OutputPort<barrett_hand_controller_srvs::BHPressureState> port_tactile_out_;
+
+	// ROS parameters
 	string dev_name_;
 	string prefix_;
 
-	double sp_torque_;
-	double f1_torque_;
-	double f2_torque_;
-	double f3_torque_;
-
-	double move_hand_cmd_;
-	double f1_target_;
-	double f2_target_;
-	double f3_target_;
-	double sp_target_;
-
-	double set_max_vel_;
-	double f1_vel_;
-	double f2_vel_;
-	double f3_vel_;
-	double sp_vel_;
-
-	int32_t temp[4], therm[4];
-
 	int resetFingersCounter_;
 
-	int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s, mode1, mode2, mode3, mode4;
+	int32_t p1, p2, p3, jp1, jp2, jp3, jp4, s;
         int32_t median_filter_samples_, median_filter_max_samples_;
 
 public:
 	BarrettHand(const std::string& name):
 		TaskContext(name, PreOperational),
+		BH_DOF(4),
+		BH_JOINTS(8),
 		TEMP_MAX_HI(65),
 		TEMP_MAX_LO(60),
-		temp_out_("BHTemp"),
-		joint_out_("joint_states"),
-		tactile_out_("BHPressureState"),
-		cmd_in_("BHCmd"),
 		loop_counter_(0),
 		resetFingersCounter_(0),
 		maxStaticTorque_(4700),
-		maxDynamicTorque_(700),
-		sp_torque_(700),
-		f1_torque_(700),
-		f2_torque_(700),
-		f3_torque_(700),
 		torqueSwitch_(-1),
-		move_hand_cmd_(false),
-		set_max_vel_(false),
 		ctrl_(NULL),
                 median_filter_samples_(1),
                 median_filter_max_samples_(8)
@@ -153,39 +137,29 @@ public:
 		ts_[2]->setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
 		ts_[3]->setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
 
-		temp[0] = 0;
-		temp[1] = 0;
-		temp[2] = 0;
-		temp[3] = 0;
-		therm[0] = 0;
-		therm[1] = 0;
-		therm[2] = 0;
-		therm[3] = 0;
-		
-		pressure_states_.finger1_tip.resize(24);
-		pressure_states_.finger2_tip.resize(24);
-		pressure_states_.finger3_tip.resize(24);
-		pressure_states_.palm_tip.resize(24);
+		tactile_out_.finger1_tip.resize(24);
+		tactile_out_.finger2_tip.resize(24);
+		tactile_out_.finger3_tip.resize(24);
+		tactile_out_.palm_tip.resize(24);
 
-		joint_states_.name.resize(8);
-		joint_states_.position.resize(8);
-		
-		temp_.temp.resize(9);
+		this->ports()->addPort("q_in", port_q_in_);
+		this->ports()->addPort("v_in", port_v_in_);
+		this->ports()->addPort("t_in", port_t_in_);
+		this->ports()->addPort("mp_in", port_mp_in_);
+		this->ports()->addPort("hold_in", port_hold_in_);
 
-		this->addPort(temp_out_).doc("Sends out BH temperature.");
-		this->addPort(joint_out_).doc("Sends out BH joint states.");
-		this->addPort(tactile_out_).doc("Sends out BH tactile data.");
-		this->addPort(cmd_in_).doc("Input command.");
+		this->ports()->addPort("q_out", port_q_out_);
+		this->ports()->addPort("t_out", port_t_out_);
+		this->ports()->addPort("status_out", port_status_out_);
+
+		this->ports()->addPort("BHTemp", port_temp_out_);
+		this->ports()->addPort("BHPressureState", port_tactile_out_);
 
 		this->provides()->addOperation("reset_fingers",&BarrettHand::resetFingers,this,RTT::OwnThread);
 		this->provides()->addOperation("reset_fingers_ros",&BarrettHand::resetFingersRos,this,RTT::OwnThread);
 		this->provides()->addOperation("calibrate",&BarrettHand::calibrateTactileSensors,this,RTT::OwnThread);
 		this->provides()->addOperation("calibrate_ros",&BarrettHand::calibrateTactileSensorsRos,this,RTT::OwnThread);
 		this->provides()->addOperation("get_pressure_info_ros",&BarrettHand::getPressureInfoRos,this,RTT::OwnThread);
-		this->provides()->addOperation("set_max_torque",&BarrettHand::setMaxTorque,this,RTT::OwnThread);
-		this->provides()->addOperation("set_max_vel",&BarrettHand::setMaxVel,this,RTT::OwnThread);
-		this->provides()->addOperation("move_hand",&BarrettHand::moveHand,this,RTT::OwnThread);
-		this->provides()->addOperation("move_hand_ros",&BarrettHand::moveHandRos,this,RTT::OwnThread);
 		this->provides()->addOperation("set_median_filter",&BarrettHand::setMedianFilter,this,RTT::OwnThread);
 		this->provides()->addOperation("set_median_filter_ros",&BarrettHand::setMedianFilterRos,this,RTT::OwnThread);
 
@@ -213,18 +187,22 @@ public:
 		{
 			ctrl_ = new MotorController(dev_name_);
 
-			joint_states_.name[0] = prefix_ + "_HandFingerOneKnuckleOneJoint";
-			joint_states_.name[1] = prefix_ + "_HandFingerOneKnuckleTwoJoint";
-			joint_states_.name[2] = prefix_ + "_HandFingerOneKnuckleThreeJoint";
-		
-			joint_states_.name[3] = prefix_ + "_HandFingerTwoKnuckleOneJoint";
-			joint_states_.name[4] = prefix_ + "_HandFingerTwoKnuckleTwoJoint";
-			joint_states_.name[5] = prefix_ + "_HandFingerTwoKnuckleThreeJoint";
-		
-			joint_states_.name[6] = prefix_ + "_HandFingerThreeKnuckleTwoJoint";
-			joint_states_.name[7] = prefix_ + "_HandFingerThreeKnuckleThreeJoint";
+			q_in_.resize(BH_DOF);
+			v_in_.resize(BH_DOF);
+			t_in_.resize(BH_DOF);
+			t_out_.resize(BH_JOINTS);
+			q_out_.resize(BH_JOINTS);
+			temp_out_.temp.resize(BH_JOINTS);
 
-			return ctrl_->isDevOpened();
+			port_q_out_.setDataSample(q_out_);
+			port_t_out_.setDataSample(t_out_);
+
+			port_temp_out_.setDataSample(temp_out_);
+
+			if (ctrl_->isDevOpened()) {
+				return true;
+			}
+			return false;
 		}
 		return false;
 	}
@@ -232,12 +210,13 @@ public:
 	// RTT start hook
 	bool startHook()
 	{
-		holdEnabled_ = true;
+		holdEnabled_ = false;
 		hold_ = true;
+		status_out_ = 0;
 		ctrl_->setHoldPosition(0, false);
 		ctrl_->setHoldPosition(1, false);
 		ctrl_->setHoldPosition(2, false);
-		ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
+		ctrl_->setHoldPosition(3, false);
 
 		ctrl_->setMaxVel(0, RAD2P(1)/1000.0);
 		ctrl_->setMaxVel(1, RAD2P(1)/1000.0);
@@ -254,104 +233,141 @@ public:
 
 	// RTT update hook
 	// This function runs every 1 ms (1000 Hz).
-	// Joint state is published every 10 ms (100 Hz).
 	// The i-th tactile data is published every 6 ms (166.66 Hz),
 	// so all 4 tactiles' data is published every 25 ms (40 Hz).
 	// Temperature is published every 100 ms (10 Hz).
 	void updateHook()
 	{
-		if (move_hand_cmd_)
+		if (resetFingersCounter_ > 0)
 		{
-			move_hand_cmd_ = false;
-			ctrl_->setMaxTorque(0, maxStaticTorque_);
-			ctrl_->setMaxTorque(1, maxStaticTorque_);
-			ctrl_->setMaxTorque(2, maxStaticTorque_);
-			ctrl_->setMaxTorque(3, maxStaticTorque_);
+			--resetFingersCounter_;
+			if (resetFingersCounter_ == 2500)
+			{
+				ctrl_->resetFinger(0);
+				ctrl_->resetFinger(1);
+				ctrl_->resetFinger(2);
+			}
+			if (resetFingersCounter_ == 2000)
+				ctrl_->resetFinger(3);
+			return;
+		}
+
+		bool move_hand = false;
+
+		if (port_q_in_.read(q_in_) == RTT::NewData) {
+			if (q_in_.size() == BH_DOF) {
+				move_hand = true;
+			} else {
+				RTT::log(RTT::Warning) << "Size of " << port_q_in_.getName()
+				<< " not equal to " << BH_DOF << RTT::endlog();
+			}
+		}
+
+		if (port_v_in_.read(v_in_) == RTT::NewData) {
+			if (v_in_.size() == BH_DOF) {
+				ctrl_->setMaxVel(0, RAD2P(v_in_[0])/1000.0);
+				ctrl_->setMaxVel(1, RAD2P(v_in_[1])/1000.0);
+				ctrl_->setMaxVel(2, RAD2P(v_in_[2])/1000.0);
+				ctrl_->setMaxVel(3, RAD2S(v_in_[3])/1000.0);
+			} else {
+				RTT::log(RTT::Warning) << "Size of " << port_v_in_.getName()
+				<< " not equal to " << BH_DOF << RTT::endlog();
+			}
+		}
+
+		if (port_t_in_.read(t_in_) == RTT::NewData) {
+			if (t_in_.size() == BH_DOF) {
+			} else {
+				RTT::log(RTT::Warning) << "Size of " << port_t_in_.getName()
+				<< " not equal to " << BH_DOF << RTT::endlog();
+			}
+		}
+
+		port_mp_in_.read(mp_in_);
+		if (port_hold_in_.read(hold_in_) == RTT::NewData) {
+			holdEnabled_ = static_cast<bool>(hold_in_);
+			ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
+		}
+
+		if (move_hand) {
+			status_out_ = 0;	// clear the status
+
+			for (int i=0; i<BH_DOF; i++) {
+				ctrl_->setMaxTorque(i, maxStaticTorque_);
+			}
 			torqueSwitch_ = 5;
 
-			ctrl_->setTargetPos(0, RAD2P(f1_target_));
-			ctrl_->setTargetPos(1, RAD2P(f2_target_));
-			ctrl_->setTargetPos(2, RAD2P(f3_target_));
-			ctrl_->setTargetPos(3, RAD2S(sp_target_));
+			ctrl_->setTargetPos(0, RAD2P(q_in_[0]));
+			ctrl_->setTargetPos(1, RAD2P(q_in_[1]));
+			ctrl_->setTargetPos(2, RAD2P(q_in_[2]));
+			ctrl_->setTargetPos(3, RAD2S(q_in_[3]));
 			ctrl_->moveAll();
 		}
 
-		if (set_max_vel_)
+		if (torqueSwitch_>0)
 		{
-			set_max_vel_ = false;
-			ctrl_->setMaxVel(0, RAD2P(f1_vel_)/1000.0);
-			ctrl_->setMaxVel(1, RAD2P(f2_vel_)/1000.0);
-			ctrl_->setMaxVel(2, RAD2P(f3_vel_)/1000.0);
-			ctrl_->setMaxVel(3, RAD2S(sp_vel_)/1000.0);
+			--torqueSwitch_;
+		}
+		else if (torqueSwitch_ == 0)
+		{
+			for (int i=0; i<BH_DOF; i++) {
+				ctrl_->setMaxTorque(i, t_in_[i]);
+			}
+			--torqueSwitch_;
 		}
 
-		// on 0, 10, 20, 30, 40, ... step
-		if ( (loop_counter_%10) == 0)
-		{
-			// sometimes jp1 or jp2 or jp3 are not updated and they must be class members, so their prevoius value is taken
-			ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
-
-			joint_states_.header.stamp = rtt_rosclock::host_now();
-
-			joint_states_.position[0] = (double)s * M_PI/ 35840.0;
-			joint_states_.position[1] = JP2RAD(jp1);
-			joint_states_.position[2] = P2RAD(p1);
-
-			joint_states_.position[3] = (double)s * M_PI/ 35840.0;
-			joint_states_.position[4] = JP2RAD(jp2);
-			joint_states_.position[5] = P2RAD(p2);
-
-			joint_states_.position[6] = JP2RAD(jp3);
-			joint_states_.position[7] = P2RAD(p3);
-
-			joint_out_.write(joint_states_);
-		}
+		// write current joint positions
+		ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
+		q_out_[0] = (double)s * M_PI/ 35840.0;
+		q_out_[1] = 2.0*M_PI/4096.0*(double)jp1/50.0;
+		q_out_[2] = 2.0*M_PI/4096.0*(double)p1*(1.0/125.0 + 1.0/375.0) - q_out_[1];
+		q_out_[3] = (double)s * M_PI/ 35840.0;
+		q_out_[4] = 2.0*M_PI*(double)jp2/4096.0/50.0;
+		q_out_[5] = 2.0*M_PI/4096.0*(double)p2*(1.0/125.0 + 1.0/375.0) - q_out_[4];
+		q_out_[6] = 2.0*M_PI*(double)jp3/4096.0/50.0;
+		q_out_[7] = 2.0*M_PI/4096.0*(double)p3*(1.0/125.0 + 1.0/375.0) - q_out_[6];
+		port_q_out_.write(q_out_);
 
 		// on 1, 101, 201, 301, 401, ... step
 		if ( (loop_counter_%100) == 1)
 		{
-			ctrl_->getTemp(0, temp[0]);
-			ctrl_->getTemp(1, temp[1]);
-			ctrl_->getTemp(2, temp[2]);
-			ctrl_->getTemp(3, temp[3]);
-			ctrl_->getTherm(0, therm[0]);
-			ctrl_->getTherm(1, therm[1]);
-			ctrl_->getTherm(2, therm[2]);
-			ctrl_->getTherm(3, therm[3]);
+			int32_t temp[4] = {0,0,0,0}, therm[4] = {0,0,0,0};
+			bool allTempOk = true;
+			bool oneTempTooHigh = false;
 
-			if (	(temp[0] > TEMP_MAX_HI || temp[1] > TEMP_MAX_HI || temp[2] > TEMP_MAX_HI || temp[3] > TEMP_MAX_HI ||
-				therm[0] > TEMP_MAX_HI || therm[1] > TEMP_MAX_HI || therm[2] > TEMP_MAX_HI || therm[3] > TEMP_MAX_HI) &&
-				hold_ == true)
-			{
+			temp_out_.header.stamp = rtt_rosclock::host_now();
+
+			for (int i=0; i<4; i++) {
+				ctrl_->getTemp(i, temp[i]);
+				ctrl_->getTherm(i, therm[i]);
+
+				if (temp[i] > TEMP_MAX_HI || therm[i] > TEMP_MAX_HI) {
+					oneTempTooHigh = true;
+				}
+				else if (temp[i] >= TEMP_MAX_LO || therm[i] >= TEMP_MAX_LO) {
+					allTempOk = false;
+				}
+				temp_out_.temp[i] = temp[i];
+				temp_out_.temp[4+i] = therm[i];
+			}
+
+			if (hold_ && oneTempTooHigh) {
 				hold_ = false;
 				ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 				RTT::log(RTT::Warning) << "Temperature is too high. Disabled spread hold." << RTT::endlog();
 			}
-
-			if (	temp[0] < TEMP_MAX_LO && temp[1] < TEMP_MAX_LO && temp[2] < TEMP_MAX_LO && temp[3] < TEMP_MAX_LO &&
-				therm[0] < TEMP_MAX_LO && therm[1] < TEMP_MAX_LO && therm[2] < TEMP_MAX_LO && therm[3] < TEMP_MAX_LO &&
-				hold_ == false)
-			{
+			else if (!hold_ && allTempOk) {
 				hold_ = true;
 				ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
 				RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
 			}
 
-			temp_.header.stamp = rtt_rosclock::host_now();
-			temp_.temp[0] = temp[0];
-			temp_.temp[1] = temp[1];
-			temp_.temp[2] = temp[2];
-			temp_.temp[3] = temp[3];
-			temp_.temp[4] = therm[0];
-			temp_.temp[5] = therm[1];
-			temp_.temp[6] = therm[2];
-			temp_.temp[7] = therm[3];
-			temp_out_.write(temp_);
+			port_temp_out_.write(temp_out_);
 		}
 
 		int i=((loop_counter_+2)%25);
 		// on 2, 27, 52, 77, 102, ... step
-		if ( i == 0)
+		if (i == 0)
 		{
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(0, tact);
@@ -374,46 +390,94 @@ public:
 			MotorController::tact_array_t tact;
 			ctrl_->getTactile(3, tact);
 			ts_[3]->updatePressure(tact);
-			pressure_states_.header.stamp = rtt_rosclock::host_now();
+			tactile_out_.header.stamp = rtt_rosclock::host_now();
 
 			for (int i=0; i<24; ++i)
 			{
-				pressure_states_.finger1_tip[i] = ts_[0]->getPressure(i,median_filter_samples_);
-				pressure_states_.finger2_tip[i] = ts_[1]->getPressure(i,median_filter_samples_);
-				pressure_states_.finger3_tip[i] = ts_[2]->getPressure(i,median_filter_samples_);
-				pressure_states_.palm_tip[i] = ts_[3]->getPressure(i,median_filter_samples_);
+				tactile_out_.finger1_tip[i] = ts_[0]->getPressure(i,median_filter_samples_);
+				tactile_out_.finger2_tip[i] = ts_[1]->getPressure(i,median_filter_samples_);
+				tactile_out_.finger3_tip[i] = ts_[2]->getPressure(i,median_filter_samples_);
+				tactile_out_.palm_tip[i] = ts_[3]->getPressure(i,median_filter_samples_);
 			}
 
-			tactile_out_.write(pressure_states_);
+			port_tactile_out_.write(tactile_out_);
 		}
 
-		if (torqueSwitch_>0)
-		{
-			--torqueSwitch_;
+		for (int i=0; i<3; i++) {
+			for (int j=0; j<24; ++j) {
+				if (ts_[i]->getPressure(j,median_filter_samples_) > mp_in_) {
+					ctrl_->stopFinger(i);
+					if (i==0) {
+						status_out_ |= STATUS_OVERPRESSURE1;
+					}
+					else if (i==1) {
+						status_out_ |= STATUS_OVERPRESSURE2;
+					}
+					else if (i==2) {
+						status_out_ |= STATUS_OVERPRESSURE3;
+					}
+					break;
+				}
+			}
 		}
-		else if (torqueSwitch_ == 0)
-		{
-			ctrl_->setMaxTorque(0, f1_torque_);
-			ctrl_->setMaxTorque(1, f2_torque_);
-			ctrl_->setMaxTorque(2, f3_torque_);
-			ctrl_->setMaxTorque(3, sp_torque_);
-			--torqueSwitch_;
+
+		int32_t mode[4] = {0,0,0,0};
+		ctrl_->getStatusAll(mode[0], mode[1], mode[2], mode[3]);
+
+		// chack for torque switch activation
+		if (abs(q_out_[2]*3.0-q_out_[1]) > 0.02) {
+			status_out_ |= STATUS_TORQUESWITCH1;
 		}
+		if (abs(q_out_[5]*3.0-q_out_[4]) > 0.02) {
+			status_out_ |= STATUS_TORQUESWITCH2;
+		}
+		if (abs(q_out_[7]*3.0-q_out_[6]) > 0.02) {
+			status_out_ |= STATUS_TORQUESWITCH3;
+		}
+
+		if (mode[0] == 0) {
+			status_out_ |= STATUS_IDLE1;
+			if ((status_out_&STATUS_OVERPRESSURE1) == 0 && abs(q_in_[0]-q_out_[1]) > 0.02) {
+				status_out_ |= STATUS_OVERCURRENT1;
+			}
+		}
+
+		if (mode[1] == 0) {
+			status_out_ |= STATUS_IDLE2;
+			if ((status_out_&STATUS_OVERPRESSURE2) == 0 && abs(q_in_[1]-q_out_[4]) > 0.02) {
+				status_out_ |= STATUS_OVERCURRENT2;
+			}
+		}
+
+		if (mode[2] == 0) {
+			status_out_ |= STATUS_IDLE3;
+			if ((status_out_&STATUS_OVERPRESSURE3) == 0 && abs(q_in_[2]-q_out_[6]) > 0.02) {
+				status_out_ |= STATUS_OVERCURRENT3;
+			}
+		}
+
+		if (mode[3] == 0) {
+			status_out_ |= STATUS_IDLE4;
+			if (abs(q_in_[3]-q_out_[3]) > 0.02) {
+				status_out_ |= STATUS_OVERCURRENT4;
+			}
+		}
+		double currents[4] = {0.0,0.0,0.0,0.0};
+		ctrl_->getCurrents(currents[0], currents[1], currents[2], currents[3]);
+		t_out_[0] = currents[3];
+		t_out_[1] = currents[0];
+		t_out_[2] = currents[0];
+		t_out_[3] = currents[3];
+		t_out_[4] = currents[1];
+		t_out_[5] = currents[1];
+		t_out_[6] = currents[2];
+		t_out_[7] = currents[2];
+
+		port_t_out_.write(t_out_);
+
+		port_status_out_.write(status_out_);
 
 		loop_counter_ = (loop_counter_+1)%1000;
-
-		if (resetFingersCounter_ > 0)
-		{
-			--resetFingersCounter_;
-			if (resetFingersCounter_ == 2500)
-			{
-				ctrl_->resetFinger(0);
-				ctrl_->resetFinger(1);
-				ctrl_->resetFinger(2);
-			}
-			if (resetFingersCounter_ == 2000)
-				ctrl_->resetFinger(3);
-		}
 	}
 
 	void resetFingers()
@@ -473,47 +537,6 @@ public:
 		return true;
 	}
 
-	bool setMaxTorque(double f1_t, double f2_t, double f3_t, double sp_t)
-	{
-		f1_torque_ = f1_t;
-		f2_torque_ = f2_t;
-		f3_torque_ = f3_t;
-		sp_torque_ = sp_t;
-
-		return true;
-	}
-
-	bool setMaxVel(double f1_s, double f2_s, double f3_s, double sp_s)
-	{
-		set_max_vel_ = true;
-		f1_vel_ = f1_s;
-		f2_vel_ = f2_s;
-		f3_vel_ = f3_s;
-		sp_vel_ = sp_s;
-
-		return true;
-	}
-
-	bool moveHand(double f1, double f2, double f3, double sp)
-	{
-		move_hand_cmd_ = true;
-		f1_target_ = f1;
-		f2_target_ = f2;
-		f3_target_ = f3;
-		sp_target_ = sp;
-
-		return true;
-	}
-
-	bool moveHandRos(barrett_hand_controller_srvs::BHMoveHand::Request  &req,
-	         barrett_hand_controller_srvs::BHMoveHand::Response &res)
-	{
-		setMaxTorque(req.f1_torque, req.f2_torque, req.f3_torque, req.sp_torque);
-		setMaxVel(req.f1_speed, req.f2_speed, req.f3_speed, req.sp_speed);		
-		res.result = moveHand(req.f1, req.f2, req.f3, req.sp);
-		return true;
-	}
-
 	bool setMedianFilter(int32_t median_filter_samples)
 	{
 		if (median_filter_samples >= 1 && median_filter_samples <= median_filter_max_samples_)
@@ -530,6 +553,7 @@ public:
 		res.result = setMedianFilter(req.samples);
 		return true;
 	}
+
 
 };
 ORO_CREATE_COMPONENT(BarrettHand)

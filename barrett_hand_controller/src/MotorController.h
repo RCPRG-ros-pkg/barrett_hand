@@ -38,6 +38,7 @@ public:
 	~MotorController();
 	void initHand();
 	void stopHand();
+	void stopFinger(int32_t id);
 	void resetFinger(int id);
 	void open(int id);
 	void close(int id);
@@ -49,6 +50,7 @@ public:
 	void setOpenTarget(int id, uint32_t ot);
 	void setTargetPos(int id, int32_t pos);
 	void setTargetVel(int id, int32_t pos);
+	void getCurrents(double &c1, double &c2, double &c3, double &c4);
 	void setHoldPosition(int id, bool hold);
 	void moveAll();
 	void moveAllVel();
@@ -58,6 +60,7 @@ public:
 	void getTactile(int id, tact_array_t &tact);
         void getTemp(int id, int32_t &temp);
         void getTherm(int id, int32_t &temp);
+	void getCts(int id, int32_t &cts);
 	bool isDevOpened();
 protected:
 	void setProperty(int id, uint32_t property, int32_t value);

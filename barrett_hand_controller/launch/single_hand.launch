@@ -9,16 +9,20 @@
   <!-- Path to look for dynamically-loaded plugins and components (something like /lib/orocos) -->
   <arg name="RTT_COMPONENT_PATH" default="$(env RTT_COMPONENT_PATH)"/>
 
+
   <group ns="$(arg PREFIX)_hand">
-    <group ns="$(arg PREFIX)_hand_controller">
-      <param name="Hand/device_name" value="$(arg DEVICE)" />
-      <param name="Hand/prefix" value="$(arg PREFIX)" />
-    </group>
+
+  <group ns="$(arg PREFIX)_hand_controller">
+    <rosparam param="Hand/device_name" subst_value="True">$(arg DEVICE)</rosparam>
+    <rosparam param="Hand/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+    <rosparam param="HandMoveAction/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+    <rosparam param="JntPub/joint_names" subst_value="True">[$(arg PREFIX)_HandFingerOneKnuckleOneJoint, $(arg PREFIX)_HandFingerOneKnuckleTwoJoint, $(arg PREFIX)_HandFingerOneKnuckleThreeJoint, $(arg PREFIX)_HandFingerTwoKnuckleOneJoint, $(arg PREFIX)_HandFingerTwoKnuckleTwoJoint, $(arg PREFIX)_HandFingerTwoKnuckleThreeJoint, $(arg PREFIX)_HandFingerThreeKnuckleTwoJoint, $(arg PREFIX)_HandFingerThreeKnuckleThreeJoint]</rosparam>
+  </group>
 
     <node
       name="$(arg PREFIX)_hand_controller"
       pkg="rtt_ros" type="rttscript"
-      args="-l $(arg LOG_LEVEL) -s $(find barrett_hand_controller)/config/single_hand.ops --">
+      args="-l $(arg LOG_LEVEL) -s $(find barrett_hand_controller)/config/single_hand.ops --" output="screen">
       <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
       <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
     </node>

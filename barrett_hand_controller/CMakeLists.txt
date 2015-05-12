@@ -9,9 +9,13 @@ if(${OROCOS_TARGET} STREQUAL "xenomai" )
   find_package(Xenomai REQUIRED)
 endif()
 
-include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS})
+find_package(Eigen REQUIRED)
+
+include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS} ${Eigen_INCLUDE_DIRS})
 
 orocos_component(barrett_hand_controller src/CANDev.cpp src/MotorController.cpp src/Tactile.cpp src/hand.cpp)
+
+orocos_component(barrett_hand_move_action src/barrett_hand_move_action.cpp)
 
 if(${OROCOS_TARGET} STREQUAL "xenomai" )
   target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES} ${Xenomai_RTDM_LIBRARIES})
