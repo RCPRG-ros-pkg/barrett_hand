@@ -50,7 +50,7 @@ connect("Hand.status_out", "HandMoveAction.status_in", ConnPolicy());
 
 HandMoveAction.configure();
 HandMoveAction.loadService("actionlib");
-HandMoveAction.actionlib.connect("/right_hand/move_hand");
+HandMoveAction.actionlib.connect("move_hand");
 
 //------------------------------------------------------------------------------
 //-- ROS Command interface
