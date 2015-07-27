@@ -25,8 +25,8 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include "barrett_hand_controller_srvs/BHMoveAction.h"
-#include "barrett_hand_controller_srvs/BHMoveGoal.h"
+#include "barrett_hand_controller_msgs/BHMoveAction.h"
+#include "barrett_hand_controller_msgs/BHMoveGoal.h"
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -67,12 +67,12 @@ private:
 		STATUS_TORQUESWITCH1 = 0x0100, STATUS_TORQUESWITCH2 = 0x0200, STATUS_TORQUESWITCH3 = 0x0400,
 		STATUS_IDLE1 = 0x1000, STATUS_IDLE2 = 0x2000, STATUS_IDLE3 = 0x4000, STATUS_IDLE4 = 0x8000 };
 
-	typedef actionlib::ServerGoalHandle<barrett_hand_controller_srvs::BHMoveAction> GoalHandle;
-	typedef boost::shared_ptr<const barrett_hand_controller_srvs::BHMoveGoal> Goal;
+	typedef actionlib::ServerGoalHandle<barrett_hand_controller_msgs::BHMoveAction> GoalHandle;
+	typedef boost::shared_ptr<const barrett_hand_controller_msgs::BHMoveGoal> Goal;
 
-	rtt_actionlib::RTTActionServer<barrett_hand_controller_srvs::BHMoveAction> as_;
+	rtt_actionlib::RTTActionServer<barrett_hand_controller_msgs::BHMoveAction> as_;
 	GoalHandle active_goal_;
-	barrett_hand_controller_srvs::BHMoveFeedback feedback_;
+	barrett_hand_controller_msgs::BHMoveFeedback feedback_;
 
 
 	Eigen::VectorXd q_out_;
@@ -201,8 +201,8 @@ public:
 			active_goal_.publishFeedback(feedback_);
 
 			if (allPucksIdle(status_in_)) {
-				barrett_hand_controller_srvs::BHMoveResult res;
-				res.error_code = barrett_hand_controller_srvs::BHMoveResult::SUCCESSFUL;
+				barrett_hand_controller_msgs::BHMoveResult res;
+				res.error_code = barrett_hand_controller_msgs::BHMoveResult::SUCCESSFUL;
 				res.torque_switch.resize(4);
 				res.pressure_stop.resize(4);
 				res.current_stop.resize(4);
@@ -234,8 +234,8 @@ private:
 
 		if (g->name.size() != BH_DOF || g->q.size() != BH_DOF || g->v.size() != BH_DOF || g->t.size() != BH_DOF)
 		{
-			barrett_hand_controller_srvs::BHMoveResult res;
-			res.error_code = barrett_hand_controller_srvs::BHMoveResult::INVALID_GOAL;
+			barrett_hand_controller_msgs::BHMoveResult res;
+			res.error_code = barrett_hand_controller_msgs::BHMoveResult::INVALID_GOAL;
 			gh.setRejected(res);
 			return;
 		}
@@ -243,8 +243,8 @@ private:
                 for (int i = 0; i < g->name.size(); i++) {
 			map<string, int>::iterator dof_idx_it = dof_map.find(g->name[i]);
 			if (dof_idx_it == dof_map.end()) {
-				barrett_hand_controller_srvs::BHMoveResult res;
-				res.error_code = barrett_hand_controller_srvs::BHMoveResult::INVALID_DOF_NAME;
+				barrett_hand_controller_msgs::BHMoveResult res;
+				res.error_code = barrett_hand_controller_msgs::BHMoveResult::INVALID_DOF_NAME;
 				gh.setRejected(res);
 				return;
 			}

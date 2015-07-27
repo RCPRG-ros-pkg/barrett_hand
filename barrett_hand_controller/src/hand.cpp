@@ -25,11 +25,11 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <barrett_hand_controller_srvs/BHPressureState.h>
-#include <barrett_hand_controller_srvs/BHTemp.h>
-#include <barrett_hand_controller_srvs/Empty.h>
-#include <barrett_hand_controller_srvs/BHGetPressureInfo.h>
-#include <barrett_hand_controller_srvs/BHSetMedianFilter.h>
+#include <barrett_hand_controller_msgs/BHPressureState.h>
+#include <barrett_hand_controller_msgs/BHTemp.h>
+#include <barrett_hand_controller_msgs/Empty.h>
+#include <barrett_hand_controller_msgs/BHGetPressureInfo.h>
+#include <barrett_hand_controller_msgs/BHSetMedianFilter.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -89,8 +89,8 @@ private:
 	uint32_t status_out_;
 	Eigen::VectorXd q_out_;
 	Eigen::VectorXd t_out_;
-	barrett_hand_controller_srvs::BHTemp temp_out_;
-	barrett_hand_controller_srvs::BHPressureState tactile_out_;
+	barrett_hand_controller_msgs::BHTemp temp_out_;
+	barrett_hand_controller_msgs::BHPressureState tactile_out_;
 
 	// OROCOS ports
 	InputPort<Eigen::VectorXd> port_q_in_;
@@ -101,8 +101,8 @@ private:
 	OutputPort<uint32_t> port_status_out_;
 	OutputPort<Eigen::VectorXd> port_q_out_;
 	OutputPort<Eigen::VectorXd> port_t_out_;
-	OutputPort<barrett_hand_controller_srvs::BHTemp> port_temp_out_;
-	OutputPort<barrett_hand_controller_srvs::BHPressureState> port_tactile_out_;
+	OutputPort<barrett_hand_controller_msgs::BHTemp> port_temp_out_;
+	OutputPort<barrett_hand_controller_msgs::BHPressureState> port_tactile_out_;
 
 	// ROS parameters
 	string dev_name_;
@@ -483,14 +483,14 @@ public:
 		resetFingersCounter_ = 3000;
 	}
 
-	bool resetFingersRos(barrett_hand_controller_srvs::Empty::Request &req, barrett_hand_controller_srvs::Empty::Response &res)
+	bool resetFingersRos(barrett_hand_controller_msgs::Empty::Request &req, barrett_hand_controller_msgs::Empty::Response &res)
 	{
 		resetFingers();
 		return true;
 	}
 
-	bool getPressureInfoRos(barrett_hand_controller_srvs::BHGetPressureInfo::Request  &req,
-	         barrett_hand_controller_srvs::BHGetPressureInfo::Response &res)
+	bool getPressureInfoRos(barrett_hand_controller_msgs::BHGetPressureInfo::Request  &req,
+	         barrett_hand_controller_msgs::BHGetPressureInfo::Response &res)
 	{
 		res.info.sensor.resize(4);
 		for (int id=0; id<4; ++id)
@@ -527,8 +527,8 @@ public:
 		}
 	}
 
-	bool calibrateTactileSensorsRos(barrett_hand_controller_srvs::Empty::Request &req,
-	         barrett_hand_controller_srvs::Empty::Response &res)
+	bool calibrateTactileSensorsRos(barrett_hand_controller_msgs::Empty::Request &req,
+	         barrett_hand_controller_msgs::Empty::Response &res)
 	{
 		calibrateTactileSensors();
 
@@ -545,8 +545,8 @@ public:
 		return false;
 	}
 
-	bool setMedianFilterRos(barrett_hand_controller_srvs::BHSetMedianFilter::Request  &req,
-	         barrett_hand_controller_srvs::BHSetMedianFilter::Response &res)
+	bool setMedianFilterRos(barrett_hand_controller_msgs::BHSetMedianFilter::Request  &req,
+	         barrett_hand_controller_msgs::BHSetMedianFilter::Response &res)
 	{
 		res.result = setMedianFilter(req.samples);
 		return true;
