@@ -38,8 +38,8 @@ from ar_track_alvar.msg import *
 #from visualization_msgs.msg import MarkerArray
 from geometry_msgs.msg import *
 #from sensor_msgs.msg import Image
-from barrett_hand_controller_srvs.msg import *
-from barrett_hand_controller_srvs.srv import *
+from barrett_hand_controller_msgs.msg import *
+from barrett_hand_controller_msgs.srv import *
 
 import tf
 from tf import *

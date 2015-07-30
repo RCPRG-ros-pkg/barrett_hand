@@ -4,7 +4,7 @@ import("rtt_rosparam");
 
 ros.import("rtt_actionlib");
 ros.import("barrett_hand_controller");
-ros.import("rtt_barrett_hand_controller_srvs");
+ros.import("rtt_barrett_hand_controller_msgs");
 ros.import("oro_joint_state_publisher");
 
 ## Load a BarrettHand component
@@ -21,10 +21,10 @@ stream("Hand.BHPressureState", ros.comm.topic("BHPressureState"))
 
 ## Connect the services
 loadService("Hand","rosservice")
-Hand.rosservice.connect( "get_pressure_info_ros", "get_pressure_info", "barrett_hand_controller_srvs/BHGetPressureInfo")
-Hand.rosservice.connect( "calibrate_ros", "calibrate_tactile_sensors", "barrett_hand_controller_srvs/Empty")
-Hand.rosservice.connect( "reset_fingers_ros", "reset_fingers", "barrett_hand_controller_srvs/Empty")
-Hand.rosservice.connect( "set_median_filter_ros", "set_median_filter", "barrett_hand_controller_srvs/BHSetMedianFilter")
+Hand.rosservice.connect( "get_pressure_info_ros", "get_pressure_info", "barrett_hand_controller_msgs/BHGetPressureInfo")
+Hand.rosservice.connect( "calibrate_ros", "calibrate_tactile_sensors", "barrett_hand_controller_msgs/Empty")
+Hand.rosservice.connect( "reset_fingers_ros", "reset_fingers", "barrett_hand_controller_msgs/Empty")
+Hand.rosservice.connect( "set_median_filter_ros", "set_median_filter", "barrett_hand_controller_msgs/BHSetMedianFilter")
 
 ## Configure the Hand component
 Hand.configure()

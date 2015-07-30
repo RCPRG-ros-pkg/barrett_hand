@@ -35,8 +35,8 @@ import ar_track_alvar.msg
 from ar_track_alvar.msg import *
 from std_msgs.msg import *
 from geometry_msgs.msg import *
-from barrett_hand_controller_srvs.msg import *
-from barrett_hand_controller_srvs.srv import *
+from barrett_hand_controller_msgs.msg import *
+from barrett_hand_controller_msgs.srv import *
 from cartesian_trajectory_msgs.msg import *
 from visualization_msgs.msg import *
 import actionlib
