@@ -423,40 +423,40 @@ public:
 		ctrl_->getStatusAll(mode[0], mode[1], mode[2], mode[3]);
 
 		// chack for torque switch activation
-		if (abs(q_out_[2]*3.0-q_out_[1]) > 0.03) {
+		if (fabs(q_out_[2]*3.0-q_out_[1]) > 0.03) {
 			status_out_ |= STATUS_TORQUESWITCH1;
 		}
-		if (abs(q_out_[5]*3.0-q_out_[4]) > 0.03) {
+		if (fabs(q_out_[5]*3.0-q_out_[4]) > 0.03) {
 			status_out_ |= STATUS_TORQUESWITCH2;
 		}
-		if (abs(q_out_[7]*3.0-q_out_[6]) > 0.03) {
+		if (fabs(q_out_[7]*3.0-q_out_[6]) > 0.03) {
 			status_out_ |= STATUS_TORQUESWITCH3;
 		}
 
 		if (mode[0] == 0) {
 			status_out_ |= STATUS_IDLE1;
-			if ((status_out_&STATUS_OVERPRESSURE1) == 0 && abs(q_in_[0]-q_out_[1]) > 0.03) {
+			if ((status_out_&STATUS_OVERPRESSURE1) == 0 && fabs(q_in_[0]-q_out_[1]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT1;
 			}
 		}
 
 		if (mode[1] == 0) {
 			status_out_ |= STATUS_IDLE2;
-			if ((status_out_&STATUS_OVERPRESSURE2) == 0 && abs(q_in_[1]-q_out_[4]) > 0.03) {
+			if ((status_out_&STATUS_OVERPRESSURE2) == 0 && fabs(q_in_[1]-q_out_[4]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT2;
 			}
 		}
 
 		if (mode[2] == 0) {
 			status_out_ |= STATUS_IDLE3;
-			if ((status_out_&STATUS_OVERPRESSURE3) == 0 && abs(q_in_[2]-q_out_[6]) > 0.03) {
+			if ((status_out_&STATUS_OVERPRESSURE3) == 0 && fabs(q_in_[2]-q_out_[6]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT3;
 			}
 		}
 
-		if (mode[3] == 0 || (holdEnabled_ && abs(q_in_[3]-q_out_[3]) < 0.05)) {
+		if (mode[3] == 0 || (holdEnabled_ && fabs(q_in_[3]-q_out_[3]) < 0.05)) {
 			status_out_ |= STATUS_IDLE4;
-			if (abs(q_in_[3]-q_out_[3]) > 0.03) {
+			if (fabs(q_in_[3]-q_out_[3]) > 0.03) {
 				status_out_ |= STATUS_OVERCURRENT4;
 			}
 		}
