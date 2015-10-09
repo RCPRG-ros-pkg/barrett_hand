@@ -1,5 +1,6 @@
 /*
- Copyright (c) 2014, Robot Control and Pattern Recognition Group, Warsaw University of Technology
+ Copyright (c) 2014, Robot Control and Pattern Recognition Group,
+ Warsaw University of Technology
  All rights reserved.
  
  Redistribution and use in source and binary forms, with or without
@@ -66,7 +67,8 @@ CANDev::CANDev(std::string dev_name, uint32_t can_id, uint32_t can_mask) {
   rfilter[0].can_id   = can_id;
   rfilter[0].can_mask = can_mask;
 
-  if (rt_dev_setsockopt(dev, SOL_CAN_RAW, CAN_RAW_FILTER, &rfilter, sizeof(struct can_filter)) < 0)
+  if (rt_dev_setsockopt(dev, SOL_CAN_RAW, CAN_RAW_FILTER, &rfilter,
+                                        sizeof(struct can_filter)) < 0)
   {
     std::cout << "Error: filter" << std::endl;
     rt_dev_close(dev);

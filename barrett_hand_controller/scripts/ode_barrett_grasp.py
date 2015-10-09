@@ -49,6 +49,7 @@ from tf import *
 from tf.transformations import * 
 import tf_conversions.posemath as pm
 from tf2_msgs.msg import *
+import rospkg
 
 import PyKDL
 import math
@@ -58,7 +59,6 @@ import copy
 import matplotlib.pyplot as plt
 import thread
 from velma import Velma
-from velmasim import VelmaSim
 import random
 from openravepy import *
 #from ..openravepy_int import KinBody, TriMesh
@@ -79,6 +79,7 @@ from openravepy.misc import OpenRAVEGlobalArguments
 from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
 
+import subprocess
 import ode
 import xode.transform
 
@@ -155,12 +156,17 @@ Class for grasp learning.
                         else:
                             pos.append(positions[i])
 
-                    self.openrave_robot.GetActiveManipulator().SetChuckingDirection(directions)
+                    self.openrave_robot.GetActiveManipulator().SetChuckingDirection([-1,0,1,1])#directions)
+                    print "manipulator name: " + self.openrave_robot.GetActiveManipulator().GetName()
                     target = self.env.GetKinBody("object")
                     self.openrave_robot.SetDOFValues(pos)
+                    raw_input(".")
 
                     contacts,finalconfig,mindist,volume = self.grasper.Grasp(execute=False, outputfinal=True, transformrobot=False, target=target)
-                    
+
+                    print finalconfig
+                    self.openrave_robot.SetDOFValues(finalconfig[0])
+                    raw_input(",")
             except e:
                 print "runGrasp: planning error:"
                 print e
@@ -582,9 +588,46 @@ Class for grasp learning.
         parser = OptionParser(description='Openrave Velma interface')
         OpenRAVEGlobalArguments.addOptions(parser)
         (options, leftargs) = parser.parse_args()
-        self.env = OpenRAVEGlobalArguments.parseAndCreate(options)#,defaultviewer=True)
+        self.env = OpenRAVEGlobalArguments.parseAndCreate(options,defaultviewer=True)
 
-        self.openrave_robot = self.env.ReadRobotXMLFile('robots/barretthand_ros.robot.xml')
+#        self.openrave_robot = self.env.ReadRobotXMLFile('robots/barretthand_ros.robot.xml')
+
+        mimic_joints = [
+        ("right_HandFingerTwoKnuckleOneJoint", "right_HandFingerOneKnuckleOneJoint*1.0", "|right_HandFingerOneKnuckleOneJoint 1.0", ""),
+        ("right_HandFingerOneKnuckleThreeJoint", "right_HandFingerOneKnuckleTwoJoint*0.33333", "|right_HandFingerOneKnuckleTwoJoint 0.33333", ""),
+        ("right_HandFingerTwoKnuckleThreeJoint", "right_HandFingerTwoKnuckleTwoJoint*0.33333", "|right_HandFingerTwoKnuckleTwoJoint 0.33333", ""),
+        ("right_HandFingerThreeKnuckleThreeJoint", "right_HandFingerThreeKnuckleTwoJoint*0.33333", "|right_HandFingerThreeKnuckleTwoJoint 0.33333", ""),
+        ]
+
+        rospack = rospkg.RosPack()
+
+        self.urdf_module = RaveCreateModule(self.env, 'urdf')
+
+        xacro_uri = rospack.get_path('barrett_hand_defs') + '/robots/barrett_hand.urdf.xml'
+
+        urdf_uri = '/tmp/barrett_hand.urdf'
+        srdf_uri = rospack.get_path('barrett_hand_defs') + '/robots/barrett_hand.srdf'
+        arg1 = "collision_model_full:=true"
+        arg2 = "collision_model_simplified:=false"
+        arg3 = "collision_model_enlargement:=0.0"
+        arg4 = "collision_model_no_hands:=false"
+
+        subprocess.call(["rosrun", "xacro", "xacro", "-o", urdf_uri, xacro_uri, arg1, arg2, arg3, arg4])
+        robot_name = self.urdf_module.SendCommand('load ' + urdf_uri + ' ' + srdf_uri )
+        print "robot name: " + robot_name
+        self.openrave_robot = self.env.GetRobot(robot_name)
+
+        self.env.Remove(self.openrave_robot)
+
+        for mimic in mimic_joints:
+            mj = self.openrave_robot.GetJoint(mimic[0])
+            mj.SetMimicEquations(0, mimic[1], mimic[2], mimic[3])
+        self.openrave_robot.GetActiveManipulator().SetChuckingDirection([0,0,0,0])#directions)
+        self.env.Add(self.openrave_robot)
+        self.openrave_robot = self.env.GetRobot(robot_name)
+
+#        print "robots: "
+#        print self.env.GetRobots()
 
         joint_names = []
         print "active joints:"
@@ -602,7 +645,8 @@ Class for grasp learning.
 
         self.env.Add(self.openrave_robot)
 
-        vertices, faces = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
+        vertices, faces = surfaceutils.readStl(rospack.get_path('velma_scripts') + "/data/meshes/klucz_gerda_ascii.stl", scale=1.0)
+#        vertices, faces = surfaceutils.readStl("klucz_gerda_ascii.stl", scale=1.0)
         self.addTrimesh("object", vertices, faces)
 
 #        self.addBox("object", 0.2,0.06,0.06)
@@ -809,7 +853,7 @@ Class for grasp learning.
 
             exit(0)
 
-        if True:
+        if False:
             #
             # generate the set of orientations
             #
@@ -2756,6 +2800,7 @@ Class for grasp learning.
 
                 # simulate the grasp
                 contacts_W,finalconfig,mindist,volume = self.runGrasp(grasp_direction, grasp_initial_configuration)    # spread, f1, f3, f2
+                print len(contacts_W)
                 # set the hand configuration for the grasp
                 self.openrave_robot.SetDOFValues(finalconfig[0])
                 # read the position of all joints
@@ -2773,12 +2818,12 @@ Class for grasp learning.
                 old_m_id = m_id
                 m_id = 0
                 # publish the mesh of the object
-                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+                m_id = self.pub_marker.publishConstantMeshMarker("package://velma_scripts/data/meshes/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
 
                 # publish sphere for the centre of the key handle
-                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
-                sphere_pos = self.T_W_O * PyKDL.Vector(-0.0215,0,0)
-                m_id = self.pub_marker.publishSinglePointMarker(sphere_pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, scale=Vector3(0.0305, 0.0305, 0.0305), T=None)
+#                m_id = self.pub_marker.publishConstantMeshMarker("package://velma_scripts/data/meshes/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+#                sphere_pos = self.T_W_O * PyKDL.Vector(-0.0215,0,0)
+#                m_id = self.pub_marker.publishSinglePointMarker(sphere_pos, m_id, r=0, g=1, b=0, namespace='default', frame_id='world', m_type=Marker.SPHERE, scale=Vector3(0.0305, 0.0305, 0.0305), T=None)
 
 
                 # update the gripper visualization in ros
@@ -2905,7 +2950,7 @@ Class for grasp learning.
                 while not rospy.is_shutdown():
                     m_id = 0
                     # publish the mesh of the object
-                    m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
+                    m_id = self.pub_marker.publishConstantMeshMarker("package://velma_scripts/data/meshes/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=self.T_W_O)
 
                     m_id = self.pub_marker.publishMultiPointsMarker(points_other, m_id, r=0, g=0, b=1, namespace='default', frame_id='world', m_type=Marker.CUBE, scale=Vector3(0.002, 0.002, 0.002), T=self.T_W_O)
                     for contact_idx in range(len(contacts_reduced_O)):
@@ -3118,7 +3163,7 @@ Class for grasp learning.
 
                 # publish the mesh of the object
                 T_W_Osim = self.getOdeBodyPose(body)
-                m_id = self.pub_marker.publishConstantMeshMarker("package://barrett_hand_defs/meshes/objects/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_Osim)
+                m_id = self.pub_marker.publishConstantMeshMarker("package://velma_scripts/data/meshes/klucz_gerda_binary.stl", m_id, r=1, g=0, b=0, scale=1.0, frame_id='world', namespace='default', T=T_W_Osim)
 
                 # update the gripper visualization in ros
                 js = JointState()

@@ -1,5 +1,6 @@
 /*
- Copyright (c) 2014, Robot Control and Pattern Recognition Group, Warsaw University of Technology
+ Copyright (c) 2014, Robot Control and Pattern Recognition Group,
+ Warsaw University of Technology
  All rights reserved.
  
  Redistribution and use in source and binary forms, with or without
@@ -43,42 +44,15 @@
 #define PROP_SG5 46
 // Raw strain gage A/D value (0-4095)
 #define PROP_SG6 47
-// Force in X. Divide by 256 to get Newtons.
-#define PROP_FX 48
-// Force in Y. Divide by 256 to get Newtons.
-#define PROP_FY 49
-// Force in Z. Divide by 256 to get Newtons.
-#define PROP_FZ 50
-// Torque about X. Divide by 4096 to get Newton-meters.
-#define PROP_TX 51
-// Torque about Y. Divide by 4096 to get Newton-meters.
-#define PROP_TY 52
-// Torque about Z. Divide by 4096 to get Newton-meters.
-#define PROP_TZ 53
-// CAN-only. Read returns 2 CAN packets containing all forces and torques. Write (any value) tares the sensor.
+// CAN-only. Read returns 2 CAN packets containing all forces and torques.
+// Write (any value) tares the sensor.
+// Divide force by 256 to get Newtons.
+// Divide torque by 4096 to get Newton-meters.
 #define PROP_FT 54
-// Acceleration in X. Divide by 1024 to get m/s^2.
-#define PROP_AX 55
-// Acceleration in Y. Divide by 1024 to get m/s^2.
-#define PROP_AY 56
-// Acceleration in Z. Divide by 1024 to get m/s^2.
-#define PROP_AZ 57
-// Storage area for calibration gain matrix
-#define PROP_GM 58
-// Storage area for calibration offset vector (unused?)
-#define PROP_OV 59
-// Debugging variable to set LED states
-#define PROP_LED 60
-// Raw thermistor A/D value (0-4095) (location? conversion?)
-#define PROP_T1 61
-// Raw thermistor A/D value (0-4095) (location? conversion?)
-#define PROP_T2 62
-// Raw thermistor A/D value (0-4095) (location? conversion?)
-#define PROP_T3 63
 // CAN-only. Read returns single CAN packet containing all accelerations.
+// Divide acceleration by 1024 to get m/s^2.
 #define PROP_A 64
 
-#define ALL_GROUP 0
 #define GR_PROP_FEEDBACK 6
 #define GR_FT_SENSOR_FORCE 10
 #define GR_FT_SENSOR_TORQUE 11
@@ -89,7 +63,8 @@
 
 #define FORCE_TORQUE_SENSOR_ID 8
 
-BarrettFtSensor::BarrettFtSensor(std::string dev_name) : dev(dev_name, CAN_ID_REC, CAN_MASK_REC) {
+BarrettFtSensor::BarrettFtSensor(std::string dev_name) :
+    dev(dev_name, CAN_ID_REC, CAN_MASK_REC) {
 }
 
 BarrettFtSensor::~BarrettFtSensor() {
@@ -145,7 +120,8 @@ void BarrettFtSensor::setPuckStatus(int32_t status) {
 	setProperty(FORCE_TORQUE_SENSOR_ID, PROP_STAT, status);
 }
 
-uint32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz, int16_t &tx, int16_t &ty, int16_t &tz) {
+uint32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz,
+                                            int16_t &tx, int16_t &ty, int16_t &tz) {
 	uint8_t data[8];
 
 	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_FT);
@@ -173,7 +149,8 @@ uint32_t BarrettFtSensor::readForceTorque(int16_t &fx, int16_t &fy, int16_t &fz,
 	return NO_ERROR;
 }
 
-uint32_t BarrettFtSensor::readStrainGages(int16_t &sg1, int16_t &sg2, int16_t &sg3, int16_t &sg4, int16_t &sg5, int16_t &sg6) {
+uint32_t BarrettFtSensor::readStrainGages(int16_t &sg1, int16_t &sg2, int16_t &sg3,
+                                            int16_t &sg4, int16_t &sg5, int16_t &sg6) {
 	int32_t value;
 	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_SG1);
 	recProperty(FORCE_TORQUE_SENSOR_ID, value);
@@ -205,7 +182,8 @@ uint32_t BarrettFtSensor::readStrainGages(int16_t &sg1, int16_t &sg2, int16_t &s
 uint32_t BarrettFtSensor::readAcceleration(int16_t &ax, int16_t &ay, int16_t &az) {
 	uint8_t data[8];
 	reqProperty(FORCE_TORQUE_SENSOR_ID, PROP_A);
-	int ret = dev.waitForReply(GROUP(FORCE_TORQUE_SENSOR_ID, GR_FT_SENSOR_ACCELERATION), data);
+	int ret = dev.waitForReply(GROUP(FORCE_TORQUE_SENSOR_ID, GR_FT_SENSOR_ACCELERATION),
+                                data);
 	if (ret != 6) {
 		return WRONG_LENGTH;
 	}

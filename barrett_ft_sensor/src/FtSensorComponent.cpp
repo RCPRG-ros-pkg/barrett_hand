@@ -1,5 +1,6 @@
 /*
- Copyright (c) 2014, Robot Control and Pattern Recognition Group, Warsaw University of Technology
+ Copyright (c) 2014, Robot Control and Pattern Recognition Group,
+ Warsaw University of Technology
  All rights reserved.
  
  Redistribution and use in source and binary forms, with or without
@@ -40,10 +41,7 @@
 
 #include "FtSensor.h"
 
-//#include <fcntl.h>
 #include <stdlib.h>
-//#include <sys/types.h>
-//#include <sys/stat.h>
 
 using namespace std;
 
@@ -84,8 +82,10 @@ public:
 		this->addPort(status_out_).doc("Sends out the sensor status");
 		this->addPort(sg_out_).doc("Sends out the raw strain gages");
 
-		this->provides()->addOperation("tare",&FtSensorComponent::tare,this,RTT::OwnThread);
-		this->provides()->addOperation("tare_ros",&FtSensorComponent::tareRos,this,RTT::OwnThread);
+		this->provides()->addOperation("tare",&FtSensorComponent::tare,this,
+                                                                    RTT::OwnThread);
+		this->provides()->addOperation("tare_ros",&FtSensorComponent::tareRos,this,
+                                                                    RTT::OwnThread);
 
 		this->addProperty("device_name", dev_name_);
 		this->addProperty("prefix", prefix_);
