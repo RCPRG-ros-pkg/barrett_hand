@@ -35,7 +35,10 @@
 #include <rtt/Port.hpp>
 #include <rtt/RTT.hpp>
 #include <rtt/Component.hpp>
+
 #include <ros/ros.h>
+#include <std_msgs/Empty.h>
+#include <std_msgs/Int32.h>
 
 #include "rtt_rosclock/rtt_rosclock.h"
 
@@ -92,6 +95,11 @@ private:
 	barrett_hand_controller_msgs::BHTemp temp_out_;
 	barrett_hand_controller_msgs::BHPressureState tactile_out_;
 
+    std_msgs::Empty reset_in_;
+    std_msgs::Empty calibrate_in_;
+    std_msgs::Int32 filter_in_;
+    barrett_hand_controller_msgs::BHPressureInfo pressure_info_;
+
 	// OROCOS ports
 	InputPort<Eigen::VectorXd> port_q_in_;
 	InputPort<Eigen::VectorXd> port_v_in_;
@@ -103,6 +111,12 @@ private:
 	OutputPort<Eigen::VectorXd> port_t_out_;
 	OutputPort<barrett_hand_controller_msgs::BHTemp> port_temp_out_;
 	OutputPort<barrett_hand_controller_msgs::BHPressureState> port_tactile_out_;
+
+    // ROS ports
+	InputPort<std_msgs::Empty> port_reset_in_;
+	InputPort<std_msgs::Empty> port_calibrate_in_;
+	InputPort<std_msgs::Int32> port_filter_in_;
+	OutputPort<barrett_hand_controller_msgs::BHPressureInfo> port_tactile_info_out_;
 
 	// ROS parameters
 	string dev_name_;
@@ -161,6 +175,12 @@ public:
 		this->ports()->addPort("BHTemp", port_temp_out_);
 		this->ports()->addPort("BHPressureState", port_tactile_out_);
 
+        // ROS ports
+        this->ports()->addPort("reset_fingers", port_reset_in_);
+        this->ports()->addPort("calibrate_tactile_sensors", port_calibrate_in_);
+        this->ports()->addPort("set_median_filter", port_filter_in_);
+        this->ports()->addPort("tactile_info_out", port_tactile_info_out_);
+/*
 		this->provides()->addOperation("reset_fingers",&BarrettHand::resetFingers,this,RTT::OwnThread);
 		this->provides()->addOperation("reset_fingers_ros",&BarrettHand::resetFingersRos,this,RTT::OwnThread);
 		this->provides()->addOperation("calibrate",&BarrettHand::calibrateTactileSensors,this,RTT::OwnThread);
@@ -168,6 +188,7 @@ public:
 		this->provides()->addOperation("get_pressure_info_ros",&BarrettHand::getPressureInfoRos,this,RTT::OwnThread);
 		this->provides()->addOperation("set_median_filter",&BarrettHand::setMedianFilter,this,RTT::OwnThread);
 		this->provides()->addOperation("set_median_filter_ros",&BarrettHand::setMedianFilterRos,this,RTT::OwnThread);
+*/
 
 		this->addProperty("device_name", dev_name_);
 		this->addProperty("prefix", prefix_);
@@ -204,6 +225,34 @@ public:
 			port_t_out_.setDataSample(t_out_);
 
 			port_temp_out_.setDataSample(temp_out_);
+
+            // tactile array info
+		    pressure_info_.sensor.resize(4);
+		    for (int id=0; id<4; ++id)
+		    {
+			    pressure_info_.sensor[id].frame_id = ts_[id]->getName();
+			    pressure_info_.sensor[id].center.resize(24);
+			    pressure_info_.sensor[id].halfside1.resize(24);
+			    pressure_info_.sensor[id].halfside2.resize(24);
+			    pressure_info_.sensor[id].force_per_unit.resize(24);
+			    for (int i=0; i<24; ++i)
+			    {
+				    pressure_info_.sensor[id].force_per_unit[i] = 1.0/256.0;
+			    }
+		    }
+
+		    for (int id=0; id<4; ++id)
+		    {
+			    for (int i=0; i<24; ++i)
+			    {
+				    pressure_info_.sensor[id].center[i] = ts_[id]->getCenter(i);
+				    pressure_info_.sensor[id].halfside1[i] = ts_[id]->getHalfside1(i);
+				    pressure_info_.sensor[id].halfside2[i] = ts_[id]->getHalfside2(i);
+			    }
+		    }
+            port_tactile_info_out_.setDataSample(pressure_info_);
+
+            port_tactile_out_.setDataSample(tactile_out_);
 
 			if (ctrl_->isDevOpened()) {
 				return true;
@@ -244,6 +293,24 @@ public:
 	// Temperature is published every 100 ms (10 Hz).
 	void updateHook()
 	{
+        if (port_reset_in_.read(reset_in_) == RTT::NewData) {
+    		resetFingersCounter_ = 3000;
+        }
+
+        if (port_calibrate_in_.read(calibrate_in_) == RTT::NewData) {
+		    for (int id=0; id<4; ++id)
+		    {
+			    ts_[id]->startCalibration();
+		    }
+        }
+
+        if (port_filter_in_.read(filter_in_) == RTT::NewData) {
+		    if (filter_in_.data >= 1 && filter_in_.data <= median_filter_max_samples_)
+		    {
+			    median_filter_samples_ = filter_in_.data;
+		    }
+        }
+
 		if (resetFingersCounter_ > 0)
 		{
 			--resetFingersCounter_;
@@ -366,6 +433,7 @@ public:
 			}
 
 			port_temp_out_.write(temp_out_);
+            port_tactile_info_out_.write(pressure_info_);
 		}
 
 		int i=((loop_counter_+2)%25);
@@ -477,81 +545,6 @@ public:
 
 		loop_counter_ = (loop_counter_+1)%1000;
 	}
-
-	void resetFingers()
-	{
-		resetFingersCounter_ = 3000;
-	}
-
-	bool resetFingersRos(barrett_hand_controller_msgs::Empty::Request &req, barrett_hand_controller_msgs::Empty::Response &res)
-	{
-		resetFingers();
-		return true;
-	}
-
-	bool getPressureInfoRos(barrett_hand_controller_msgs::BHGetPressureInfo::Request  &req,
-	         barrett_hand_controller_msgs::BHGetPressureInfo::Response &res)
-	{
-		res.info.sensor.resize(4);
-		for (int id=0; id<4; ++id)
-		{
-			res.info.sensor[id].frame_id = ts_[id]->getName();
-			res.info.sensor[id].center.resize(24);
-			res.info.sensor[id].halfside1.resize(24);
-			res.info.sensor[id].halfside2.resize(24);
-			res.info.sensor[id].force_per_unit.resize(24);
-			for (int i=0; i<24; ++i)
-			{
-				res.info.sensor[id].force_per_unit[i] = 1.0/256.0;
-			}
-		}
-
-		for (int id=0; id<4; ++id)
-		{
-			for (int i=0; i<24; ++i)
-			{
-				res.info.sensor[id].center[i] = ts_[id]->getCenter(i);
-				res.info.sensor[id].halfside1[i] = ts_[id]->getHalfside1(i);
-				res.info.sensor[id].halfside2[i] = ts_[id]->getHalfside2(i);
-			}
-		}
-
-		return true;
-	}
-
-	void calibrateTactileSensors()
-	{
-		for (int id=0; id<4; ++id)
-		{
-			ts_[id]->startCalibration();
-		}
-	}
-
-	bool calibrateTactileSensorsRos(barrett_hand_controller_msgs::Empty::Request &req,
-	         barrett_hand_controller_msgs::Empty::Response &res)
-	{
-		calibrateTactileSensors();
-
-		return true;
-	}
-
-	bool setMedianFilter(int32_t median_filter_samples)
-	{
-		if (median_filter_samples >= 1 && median_filter_samples <= median_filter_max_samples_)
-		{
-			median_filter_samples_ = median_filter_samples;
-			return true;
-		}
-		return false;
-	}
-
-	bool setMedianFilterRos(barrett_hand_controller_msgs::BHSetMedianFilter::Request  &req,
-	         barrett_hand_controller_msgs::BHSetMedianFilter::Response &res)
-	{
-		res.result = setMedianFilter(req.samples);
-		return true;
-	}
-
 };
 ORO_CREATE_COMPONENT(BarrettHand)
 
