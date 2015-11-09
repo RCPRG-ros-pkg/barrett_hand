@@ -23,13 +23,6 @@ stream("Hand.calibrate_tactile_sensors", ros.comm.topic("calibrate_tactile_senso
 stream("Hand.set_median_filter", ros.comm.topic("set_median_filter"))
 stream("Hand.tactile_info_out", ros.comm.topic("tactile_info_out"))
 
-## Connect the services
-#loadService("Hand","rosservice")
-#Hand.rosservice.connect( "get_pressure_info_ros", "get_pressure_info", "barrett_hand_controller_msgs/BHGetPressureInfo")
-#Hand.rosservice.connect( "calibrate_ros", "calibrate_tactile_sensors", "barrett_hand_controller_msgs/Empty")
-#Hand.rosservice.connect( "reset_fingers_ros", "reset_fingers", "barrett_hand_controller_msgs/Empty")
-#Hand.rosservice.connect( "set_median_filter_ros", "set_median_filter", "barrett_hand_controller_msgs/BHSetMedianFilter")
-
 ## Configure the Hand component
 Hand.configure()
 
