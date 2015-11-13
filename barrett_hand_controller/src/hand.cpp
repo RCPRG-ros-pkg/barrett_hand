@@ -27,9 +27,7 @@
 
 #include <barrett_hand_controller_msgs/BHPressureState.h>
 #include <barrett_hand_controller_msgs/BHTemp.h>
-#include <barrett_hand_controller_msgs/Empty.h>
-#include <barrett_hand_controller_msgs/BHGetPressureInfo.h>
-#include <barrett_hand_controller_msgs/BHSetMedianFilter.h>
+#include <barrett_hand_controller_msgs/BHPressureInfo.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -180,15 +178,6 @@ public:
         this->ports()->addPort("calibrate_tactile_sensors", port_calibrate_in_);
         this->ports()->addPort("set_median_filter", port_filter_in_);
         this->ports()->addPort("tactile_info_out", port_tactile_info_out_);
-/*
-		this->provides()->addOperation("reset_fingers",&BarrettHand::resetFingers,this,RTT::OwnThread);
-		this->provides()->addOperation("reset_fingers_ros",&BarrettHand::resetFingersRos,this,RTT::OwnThread);
-		this->provides()->addOperation("calibrate",&BarrettHand::calibrateTactileSensors,this,RTT::OwnThread);
-		this->provides()->addOperation("calibrate_ros",&BarrettHand::calibrateTactileSensorsRos,this,RTT::OwnThread);
-		this->provides()->addOperation("get_pressure_info_ros",&BarrettHand::getPressureInfoRos,this,RTT::OwnThread);
-		this->provides()->addOperation("set_median_filter",&BarrettHand::setMedianFilter,this,RTT::OwnThread);
-		this->provides()->addOperation("set_median_filter_ros",&BarrettHand::setMedianFilterRos,this,RTT::OwnThread);
-*/
 
 		this->addProperty("device_name", dev_name_);
 		this->addProperty("prefix", prefix_);
