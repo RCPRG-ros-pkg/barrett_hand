@@ -43,13 +43,11 @@
 #include <map>
 #include <math.h>
 #include "MotorController.h"
-#include "tactile_geometry.h"
 
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "Tactile.h"
 
 #include "Eigen/Dense"
 

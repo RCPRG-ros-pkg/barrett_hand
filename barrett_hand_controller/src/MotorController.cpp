@@ -50,8 +50,6 @@
 #define PROP_TEMP 9
 // Thermistor (motor) temperature
 #define PROP_THERM 20
-// Tactile sensor array access (special)
-#define PROP_TACT 106
 // Flag to hold position after move
 #define PROP_HOLD 77
 // Max torque
@@ -78,14 +76,40 @@ const int MODE_TRAPEZOID = 5;
 #define ALL_GROUP 0
 #define PFEEDBACK_GROUP 3
 #define HAND_GROUP 5
-#define TACTILE_FULL_GROUP 9
 
 #define GROUP(from, to) 0x400 | ((from) << 5) | (to)
 
-MotorController::MotorController(std::string dev_name) : dev(dev_name) {
+MotorController::MotorController(const std::string &dev_name) {
+
+    // 11                               000 0000 1011
+    // 12                               000 0000 1100
+    // 13                               000 0000 1101
+    // 14                               000 0000 1110
+    // GROUP(11, PFEEDBACK_GROUP)       001 0110 0011
+    // GROUP(12, PFEEDBACK_GROUP)       001 1000 0011
+    // GROUP(13, PFEEDBACK_GROUP)       001 1010 0011
+    // GROUP(14, PFEEDBACK_GROUP)       001 1100 0011
+    // GROUP(11, 6)                     001 0110 0110
+    // GROUP(12, 6)                     001 1000 0110
+    // GROUP(13, 6)                     001 1010 0110
+    // GROUP(14, 6)                     001 1100 0110
+    // GROUP(0, HAND_GROUP)             000 0000 0101
+
+    // mask:    0x07FF                  111 1111 1111
+
+    std::vector<CANDev::FilterElement > filters;
+    for (int puck_id = 0; puck_id < 4; puck_id++) {
+        filters.push_back( CANDev::FilterElement(11 + puck_id, 0x07FF) );
+        filters.push_back( CANDev::FilterElement(GROUP(11 + puck_id, PFEEDBACK_GROUP), 0x07FF) );
+        filters.push_back( CANDev::FilterElement(GROUP(11 + puck_id, 6), 0x07FF) );
+    }
+    filters.push_back( CANDev::FilterElement(GROUP(0, HAND_GROUP), 0x07FF) );
+
+    pdev_ = new CANDev(dev_name, "MotorController", filters);
 }
 
 MotorController::~MotorController() {
+    delete pdev_;
 }
 
 void MotorController::setProperty(int id, uint32_t property, int32_t value) {
@@ -99,10 +123,10 @@ void MotorController::setProperty(int id, uint32_t property, int32_t value) {
 	frame.data[1] = 0;
 	
 	for(unsigned int i=2; i<6; i++){
-    frame.data[i] = (uint8_t)(value & 0x000000FF);
-    value >>= 8;
-  }
-	dev.send(frame.can_id, frame.can_dlc, frame.data);
+        frame.data[i] = (uint8_t)(value & 0x000000FF);
+        value >>= 8;
+    }
+	pdev_->send(frame.can_id, frame.can_dlc, frame.data);
 }
 
 void MotorController::reqProperty(int id, uint32_t property) {
@@ -114,12 +138,12 @@ void MotorController::reqProperty(int id, uint32_t property) {
 	
 	frame.data[0] = property;
 	
-	dev.send(frame.can_id, frame.can_dlc, frame.data);
+	pdev_->send(frame.can_id, frame.can_dlc, frame.data);
 }
 
 void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 	uint8_t data[8];
-	int ret = dev.waitForReply(GROUP(id, PFEEDBACK_GROUP), data);
+	int ret = pdev_->waitForReply(GROUP(id, PFEEDBACK_GROUP), data);
 	
 	if(ret == 6) {
 		p = (int32_t(0x3F & data[0]) << 16) | ((int32_t)data[1] << 8) | (int32_t)data[2];
@@ -135,21 +159,12 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 		jp = 0x3FFFFF - jp;
 }
 
-void MotorController::recTact(int id, int32_t &gr, int32_t &a, int32_t &b, int32_t &c, int32_t &d, int32_t &e) {
-	uint8_t data[8];
-	dev.waitForReply(GROUP(id, TACTILE_FULL_GROUP), data);
-
-	gr = (data[0]>>4)&0x0F;
-	a = ((data[0]&0x0F)<<8) | data[1];
-	b = (data[2]<<4) | ((data[3]>>4)&0x0F);
-	c = ((data[3]&0x0F)<<8) | data[4];
-	d = (data[5]<<4) | ((data[6]>>4)&0x0F);
-	e = ((data[6]&0x0F)<<8) | data[7];
-}
-
 void MotorController::recProperty(int id, int32_t &value) {
 	uint8_t data[8];
-	int ret = dev.waitForReply(GROUP(id, 6), data);
+	int ret = pdev_->waitForReply(GROUP(id, 6), data);
+    if (ret <= 0) {
+        return;
+    }
 	
 	value = data[ret-1] & 0x80 ? -1L : 0;
 	for (unsigned int i = ret-1; i >= 2; i--)
@@ -198,12 +213,12 @@ void MotorController::close(int id) {
 	setProperty(11 + id, PROP_CMD, CMD_CLOSE);
 }
 
-void MotorController::setTargetPos(int id, int32_t pos) {
-	setProperty(11 + id, PROP_E, pos);
+void MotorController::setTargetPos(int puck_id, int32_t pos) {
+	setProperty(11 + puck_id, PROP_E, pos);
 }
 
-void MotorController::setTargetVel(int id, int32_t vel) {
-	setProperty(11 + id, PROP_V, vel);
+void MotorController::setTargetVel(int puck_id, int32_t vel) {
+	setProperty(11 + puck_id, PROP_V, vel);
 }
 
 void MotorController::moveAll() {
@@ -214,14 +229,14 @@ void MotorController::moveAllVel() {
 	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_VELOCITY);
 }
 
-void MotorController::getPosition(int id, int32_t &p, int32_t &jp) {
-	reqProperty(11 + id, PROP_P);
-	recEncoder2(11 + id, p, jp);
+void MotorController::getPosition(int puck_id, int32_t &p, int32_t &jp) {
+	reqProperty(11 + puck_id, PROP_P);
+	recEncoder2(11 + puck_id, p, jp);
 }
 
-void MotorController::getStatus(int id, int32_t &mode) {
-	reqProperty(11+id, PROP_MODE);
-	recProperty(11+id, mode);
+void MotorController::getStatus(int puck_id, int32_t &mode) {
+	reqProperty(11+puck_id, PROP_MODE);
+	recProperty(11+puck_id, mode);
 }
 
 void MotorController::getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4) {
@@ -253,16 +268,6 @@ void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int3
 	recEncoder2(11 + 1, p2, jp2);
 	recEncoder2(11 + 2, p3, jp3);
 	recEncoder2(11 + 3, s, jp);
-}
-
-void MotorController::getTactile(int id, tact_array_t &tact) {
-	setProperty(11 + id, PROP_TACT, 2);
-	int gr;
-	recTact(11 + id, gr, tact[0], tact[1], tact[2], tact[3], tact[4]);
-	recTact(11 + id, gr, tact[5], tact[6], tact[7], tact[8], tact[9]);
-	recTact(11 + id, gr, tact[10], tact[11], tact[12], tact[13], tact[14]);
-	recTact(11 + id, gr, tact[15], tact[16], tact[17], tact[18], tact[19]);
-	recTact(11 + id, gr, tact[20], tact[21], tact[22], tact[23], tact[24]);
 }
 
 int32_t MotorController::getParameter(int32_t id, int32_t prop_id)
@@ -309,7 +314,7 @@ void MotorController::setHoldPosition(int id, bool hold) {
 }
 
 bool MotorController::isDevOpened() {
-	return dev.isOpened();
+	return pdev_->isOpened();
 }
 
 

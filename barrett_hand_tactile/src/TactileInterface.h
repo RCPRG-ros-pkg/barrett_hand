@@ -25,33 +25,25 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef _CAN_DEV_H_
-#define _CAN_DEV_H_
+#ifndef _TACTILE_INTERFACE_H_
+#define _TACTILE_INTERFACE_H_
 
-#include <string>
-#include <vector>
+#include <inttypes.h>
+#include "can_driver/CANDev.h"
 
-#if !defined(HAVE_RTNET)
-#include <linux/can.h>
-#include <linux/can/raw.h>
-#else
-#include <rtdm/rtcan.h> // Defines for the RT CAN socket
-#endif
-
-class CANDev {
+class TactileInterface {
 public:
-  CANDev(std::string dev);
-  ~CANDev();
-  
-  void send(uint32_t can_id, uint8_t len, const uint8_t *data);
-  uint32_t waitForReply(uint32_t can_id, uint8_t *data);
-  bool isOpened();
+	typedef int32_t tact_array_t[24];
+	TactileInterface(const std::string &dev_name);
+	~TactileInterface();
+	void recTact(int can_id, int32_t &gr, int32_t &a, int32_t &b, int32_t &c, int32_t &d, int32_t &e);
+	void getTactile(int id, tact_array_t &tact);
+	bool isDevOpened();
 protected:
-private:
+	void setProperty(int id, uint32_t property, int32_t value);
 
-  int dev;
-  std::vector<can_frame> frame_buf;
+	CANDev *pdev_;
 };
 
-#endif
+#endif  // TACTILE_INTERFACE
 

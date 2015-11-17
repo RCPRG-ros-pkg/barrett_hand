@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>barrett_hand_controller</name>
+  <name>barrett_hand_tactile</name>
   <version>0.0.0</version>
   <description>The barrett_hand_controller package</description>
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(barrett_hand_controller)
+project(barrett_hand_tactile)
 
 
 find_package(catkin REQUIRED COMPONENTS
@@ -13,14 +13,12 @@ find_package(Eigen REQUIRED)
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS} ${Eigen_INCLUDE_DIRS})
 
-orocos_component(barrett_hand_controller src/MotorController.cpp src/hand.cpp)
-
-orocos_component(barrett_hand_move_action src/barrett_hand_move_action.cpp)
+orocos_component(barrett_hand_tactile src/TactileInterface.cpp src/Tactile.cpp src/hand_tactile.cpp)
 
 if(${OROCOS_TARGET} STREQUAL "xenomai" )
-  target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES} ${Xenomai_RTDM_LIBRARIES})
+  target_link_libraries(barrett_hand_tactile ${catkin_LIBRARIES} ${Xenomai_RTDM_LIBRARIES})
 else()
-  target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES})
+  target_link_libraries(barrett_hand_tactile ${catkin_LIBRARIES})
 endif()
 
 #Start of user code user_build
@@ -32,4 +30,3 @@ endif()
 
 orocos_generate_package()
 
-#catkin_python_setup()

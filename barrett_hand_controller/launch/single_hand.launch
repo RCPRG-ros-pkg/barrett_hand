@@ -15,6 +15,8 @@
   <group ns="$(arg PREFIX)_hand_controller">
     <rosparam param="Hand/device_name" subst_value="True">$(arg DEVICE)</rosparam>
     <rosparam param="Hand/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+    <rosparam param="HandTact/device_name" subst_value="True">$(arg DEVICE)</rosparam>
+    <rosparam param="HandTact/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     <rosparam param="HandMoveAction/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     <rosparam param="JntPub/joint_names" subst_value="True">[$(arg PREFIX)_HandFingerOneKnuckleOneJoint, $(arg PREFIX)_HandFingerOneKnuckleTwoJoint, $(arg PREFIX)_HandFingerOneKnuckleThreeJoint, $(arg PREFIX)_HandFingerTwoKnuckleOneJoint, $(arg PREFIX)_HandFingerTwoKnuckleTwoJoint, $(arg PREFIX)_HandFingerTwoKnuckleThreeJoint, $(arg PREFIX)_HandFingerThreeKnuckleTwoJoint, $(arg PREFIX)_HandFingerThreeKnuckleThreeJoint]</rosparam>
   </group>
@@ -30,6 +32,12 @@
     <node
       name="$(arg PREFIX)_hand_controller_markers"
       pkg="barrett_hand_controller" type="markers.py"
+      args="$(arg PREFIX) --">
+    </node>
+
+    <node
+      name="$(arg PREFIX)_hand_tactile_vis"
+      pkg="barrett_hand_tactile" type="markers.py"
       args="$(arg PREFIX) --">
     </node>
   </group>

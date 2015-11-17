@@ -95,13 +95,13 @@ geometry_msgs::Vector3 Tactile::getHalfside2(int i)
 	return geometry_msgs::Vector3();
 }
 
-void Tactile::updatePressure(const MotorController::tact_array_t &tact)
+void Tactile::updatePressure(const TactileInterface::tact_array_t &tact)
 {
         ++tact_index_;
 	if (tact_index_ >= median_filter_max_samples_)
 		tact_index_ = 0;
 
-	memcpy(tact_[tact_index_], tact, sizeof(MotorController::tact_array_t));
+	memcpy(tact_[tact_index_], tact, sizeof(TactileInterface::tact_array_t));
 
 	if (calibration_counter_ < calibration_counter_max_)
 	{

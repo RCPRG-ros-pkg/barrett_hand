@@ -35,7 +35,6 @@ import copy
 import std_msgs.msg
 from std_msgs.msg import ColorRGBA
 from barrett_hand_controller_msgs.msg import *
-from barrett_hand_controller_msgs.srv import *
 from visualization_msgs.msg import *
 from interactive_markers.interactive_marker_server import *
 from interactive_markers.menu_handler import *
@@ -48,7 +47,6 @@ import barrett_hand_interface
 
 import tf
 from tf import *
-#from tf.transformations import euler_from_quaternion
 from tf2_msgs.msg import *
 
 class BarrettHandMarkers:
@@ -93,7 +91,7 @@ class BarrettHandMarkers:
             self.f2_val = val
 
         if ( (self.update_on == "mouse" and feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP) or (feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK and feedback.control_name == "button1_control") ):
-            self.bh.moveHand([self.f1_val, self.f2_val, self.f3_val, self.spread_val], [1.2, 1.2, 1.2, 1.2], [4000, 4000, 4000, 4000], 300, hold=True)
+            self.bh.moveHand([self.f1_val, self.f2_val, self.f3_val, self.spread_val], [1.2, 1.2, 1.2, 1.2], [4000, 4000, 4000, 4000], 50, hold=True)
 
     def createSphereMarkerControl(self, scale, position, color):
         marker = Marker()
@@ -203,155 +201,6 @@ class BarrettHandMarkers:
 
         self.server.applyChanges();
 
-    # ****************** markers **********************
-
-    def convertToRGB(self, value):
-        r = 0
-        g = 0
-        b = 0
-        if value<256:
-            b = 255
-            g = value
-        elif value<512:
-            b = 255-(value-256)
-            g = 255
-        elif value<768:
-            g = 255
-            r = (value-512)
-        elif value<1024:
-            r = 255
-            g = 255-(value-768)
-        else:
-            r = 255
-            g = 0
-            b = 0
-        result = []
-        result.append(r)
-        result.append(g)
-        result.append(b)
-        return result
-
-    def spin(self):
-        
-        while not rospy.is_shutdown():
-
-            m = MarkerArray()
-
-            stamp, f1_tact, f2_tact, f3_tact, palm_tact = self.bh.getTactileData()
-            finger_skin_data = []
-            finger_skin_data.append(f1_tact)
-            finger_skin_data.append(f2_tact)
-            finger_skin_data.append(f3_tact)
-            finger_skin_data.append(palm_tact)
-
-            frame_id = []
-            frame_id.append(self.prefix+"_HandFingerOneKnuckleThreeLink")
-            frame_id.append(self.prefix+"_HandFingerTwoKnuckleThreeLink")
-            frame_id.append(self.prefix+"_HandFingerThreeKnuckleThreeLink")
-            frame_id.append(self.prefix+"_HandPalmLink")
-
-            arrows = False
-
-            if arrows:
-                for sens in range(0, 4):
-                    for i in range(0, 24):
-                        halfside1 = PyKDL.Vector(pressure_info.sensor[sens].halfside1[i].x, pressure_info.sensor[sens].halfside1[i].y, pressure_info.sensor[sens].halfside1[i].z)
-                        halfside2 = PyKDL.Vector(pressure_info.sensor[sens].halfside2[i].x, pressure_info.sensor[sens].halfside2[i].y, pressure_info.sensor[sens].halfside2[i].z)
-                        # calculate cross product: halfside1 x halfside2
-                        norm = halfside1*halfside2
-                        norm.Normalize()
-                        scale = 0
-                        if sens == 0:
-                            scale = data.finger1_tip[i]/256.0
-                        elif sens == 1:
-                            scale = data.finger2_tip[i]/256.0
-                        elif sens == 2:
-                            scale = data.finger3_tip[i]/256.0
-                        else:
-                            scale = data.palm_tip[i]/256.0
-                        norm = norm*scale*0.01
-                        marker = Marker()
-                        marker.header.frame_id = frame_id[sens]
-                        marker.header.stamp = rospy.Time.now()
-                        marker.ns = frame_id[sens]
-                        marker.id = i
-                        marker.type = 0
-                        marker.action = 0
-                        marker.points.append(Point(pressure_info.sensor[sens].center[i].x,pressure_info.sensor[sens].center[i].y,pressure_info.sensor[sens].center[i].z))
-                        marker.points.append(Point(pressure_info.sensor[sens].center[i].x+norm.x(), pressure_info.sensor[sens].center[i].y+norm.y(), pressure_info.sensor[sens].center[i].z+norm.z()))
-                        marker.pose = Pose( Point(0,0,0), Quaternion(0,0,0,1) )
-                        marker.scale = Vector3(0.001, 0.002, 0)
-                        marker.color = ColorRGBA(1,0,0,1)
-                        m.markers.append(marker)
-                self.pub.publish(m)
-            else:
-                for sens in range(0, 4):
-                    for i in range(0, 24):
-                        value = self.convertToRGB(int(finger_skin_data[sens][i]/2))
-
-                        marker = Marker()
-                        marker.header.frame_id = frame_id[sens]
-                        marker.header.stamp = rospy.Time.now()
-                        marker.ns = frame_id[sens]
-                        marker.id = i
-                        marker.type = 1
-                        marker.action = 0
-                        if sens < 3:
-                            marker.pose = pm.toMsg(self.bh.pressure_frames[i])
-                            marker.scale = Vector3(self.bh.pressure_cells_size[i][0], self.bh.pressure_cells_size[i][1], 0.004)
-                        else:
-                            marker.pose = pm.toMsg(self.bh.palm_pressure_frames[i])
-                            marker.scale = Vector3(self.bh.palm_pressure_cells_size[i][0], self.bh.palm_pressure_cells_size[i][1], 0.004)
-                        marker.color = ColorRGBA(1.0/255.0*value[0], 1.0/255.0*value[1], 1.0/255.0*value[2],1)
-                        m.markers.append(marker)
-                self.pub.publish(m)
-
-
-        #  palm   f1  f2  f3
-        #         xxx xxx xxx
-        #         xxx xxx xxx 
-        #  xxxxx  xxx xxx xxx
-        # xxxxxxx xxx xxx xxx
-        # 56789xx 9xx 9xx 9xx
-        #  01234  678 678 678
-        #         345 345 345
-        #         012 012 012
-
-            im = Image()
-            im.height = 8
-            im.width = 19
-            im.encoding = "rgb8"
-            im.is_bigendian = 0
-            im.step = im.width*3
-            im.data = [0]*(im.step*im.height)
-            for finger in range(0, 3):
-                for y in range(0, 8):
-                    for x in range(0, 3):
-                        xim = 8 + x + finger * 4
-                        yim = im.height-1-y
-                        value = self.convertToRGB(int(finger_skin_data[finger][y*3+x]/2))
-                        im.data[(yim*im.width + xim)*3+0] = value[0]
-                        im.data[(yim*im.width + xim)*3+1] = value[1]
-                        im.data[(yim*im.width + xim)*3+2] = value[2]
-
-            palm_im_x = [1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 0, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5]
-            palm_im_y = [5, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]
-
-            for i in range(0, 24):
-                xim = palm_im_x[i]
-                yim = palm_im_y[i]
-                value = self.convertToRGB(int(finger_skin_data[3][i]/2))
-                im.data[(yim*im.width + xim)*3+0] = value[0]
-                im.data[(yim*im.width + xim)*3+1] = value[1]
-                im.data[(yim*im.width + xim)*3+2] = value[2]
-
-            self.tactileImagepub.publish(im)
-            rospy.sleep(0.1)
-
-    def run_mark(self):
-        self.pub = rospy.Publisher('/' + self.prefix + '_hand/tactile_markers', MarkerArray, queue_size=100)
-        self.tactileImagepub = rospy.Publisher('/' + self.prefix + '_hand/tactile_image', Image, queue_size=100)
-
     def __init__(self, prefix, no_interactive, no_tactile):
         self.prefix = prefix
         self.bh = barrett_hand_interface.BarrettHand(self.prefix)
@@ -360,8 +209,6 @@ class BarrettHandMarkers:
 
         if no_interactive == 0:
             self.run_int()
-        if no_tactile == 0:
-            self.run_mark()
 
 if __name__ == '__main__':
     a = []
@@ -396,6 +243,6 @@ if __name__ == '__main__':
     bhm = BarrettHandMarkers(prefix, noint, notac)
 
     # start the ROS main loop
-    bhm.spin()
+    rospy.spin()
 
 

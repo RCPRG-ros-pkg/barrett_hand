@@ -27,7 +27,7 @@
 
 #include "geometry_msgs/Vector3.h"
 #include <string>
-#include "MotorController.h"
+#include "TactileInterface.h"
 
 class Tactile
 {
@@ -43,7 +43,7 @@ public:
 	geometry_msgs::Vector3 getCenter(int i);
 	geometry_msgs::Vector3 getHalfside1(int i);
 	geometry_msgs::Vector3 getHalfside2(int i);
-	void updatePressure(const MotorController::tact_array_t &tact);
+	void updatePressure(const TactileInterface::tact_array_t &tact);
 	int selectionAlgorithm(int *tab, int left,int right,int kth);
 	int32_t getPressure(int i, int median_filter_samples);
 
