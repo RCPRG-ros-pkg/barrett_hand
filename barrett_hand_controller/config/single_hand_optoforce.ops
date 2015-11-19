@@ -28,6 +28,11 @@ stream("Hand.reset_fingers", ros.comm.topic("reset_fingers"))
 stream("HandForce.force0_out", ros.comm.topic("/optoforce/force0"))
 stream("HandForce.force1_out", ros.comm.topic("/optoforce/force1"))
 stream("HandForce.force2_out", ros.comm.topic("/optoforce/force2"))
+stream("HandForce.force0_scaled_out", ros.comm.topic("/optoforce/force0_scaled"))
+stream("HandForce.force1_scaled_out", ros.comm.topic("/optoforce/force1_scaled"))
+stream("HandForce.force2_scaled_out", ros.comm.topic("/optoforce/force2_scaled"))
+
+stream("HandForce.tare_in", ros.comm.topic("/optoforce/tare"))
 
 connect("HandForce.total_measured_force_out", "Hand.max_measured_pressure_in", ConnPolicy());
 

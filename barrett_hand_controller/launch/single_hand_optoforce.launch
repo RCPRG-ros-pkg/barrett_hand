@@ -18,6 +18,10 @@
     <rosparam param="HandForce/device_name" subst_value="True">$(arg DEVICE)</rosparam>
     <rosparam param="HandForce/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     <rosparam param="HandForce/n_sensors">3</rosparam>
+    <rosparam param="HandForce/sensitivity">6100</rosparam>
+    <rosparam param="HandForce/nominal_capacity_x">20.0</rosparam>
+    <rosparam param="HandForce/nominal_capacity_y">20.0</rosparam>
+    <rosparam param="HandForce/nominal_capacity_z">40.0</rosparam>
     <rosparam param="HandMoveAction/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     <rosparam param="JntPub/joint_names" subst_value="True">[$(arg PREFIX)_HandFingerOneKnuckleOneJoint, $(arg PREFIX)_HandFingerOneKnuckleTwoJoint, $(arg PREFIX)_HandFingerOneKnuckleThreeJoint, $(arg PREFIX)_HandFingerTwoKnuckleOneJoint, $(arg PREFIX)_HandFingerTwoKnuckleTwoJoint, $(arg PREFIX)_HandFingerTwoKnuckleThreeJoint, $(arg PREFIX)_HandFingerThreeKnuckleTwoJoint, $(arg PREFIX)_HandFingerThreeKnuckleThreeJoint]</rosparam>
   </group>
