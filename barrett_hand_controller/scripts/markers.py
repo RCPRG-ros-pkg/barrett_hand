@@ -91,7 +91,7 @@ class BarrettHandMarkers:
             self.f2_val = val
 
         if ( (self.update_on == "mouse" and feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP) or (feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK and feedback.control_name == "button1_control") ):
-            self.bh.moveHand([self.f1_val, self.f2_val, self.f3_val, self.spread_val], [1.2, 1.2, 1.2, 1.2], [4000, 4000, 4000, 4000], 50, hold=True)
+            self.bh.moveHand([self.f1_val, self.f2_val, self.f3_val, self.spread_val], [1.2, 1.2, 1.2, 1.2], [4000, 4000, 4000, 4000], self.stop_force, hold=self.spread_hold)
 
     def createSphereMarkerControl(self, scale, position, color):
         marker = Marker()
@@ -115,11 +115,37 @@ class BarrettHandMarkers:
         control.markers.append( marker );
         return control
 
+    def stopForceCb(self, feedback):
+        for force in self.force_menu_id_map:
+            if self.force_menu_id_map[force] == feedback.menu_entry_id:
+                print "STOP force: ", force
+                self.stop_force = force;
+
+    def spreadHoldCb(self, feedback):
+        if self.menu_spread_enable_id == feedback.menu_entry_id:
+            print "spread HOLD enabled: "
+            self.spread_hold = True
+        elif self.menu_spread_disable_id == feedback.menu_entry_id:
+            print "spread HOLD disabled: "
+            self.spread_hold = False
+
     def run_int(self):
         self.spread_val = 0.0
         self.f1_val = 0.0
         self.f2_val = 0.0
         self.f3_val = 0.0
+
+        self.menu_handler = MenuHandler()
+
+        self.menu_stop_force = self.menu_handler.insert( "STOP force" )
+        stop_forces_list = [30, 50, 70, 100, 150, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 4000]
+        self.force_menu_id_map = {}
+        for force in stop_forces_list:
+            self.force_menu_id_map[force] = self.menu_handler.insert( str(force), parent=self.menu_stop_force, callback=self.stopForceCb )
+
+        self.menu_spread_hold = self.menu_handler.insert( "spread HOLD" )
+        self.menu_spread_enable_id = self.menu_handler.insert( "enable", parent=self.menu_spread_hold, callback=self.spreadHoldCb )
+        self.menu_spread_disable_id = self.menu_handler.insert( "disable", parent=self.menu_spread_hold, callback=self.spreadHoldCb )
 
         # create an interactive marker server on the topic namespace simple_marker
         self.server = InteractiveMarkerServer('/'+self.prefix+'_markers')
@@ -199,12 +225,15 @@ class BarrettHandMarkers:
         int_f3_marker.controls.append( self.createBoxMarkerControl(Point(0.005,0.1,0.005), Point(0.0, -0.05, 0.0) ) )
         self.server.insert(int_f3_marker, self.processFeedback);
 
+        self.menu_handler.apply( self.server, "menu_marker" )
+
         self.server.applyChanges();
 
     def __init__(self, prefix, no_interactive, no_tactile):
         self.prefix = prefix
         self.bh = barrett_hand_interface.BarrettHand(self.prefix)
-
+        self.stop_force = 30
+        self.spread_hold = True
         self.update_on = "demand"
 
         if no_interactive == 0:
