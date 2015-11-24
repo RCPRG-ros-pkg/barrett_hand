@@ -76,7 +76,7 @@ private:
 	Eigen::VectorXd q_out_;
 	Eigen::VectorXd v_out_;
 	Eigen::VectorXd t_out_;
-	int32_t mp_out_;
+	double mp_out_;
 	int32_t hold_out_;
 
 	uint32_t status_in_;
@@ -85,7 +85,7 @@ private:
 	OutputPort<Eigen::VectorXd> port_q_out_;
 	OutputPort<Eigen::VectorXd> port_v_out_;
 	OutputPort<Eigen::VectorXd> port_t_out_;
-	OutputPort<int32_t> port_mp_out_;
+	OutputPort<double> port_mp_out_;
 	OutputPort<int32_t> port_hold_out_;
 
 	string prefix_;

@@ -91,7 +91,7 @@ class BarrettHandMarkers:
             self.f2_val = val
 
         if ( (self.update_on == "mouse" and feedback.event_type == InteractiveMarkerFeedback.MOUSE_UP) or (feedback.event_type == InteractiveMarkerFeedback.BUTTON_CLICK and feedback.control_name == "button1_control") ):
-            self.bh.moveHand([self.f1_val, self.f2_val, self.f3_val, self.spread_val], [1.2, 1.2, 1.2, 1.2], [4000, 4000, 4000, 4000], self.stop_force, hold=self.spread_hold)
+            self.bh.moveHand([self.f1_val, self.f2_val, self.f3_val, self.spread_val], [self.velocity, self.velocity, self.velocity, self.velocity], [4000, 4000, 4000, 4000], self.stop_force, hold=self.spread_hold)
 
     def createSphereMarkerControl(self, scale, position, color):
         marker = Marker()
@@ -120,14 +120,22 @@ class BarrettHandMarkers:
             if self.force_menu_id_map[force] == feedback.menu_entry_id:
                 print "STOP force: ", force
                 self.stop_force = force;
+                break
 
     def spreadHoldCb(self, feedback):
         if self.menu_spread_enable_id == feedback.menu_entry_id:
-            print "spread HOLD enabled: "
+            print "spread HOLD enabled"
             self.spread_hold = True
         elif self.menu_spread_disable_id == feedback.menu_entry_id:
-            print "spread HOLD disabled: "
+            print "spread HOLD disabled"
             self.spread_hold = False
+
+    def velocityCb(self, feedback):
+        for velocity in self.velocity_menu_id_map:
+            if self.velocity_menu_id_map[velocity] == feedback.menu_entry_id:
+                print "velocity: ", velocity
+                self.velocity = velocity
+                break
 
     def run_int(self):
         self.spread_val = 0.0
@@ -138,7 +146,8 @@ class BarrettHandMarkers:
         self.menu_handler = MenuHandler()
 
         self.menu_stop_force = self.menu_handler.insert( "STOP force" )
-        stop_forces_list = [30, 50, 70, 100, 150, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 4000]
+#        stop_forces_list = [30, 50, 70, 100, 150, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 4000]
+        stop_forces_list = [0.125, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0]
         self.force_menu_id_map = {}
         for force in stop_forces_list:
             self.force_menu_id_map[force] = self.menu_handler.insert( str(force), parent=self.menu_stop_force, callback=self.stopForceCb )
@@ -146,6 +155,12 @@ class BarrettHandMarkers:
         self.menu_spread_hold = self.menu_handler.insert( "spread HOLD" )
         self.menu_spread_enable_id = self.menu_handler.insert( "enable", parent=self.menu_spread_hold, callback=self.spreadHoldCb )
         self.menu_spread_disable_id = self.menu_handler.insert( "disable", parent=self.menu_spread_hold, callback=self.spreadHoldCb )
+
+        self.menu_velocity = self.menu_handler.insert( "velocity" )
+        velocity_list = [0.3, 0.5, 0.7, 1.0, 1.2]
+        self.velocity_menu_id_map = {}
+        for velocity in velocity_list:
+            self.velocity_menu_id_map[velocity] = self.menu_handler.insert( str(velocity), parent=self.menu_velocity, callback=self.velocityCb )
 
         # create an interactive marker server on the topic namespace simple_marker
         self.server = InteractiveMarkerServer('/'+self.prefix+'_markers')
@@ -229,15 +244,51 @@ class BarrettHandMarkers:
 
         self.server.applyChanges();
 
-    def __init__(self, prefix, no_interactive, no_tactile):
+    def __init__(self, prefix):
         self.prefix = prefix
         self.bh = barrett_hand_interface.BarrettHand(self.prefix)
         self.stop_force = 30
         self.spread_hold = True
+        self.velocity = 1.0
         self.update_on = "demand"
+        self.run_int()
 
-        if no_interactive == 0:
-            self.run_int()
+        self.pub0 = rospy.Publisher('optoforce0_pos', Vector3Stamped, queue_size=10)
+        self.pub1 = rospy.Publisher('optoforce1_pos', Vector3Stamped, queue_size=10)
+        self.pub2 = rospy.Publisher('optoforce2_pos', Vector3Stamped, queue_size=10)
+        self.listener = tf.TransformListener()
+
+    def spin(self):
+        rate = rospy.Rate(10.0)
+        while not rospy.is_shutdown():
+            rate.sleep()
+            try:
+                (trans0,rot0) = self.listener.lookupTransform('/right_HandPalmLink', '/right_HandFingerOneKnuckleThreeOptoforce', rospy.Time(0))
+                (trans1,rot1) = self.listener.lookupTransform('/right_HandPalmLink', '/right_HandFingerTwoKnuckleThreeOptoforce', rospy.Time(0))
+                (trans2,rot2) = self.listener.lookupTransform('/right_HandPalmLink', '/right_HandFingerThreeKnuckleThreeOptoforce', rospy.Time(0))
+            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+                continue
+
+            v0 = Vector3Stamped()
+            v1 = Vector3Stamped()
+            v2 = Vector3Stamped()
+            v0.header.stamp = rospy.Time.now()
+            v1.header.stamp = rospy.Time.now()
+            v2.header.stamp = rospy.Time.now()
+            v0.vector.x = trans0[0]
+            v0.vector.y = trans0[1]
+            v0.vector.z = trans0[2]
+            v1.vector.x = trans1[0]
+            v1.vector.y = trans1[1]
+            v1.vector.z = trans1[2]
+            v2.vector.x = trans2[0]
+            v2.vector.y = trans2[1]
+            v2.vector.z = trans2[2]
+            self.pub0.publish(v0)
+            self.pub1.publish(v1)
+            self.pub2.publish(v2)
+        
+
 
 if __name__ == '__main__':
     a = []
@@ -247,31 +298,14 @@ if __name__ == '__main__':
     if len(a) > 1:
         prefix = a[1]
     else:
-        print "Usage: %s prefix [noint] [notac]"%a[0]
-        exit(0)
-
-    noint = 0
-    notac = 0
-    if len(a) > 2:
-        if a[2] == 'noint':
-            noint = 1
-        if a[2] == 'notac':
-            notac = 1
-
-    if len(a) > 3:
-        if a[3] == 'noint':
-            noint = 1
-        if a[3] == 'notac':
-            notac = 1
-
-    if noint == 1 and notac == 1:
+        print "Usage: %s prefix"%a[0]
         exit(0)
 
     rospy.init_node(prefix+'_hand_markers', anonymous=True)
 
-    bhm = BarrettHandMarkers(prefix, noint, notac)
+    bhm = BarrettHandMarkers(prefix)
 
     # start the ROS main loop
-    rospy.spin()
+    bhm.spin()
 
 

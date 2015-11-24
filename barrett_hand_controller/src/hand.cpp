@@ -80,7 +80,7 @@ private:
     Eigen::VectorXd q_in_;
     Eigen::VectorXd v_in_;
     Eigen::VectorXd t_in_;
-    int32_t mp_in_;
+    double mp_in_;
     int32_t hold_in_;
     uint32_t status_out_;
     Eigen::Vector4d max_measured_pressure_in_;
@@ -96,7 +96,7 @@ private:
     InputPort<Eigen::VectorXd> port_q_in_;
     InputPort<Eigen::VectorXd> port_v_in_;
     InputPort<Eigen::VectorXd> port_t_in_;
-    InputPort<int32_t> port_mp_in_;
+    InputPort<double> port_mp_in_;
     InputPort<int32_t> port_hold_in_;
     InputPort<Eigen::Vector4d > port_max_measured_pressure_in_;
     InputPort<std_msgs::Empty> port_reset_in_;

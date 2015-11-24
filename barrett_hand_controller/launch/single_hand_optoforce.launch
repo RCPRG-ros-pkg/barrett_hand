@@ -9,7 +9,6 @@
   <!-- Path to look for dynamically-loaded plugins and components (something like /lib/orocos) -->
   <arg name="RTT_COMPONENT_PATH" default="$(env RTT_COMPONENT_PATH)"/>
 
-
   <group ns="$(arg PREFIX)_hand">
 
   <group ns="$(arg PREFIX)_hand_controller">
@@ -18,10 +17,12 @@
     <rosparam param="HandForce/device_name" subst_value="True">$(arg DEVICE)</rosparam>
     <rosparam param="HandForce/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     <rosparam param="HandForce/n_sensors">3</rosparam>
-    <rosparam param="HandForce/sensitivity">6100</rosparam>
     <rosparam param="HandForce/nominal_capacity_x">20.0</rosparam>
     <rosparam param="HandForce/nominal_capacity_y">20.0</rosparam>
     <rosparam param="HandForce/nominal_capacity_z">40.0</rosparam>
+    <rosparam param="HandForce/counts_nc_0">15917</rosparam>
+    <rosparam param="HandForce/counts_nc_1">15917</rosparam>
+    <rosparam param="HandForce/counts_nc_2">15875</rosparam>
     <rosparam param="HandMoveAction/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     <rosparam param="JntPub/joint_names" subst_value="True">[$(arg PREFIX)_HandFingerOneKnuckleOneJoint, $(arg PREFIX)_HandFingerOneKnuckleTwoJoint, $(arg PREFIX)_HandFingerOneKnuckleThreeJoint, $(arg PREFIX)_HandFingerTwoKnuckleOneJoint, $(arg PREFIX)_HandFingerTwoKnuckleTwoJoint, $(arg PREFIX)_HandFingerTwoKnuckleThreeJoint, $(arg PREFIX)_HandFingerThreeKnuckleTwoJoint, $(arg PREFIX)_HandFingerThreeKnuckleThreeJoint]</rosparam>
   </group>
@@ -33,13 +34,6 @@
       <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
       <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
     </node>
-<!--
-    <node
-      name="$(arg PREFIX)_hand_controller_markers"
-      pkg="barrett_hand_controller" type="markers.py"
-      args="$(arg PREFIX) - -">
-    </node>
--->
   </group>
 
 </launch>
