@@ -16,23 +16,35 @@
       <rosparam param="Hand/prefix" subst_value="True">$(arg PREFIX)</rosparam>
       <rosparam param="HandMoveAction/prefix" subst_value="True">$(arg PREFIX)</rosparam>
       <rosparam param="JntPub/joint_names" subst_value="True">[$(arg PREFIX)_HandFingerOneKnuckleOneJoint, $(arg PREFIX)_HandFingerOneKnuckleTwoJoint, $(arg PREFIX)_HandFingerOneKnuckleThreeJoint, $(arg PREFIX)_HandFingerTwoKnuckleOneJoint, $(arg PREFIX)_HandFingerTwoKnuckleTwoJoint, $(arg PREFIX)_HandFingerTwoKnuckleThreeJoint, $(arg PREFIX)_HandFingerThreeKnuckleTwoJoint, $(arg PREFIX)_HandFingerThreeKnuckleThreeJoint]</rosparam>
-      <rosparam param="HandForce/device_name" subst_value="True">$(arg DEVICE)</rosparam>
-      <rosparam param="HandForce/prefix" subst_value="True">$(arg PREFIX)</rosparam>
-      <rosparam param="HandForce/n_sensors">3</rosparam>
-      <rosparam param="HandForce/nominal_capacity_x">20.0</rosparam>
-      <rosparam param="HandForce/nominal_capacity_y">20.0</rosparam>
-      <rosparam param="HandForce/nominal_capacity_z">40.0</rosparam>
-      <rosparam param="HandForce/counts_nc_0">15917</rosparam>
-      <rosparam param="HandForce/counts_nc_1">15917</rosparam>
-      <rosparam param="HandForce/counts_nc_2">15875</rosparam>
+      <rosparam param="HandTact/device_name" subst_value="True">$(arg DEVICE)</rosparam>
+      <rosparam param="HandTact/prefix" subst_value="True">$(arg PREFIX)</rosparam>
     </group>
+
+
+
+
+
+
+
 
     <node
       name="$(arg PREFIX)_hand_controller"
       pkg="rtt_ros" type="rttscript"
-      args="-l $(arg LOG_LEVEL) -s $(find barrett_hand_controller)/config/single_hand_optoforce.ops --" output="screen">
+      args="-l $(arg LOG_LEVEL) -s $(find barrett_hand_controller)/config/single_hand_tactile.ops --" output="screen">
       <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
       <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
+    </node>
+<!--
+    <node
+      name="$(arg PREFIX)_hand_controller_markers"
+      pkg="barrett_hand_controller" type="markers.py"
+      args="$(arg PREFIX) - -">
+    </node>
+-->
+    <node
+      name="$(arg PREFIX)_hand_tactile_vis"
+      pkg="barrett_hand_tactile" type="markers.py"
+      args="$(arg PREFIX) --">
     </node>
   </group>
 

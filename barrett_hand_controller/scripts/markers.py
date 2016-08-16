@@ -147,7 +147,7 @@ class BarrettHandMarkers:
 
         self.menu_stop_force = self.menu_handler.insert( "STOP force" )
 #        stop_forces_list = [30, 50, 70, 100, 150, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 4000]
-        stop_forces_list = [0.125, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0]
+        stop_forces_list = [0.125, 0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.8, 4.0, 5.6, 8.0, 10.5, 16.0, 20.0, 30.0, 50.0, 70.0, 100.0, 130.0, 200.0, 270.0, 400.0]
         self.force_menu_id_map = {}
         for force in stop_forces_list:
             self.force_menu_id_map[force] = self.menu_handler.insert( str(force), parent=self.menu_stop_force, callback=self.stopForceCb )

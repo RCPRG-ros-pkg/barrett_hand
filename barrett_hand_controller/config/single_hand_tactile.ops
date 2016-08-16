@@ -36,6 +36,10 @@ connect("HandTact.max_measured_pressure_out", "Hand.max_measured_pressure_in", C
 Hand.configure()
 HandTact.configure()
 
+
+
+
+
 //------------------------------------------------------------------------------
 //-- ROS Command interface
 //------------------------------------------------------------------------------

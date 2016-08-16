@@ -65,9 +65,11 @@ Class for BarrettHand robot.
 """
 
     def getPressureSensorsInfo(self):
+        print "getPressureSensorsInfo"
         self.is_updated = False
         self.pressure_info_tmp = None
         def tactileInfoCallback(msg):
+            print "tactileInfoCallback"
             if not self.is_updated:
                 self.pressure_info_tmp = msg
                 self.is_updated = True

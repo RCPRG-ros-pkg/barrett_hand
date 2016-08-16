@@ -93,7 +93,6 @@ void TactileInterface::recTact(int can_id, int32_t &gr, int32_t &a, int32_t &b, 
 }
 
 void TactileInterface::getTactile(int puck_id, tact_array_t &tact) {
-//	setProperty(11 + puck_id, PROP_TACT, 2);
 	setProperty(11 + puck_id, PROP_TACT, 2);
 	int gr;
 	recTact(11 + puck_id, gr, tact[0], tact[1], tact[2], tact[3], tact[4]);
