@@ -104,11 +104,6 @@ public:
         ts_[2]->setGeometry("finger3_tip_info", finger_sensor_center, finger_sensor_halfside1, finger_sensor_halfside2, 0.001);
         ts_[3]->setGeometry("palm_info", palm_sensor_center, palm_sensor_halfside1, palm_sensor_halfside2, 0.001);
 
-        tactile_out_.finger1_tip.resize(24);
-        tactile_out_.finger2_tip.resize(24);
-        tactile_out_.finger3_tip.resize(24);
-        tactile_out_.palm_tip.resize(24);
-
         this->ports()->addPort("BHPressureState", port_tactile_out_);
         this->ports()->addPort("calibrate_tactile_sensors", port_calibrate_in_);
         this->ports()->addPort("set_median_filter", port_filter_in_);
@@ -134,13 +129,8 @@ public:
             tact_ = new TactileInterface(dev_name_);
 
             // tactile array info
-            pressure_info_.sensor.resize(4);
             for (int id=0; id<4; ++id) {
                 pressure_info_.sensor[id].frame_id = ts_[id]->getName();
-                pressure_info_.sensor[id].center.resize(24);
-                pressure_info_.sensor[id].halfside1.resize(24);
-                pressure_info_.sensor[id].halfside2.resize(24);
-                pressure_info_.sensor[id].force_per_unit.resize(24);
                 for (int i=0; i<24; ++i)
                 {
                     pressure_info_.sensor[id].force_per_unit[i] = 1.0/256.0;

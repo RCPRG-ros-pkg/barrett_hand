@@ -171,7 +171,6 @@ public:
             t_in_.resize(BH_DOF);
             t_out_.resize(BH_JOINTS);
             q_out_.resize(BH_JOINTS);
-            temp_out_.temp.resize(BH_JOINTS);
 
             port_q_out_.setDataSample(q_out_);
             port_t_out_.setDataSample(t_out_);
