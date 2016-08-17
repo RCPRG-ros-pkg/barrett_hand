@@ -33,6 +33,7 @@
       <rosparam param="HandForce1/counts_nc_2_x">15875</rosparam>
       <rosparam param="HandForce1/counts_nc_2_y">15875</rosparam>
       <rosparam param="HandForce1/counts_nc_2_z">15875</rosparam>
+      <rosparam param="HandForce1/test_mode">false</rosparam>
       <rosparam param="HandForce2/device_name" subst_value="True">$(arg DEVICE)</rosparam>
       <rosparam param="HandForce2/prefix" subst_value="True">$(arg PREFIX)</rosparam>
       <rosparam param="HandForce2/n_sensors">1</rosparam>
@@ -41,15 +42,16 @@
       <rosparam param="HandForce2/nominal_capacity_x">20.0</rosparam>
       <rosparam param="HandForce2/nominal_capacity_y">20.0</rosparam>
       <rosparam param="HandForce2/nominal_capacity_z">40.0</rosparam>
-      <rosparam param="HandForce1/counts_nc_0_x">15917</rosparam>
-      <rosparam param="HandForce1/counts_nc_0_y">15917</rosparam>
-      <rosparam param="HandForce1/counts_nc_0_z">15917</rosparam>
-      <rosparam param="HandForce1/counts_nc_1_x">15917</rosparam>
-      <rosparam param="HandForce1/counts_nc_1_y">15917</rosparam>
-      <rosparam param="HandForce1/counts_nc_1_z">15917</rosparam>
-      <rosparam param="HandForce1/counts_nc_2_x">15875</rosparam>
-      <rosparam param="HandForce1/counts_nc_2_y">15875</rosparam>
-      <rosparam param="HandForce1/counts_nc_2_z">15875</rosparam>
+      <rosparam param="HandForce2/counts_nc_0_x">15917</rosparam>
+      <rosparam param="HandForce2/counts_nc_0_y">15917</rosparam>
+      <rosparam param="HandForce2/counts_nc_0_z">15917</rosparam>
+      <rosparam param="HandForce2/counts_nc_1_x">15917</rosparam>
+      <rosparam param="HandForce2/counts_nc_1_y">15917</rosparam>
+      <rosparam param="HandForce2/counts_nc_1_z">15917</rosparam>
+      <rosparam param="HandForce2/counts_nc_2_x">15875</rosparam>
+      <rosparam param="HandForce2/counts_nc_2_y">15875</rosparam>
+      <rosparam param="HandForce2/counts_nc_2_z">15875</rosparam>
+      <rosparam param="HandForce2/test_mode">false</rosparam>
     </group>
 
     <node
