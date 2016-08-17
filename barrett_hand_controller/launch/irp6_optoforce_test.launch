@@ -1,0 +1,65 @@
+<launch>
+  <arg name="PREFIX" default="right"/>
+  <arg name="DEVICE" default="can0"/>
+  <arg name="LOG_LEVEL" default="error"/>
+  <arg name="DEBUG" default="false"/>
+
+  <!-- Orocos target (gnulinux, xenomai, etc) -->
+  <arg name="OROCOS_TARGET" default="$(optenv OROCOS_TARGET)"/>
+  <!-- Path to look for dynamically-loaded plugins and components (something like /lib/orocos) -->
+  <arg name="RTT_COMPONENT_PATH" default="$(env RTT_COMPONENT_PATH)"/>
+
+  <group ns="$(arg PREFIX)_hand">
+
+    <group ns="$(arg PREFIX)_hand_controller">
+      <rosparam param="Hand/device_name" subst_value="True">$(arg DEVICE)</rosparam>
+      <rosparam param="Hand/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+      <rosparam param="HandMoveAction/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+      <rosparam param="JntPub/joint_names" subst_value="True">[$(arg PREFIX)_HandFingerOneKnuckleOneJoint, $(arg PREFIX)_HandFingerOneKnuckleTwoJoint, $(arg PREFIX)_HandFingerOneKnuckleThreeJoint, $(arg PREFIX)_HandFingerTwoKnuckleOneJoint, $(arg PREFIX)_HandFingerTwoKnuckleTwoJoint, $(arg PREFIX)_HandFingerTwoKnuckleThreeJoint, $(arg PREFIX)_HandFingerThreeKnuckleTwoJoint, $(arg PREFIX)_HandFingerThreeKnuckleThreeJoint]</rosparam>
+      <rosparam param="HandForce1/device_name" subst_value="True">$(arg DEVICE)</rosparam>
+      <rosparam param="HandForce1/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+      <rosparam param="HandForce1/n_sensors">1</rosparam>
+      <rosparam param="HandForce1/can_rx_id">256</rosparam>
+      <rosparam param="HandForce1/can_tx_id">257</rosparam>
+      <rosparam param="HandForce1/nominal_capacity_x">20.0</rosparam>
+      <rosparam param="HandForce1/nominal_capacity_y">20.0</rosparam>
+      <rosparam param="HandForce1/nominal_capacity_z">40.0</rosparam>
+      <rosparam param="HandForce1/counts_nc_0_x">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_0_y">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_0_z">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_1_x">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_1_y">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_1_z">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_2_x">15875</rosparam>
+      <rosparam param="HandForce1/counts_nc_2_y">15875</rosparam>
+      <rosparam param="HandForce1/counts_nc_2_z">15875</rosparam>
+      <rosparam param="HandForce2/device_name" subst_value="True">$(arg DEVICE)</rosparam>
+      <rosparam param="HandForce2/prefix" subst_value="True">$(arg PREFIX)</rosparam>
+      <rosparam param="HandForce2/n_sensors">1</rosparam>
+      <rosparam param="HandForce2/can_rx_id">258</rosparam>
+      <rosparam param="HandForce2/can_tx_id">259</rosparam>
+      <rosparam param="HandForce2/nominal_capacity_x">20.0</rosparam>
+      <rosparam param="HandForce2/nominal_capacity_y">20.0</rosparam>
+      <rosparam param="HandForce2/nominal_capacity_z">40.0</rosparam>
+      <rosparam param="HandForce1/counts_nc_0_x">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_0_y">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_0_z">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_1_x">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_1_y">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_1_z">15917</rosparam>
+      <rosparam param="HandForce1/counts_nc_2_x">15875</rosparam>
+      <rosparam param="HandForce1/counts_nc_2_y">15875</rosparam>
+      <rosparam param="HandForce1/counts_nc_2_z">15875</rosparam>
+    </group>
+
+    <node
+      name="$(arg PREFIX)_hand_controller"
+      pkg="rtt_ros" type="deployer"
+      args="-l $(arg LOG_LEVEL) -s $(find barrett_hand_controller)/config/irp6_optoforce_test.ops --" output="screen">
+      <env name="OROCOS_TARGET" value="$(arg OROCOS_TARGET)"/>
+      <env name="RTT_COMPONENT_PATH" value="$(arg RTT_COMPONENT_PATH)"/>
+    </node>
+  </group>
+
+</launch>
+
