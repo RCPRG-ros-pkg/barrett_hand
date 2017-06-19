@@ -109,7 +109,8 @@ private:
 
 class BarrettHand : public RTT::TaskContext {
 private:
-        const int BH_DOF;
+    enum {SEQ_BEFORE_CMD_SEND, SEQ_CMD_SEND, SEQ_STATUS_RECV};
+    const int BH_DOF;
     const int BH_JOINTS;
     const int TEMP_MAX_HI;
     const int TEMP_MAX_LO;
@@ -117,6 +118,8 @@ private:
         STATUS_OVERPRESSURE1 = 0x0010, STATUS_OVERPRESSURE2 = 0x0020, STATUS_OVERPRESSURE3 = 0x0040,
         STATUS_TORQUESWITCH1 = 0x0100, STATUS_TORQUESWITCH2 = 0x0200, STATUS_TORQUESWITCH3 = 0x0400,
         STATUS_IDLE1 = 0x1000, STATUS_IDLE2 = 0x2000, STATUS_IDLE3 = 0x4000, STATUS_IDLE4 = 0x8000 };
+
+    int status_read_seq_;
 
     int32_t loop_counter_;
     MotorController *ctrl_;
@@ -348,6 +351,9 @@ public:
         }
         else if (cnt == 7) {
             ctrl_->sendGetStatus(3);
+            if (status_read_seq_ == SEQ_CMD_SEND) {
+                status_read_seq_ = SEQ_STATUS_RECV;
+            }
         }
         else if (cnt == 8) {
             ctrl_->sendGetCurrent(0);
@@ -386,6 +392,9 @@ public:
                     RTT::log(RTT::Warning) << "sending move command " << cmd.id_ << RTT::endlog();
                     //ctrl_->moveAll();
                     ctrl_->move(cmd.id_);
+                    if (cmd.id_ == 3 && status_read_seq_ == SEQ_BEFORE_CMD_SEND) {
+                        status_read_seq_ = SEQ_CMD_SEND;
+                    }
                 }
             }
         }
@@ -465,6 +474,7 @@ public:
 
         if (move_hand) {
             status_out_ = 0;        // clear the status
+            status_read_seq_ = SEQ_BEFORE_CMD_SEND;
 
             for (int i=0; i<BH_DOF; i++) {
                 cmds_.push(BHCanCommand(i, BHCanCommand::CMD_MAX_TORQUE, maxStaticTorque_));
@@ -579,7 +589,7 @@ public:
             status_out_ |= STATUS_TORQUESWITCH3;
         }
 
-        if (mode_[0] == 0) {
+        if (mode_[0] == 0 && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE1;
             if ((status_out_&STATUS_OVERPRESSURE1) == 0 && fabs(q_in_[0]-q_out_[1]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT1;
@@ -589,7 +599,7 @@ public:
             status_out_ &= ~STATUS_IDLE1;
         }
 
-        if (mode_[1] == 0) {
+        if (mode_[1] == 0 && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE2;
             if ((status_out_&STATUS_OVERPRESSURE2) == 0 && fabs(q_in_[1]-q_out_[4]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT2;
@@ -599,7 +609,7 @@ public:
             status_out_ &= ~STATUS_IDLE2;
         }
 
-        if (mode_[2] == 0) {
+        if (mode_[2] == 0 && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE3;
             if ((status_out_&STATUS_OVERPRESSURE3) == 0 && fabs(q_in_[2]-q_out_[6]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT3;
@@ -609,7 +619,7 @@ public:
             status_out_ &= ~STATUS_IDLE3;
         }
 
-        if (mode_[3] == 0 || (holdEnabled_ && fabs(q_in_[3]-q_out_[3]) < 0.05)) {
+        if (mode_[3] == 0 || (holdEnabled_ && fabs(q_in_[3]-q_out_[3]) < 0.05) && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE4;
             if (fabs(q_in_[3]-q_out_[3]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT4;
