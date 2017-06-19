@@ -29,13 +29,14 @@
 #define _MOTOR_CONTROLLER_H_
 
 #include <inttypes.h>
-#include "can_driver/CANDev.h"
+#include <controller_common/can_queue_service_requester.h>
 
 class MotorController {
 public:
 	typedef int32_t tact_array_t[24];
-	MotorController(const std::string &dev_name);
+	MotorController(RTT::TaskContext *owner, const std::string &dev_name, int can_id_base);
 	~MotorController();
+/*
 	void initHand();
 	void stopHand();
 	void stopFinger(int32_t id);
@@ -58,17 +59,34 @@ public:
 	void getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4);
     void getTemp(int id, int32_t &temp);
     void getTherm(int id, int32_t &temp);
-	void getCts(int id, int32_t &cts);
+//	void getCts(int id, int32_t &cts);
+*/
+	void stopFinger(int32_t id);
+    void resetFinger(int id);
+    void setMaxVel(int id, uint32_t vel);
+    void sendGetPosition(int puck_id);
+    void getPosition(int puck_id, int32_t &p, int32_t &jp);
+    void sendGetStatus(int puck_id);
+    void getStatus(int puck_id, int32_t &mode);
+    void sendGetCurrent(int puck_id);
+    void getCurrent(int puck_id, double &c);
+    void setHoldPosition(int id, bool hold);
+	void setMaxTorque(int id, uint32_t vel);
+	void setTargetPos(int puck_id, int32_t pos);
+	void moveAll();
+    void move(int puck_id);
+
 	bool isDevOpened();
 protected:
 	void setProperty(int id, uint32_t property, int32_t value);
 	void reqProperty(int id, uint32_t property);
-	void recEncoder2(int id, int32_t &p, int32_t &jp);
-	void recProperty(int id, int32_t &value);
-	int32_t getParameter(int32_t id, int32_t prop_id);
+	bool recEncoder2(int id, int32_t &p, int32_t &jp);
+	bool recProperty(int id, int32_t &value);
+//	int32_t getParameter(int32_t id, int32_t prop_id);
 	void setParameter(int32_t id, int32_t prop_id, int32_t value, bool save);
 
-	CANDev *pdev_;
+    boost::shared_ptr<controller_common::CanQueueServiceRequester > can_srv_;
+    int can_id_base_;
 };
 
 #endif

@@ -30,6 +30,8 @@
 #include <string>
 #include <cstring>
 
+#include "barrett_hand_controller/BarrettHandCan.h"
+/*
 // For commands w/o values: RESET,HOME,KEEP,PASS,LOOP,HI,IC,IO,TC,TO,C,O,T 5
 #define PROP_CMD 29
 // 32-Bit Position. R=Act, W=Cmd
@@ -78,8 +80,11 @@ const int MODE_TRAPEZOID = 5;
 #define HAND_GROUP 5
 
 #define GROUP(from, to) 0x400 | ((from) << 5) | (to)
+*/
 
-MotorController::MotorController(const std::string &dev_name) {
+MotorController::MotorController(RTT::TaskContext *owner, const std::string &dev_name, int can_id_base)
+    : can_id_base_(can_id_base)
+{
 
     // 11                               000 0000 1011
     // 12                               000 0000 1100
@@ -97,59 +102,61 @@ MotorController::MotorController(const std::string &dev_name) {
 
     // mask:    0x07FF                  111 1111 1111
 
-    std::vector<CANDev::FilterElement > filters;
+    std::vector<std::pair<uint32_t, uint32_t > > filters;
     for (int puck_id = 0; puck_id < 4; puck_id++) {
-        filters.push_back( CANDev::FilterElement(11 + puck_id, 0x07FF) );
-        filters.push_back( CANDev::FilterElement(GROUP(11 + puck_id, PFEEDBACK_GROUP), 0x07FF) );
-        filters.push_back( CANDev::FilterElement(GROUP(11 + puck_id, 6), 0x07FF) );
+        filters.push_back( std::pair<uint32_t, uint32_t >(can_id_base_ + puck_id, 0x07FF) );
+        filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(can_id_base_ + puck_id, PFEEDBACK_GROUP), 0x07FF) );
+        filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(can_id_base_ + puck_id, 6), 0x07FF) );
     }
-    filters.push_back( CANDev::FilterElement(GROUP(0, HAND_GROUP), 0x07FF) );
+    filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(0, HAND_GROUP), 0x07FF) );
 
-    pdev_ = new CANDev(dev_name, "MotorController", filters);
+    can_srv_ = owner->getProvider<controller_common::CanQueueServiceRequester >("can_queue");
+
+    if (can_srv_ && can_srv_->initialize.ready()) {
+        can_srv_->initialize(dev_name, filters);
+    }
 }
 
 MotorController::~MotorController() {
-    delete pdev_;
+    //delete pdev_;
 }
 
 void MotorController::setProperty(int id, uint32_t property, int32_t value) {
-	struct can_frame frame;
-	memset(&frame, 0, sizeof(frame));
-	
-	frame.can_id = id;
-	frame.can_dlc = 6;
-	
-	frame.data[0] = 0x80 | property;
-	frame.data[1] = 0;
+	int can_id = id;
+	int can_dlc = 6;
+	int8_t data[8];
+
+	data[0] = 0x80 | property;
+	data[1] = 0;
 	
 	for(unsigned int i=2; i<6; i++){
-        frame.data[i] = (uint8_t)(value & 0x000000FF);
+        data[i] = (int8_t)(value & 0x000000FF);
         value >>= 8;
     }
-	pdev_->send(frame.can_id, frame.can_dlc, frame.data);
+    can_srv_->send(can_id, can_dlc, data);
 }
 
 void MotorController::reqProperty(int id, uint32_t property) {
-	struct can_frame frame;
-	memset(&frame, 0, sizeof(frame));
+	int can_id = id;
+	int can_dlc = 1;
+	int8_t data[8];
 	
-	frame.can_id = id;
-	frame.can_dlc = 1;
-	
-	frame.data[0] = property;
-	
-	pdev_->send(frame.can_id, frame.can_dlc, frame.data);
+	data[0] = property;
+
+	can_srv_->send(can_id, can_dlc, data);
 }
 
-void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
-	uint8_t data[8];
-	int ret = pdev_->waitForReply(GROUP(id, PFEEDBACK_GROUP), data);
-	
-	if(ret == 6) {
-		p = (int32_t(0x3F & data[0]) << 16) | ((int32_t)data[1] << 8) | (int32_t)data[2];
-		jp = (int32_t(0x3F & data[3]) << 16) | ((int32_t)data[4] << 8) | (int32_t)data[5];
-	} else if (ret == 3) {
-		p = (int32_t(0x3F & data[0]) << 16) | ((int32_t)data[1] << 8) | (int32_t)data[2];
+bool MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
+    int8_t data[8];
+    uint8_t *udata = reinterpret_cast<uint8_t* >(&data[0]);
+    uint16_t dlc = 0;
+    if (!can_srv_->readReply(GROUP(id, PFEEDBACK_GROUP), dlc, &data[0])) {
+        return false;
+    }
+
+    p = int32_t((uint32_t(0x3F & udata[0]) << 16) | ((uint32_t)udata[1] << 8) | (uint32_t)udata[2]);
+	if (dlc == 6) {
+        jp = int32_t((uint32_t(0x3F & udata[3]) << 16) | ((uint32_t)udata[4] << 8) | (uint32_t)udata[5]);
 	}
 
 	// this is necessary around encoder zero
@@ -157,104 +164,131 @@ void MotorController::recEncoder2(int id, int32_t &p, int32_t &jp) {
 		p = 0x3FFFFF - p;
 	if(jp > 0x200000)
 		jp = 0x3FFFFF - jp;
+    return true;
 }
 
-void MotorController::recProperty(int id, int32_t &value) {
-	uint8_t data[8];
-	int ret = pdev_->waitForReply(GROUP(id, 6), data);
-    if (ret <= 0) {
-        return;
+bool MotorController::recProperty(int id, int32_t &value) {
+    int8_t data[8];
+    uint16_t dlc = 0;
+    if (!can_srv_->readReply(GROUP(id, 6), dlc, data)) {
+        return false;
+    }
+    if (dlc <= 0) {
+        return false;
     }
 	
-	value = data[ret-1] & 0x80 ? -1L : 0;
-	for (unsigned int i = ret-1; i >= 2; i--)
+	value = data[dlc-1] & 0x80 ? -1L : 0;
+	for (unsigned int i = dlc-1; i >= 2; i--)
 		value = value << 8 | data[i];
+    return true;
 }
 
 void MotorController::resetFinger(int id) {
-	setProperty(11+id, PROP_CMD, CMD_HI);
+	setProperty(can_id_base_+id, PROP_CMD, CMD_HI);
 }
 
-void MotorController::initHand() {
-	resetFinger(0);
-	resetFinger(1);
-	resetFinger(2);
-}
+//void MotorController::initHand() {
+//	resetFinger(0);
+//	resetFinger(1);
+//	resetFinger(2);
+//}
 
-void MotorController::stopHand() {
-	setProperty(GROUP(0, HAND_GROUP), PROP_CMD, CMD_STOP);
-}
+//void MotorController::stopHand() {
+//	setProperty(GROUP(0, HAND_GROUP), PROP_CMD, CMD_STOP);
+//}
 
 void MotorController::stopFinger(int32_t id) {
-	setProperty(11 + id, PROP_CMD, CMD_STOP);
+	setProperty(can_id_base_ + id, PROP_CMD, CMD_STOP);
 }
 
-void MotorController::setOpenTarget(int id, uint32_t ot) {
-	setProperty(11 + id, PROP_OT, ot);
-}
+//void MotorController::setOpenTarget(int id, uint32_t ot) {
+//	setProperty(can_id_base_ + id, PROP_OT, ot);
+//}
 
-void MotorController::setCloseTarget(int id, uint32_t ct) {
-	setProperty(11 + id, PROP_CT, ct);
-}
+//void MotorController::setCloseTarget(int id, uint32_t ct) {
+//	setProperty(can_id_base_ + id, PROP_CT, ct);
+//}
 
 void MotorController::setMaxVel(int id, uint32_t vel) {
-	setProperty(11 + id, PROP_MV, vel);
+	setProperty(can_id_base_ + id, PROP_MV, vel);
 }
 
 void MotorController::setMaxTorque(int id, uint32_t vel) {
-	setProperty(11 + id, PROP_MT, vel);
+	setProperty(can_id_base_ + id, PROP_MT, vel);
 }
 
-void MotorController::open(int id) {
-	setProperty(11 + id, PROP_CMD, CMD_OPEN);
-}
+//void MotorController::open(int id) {
+//	setProperty(can_id_base_ + id, PROP_CMD, CMD_OPEN);
+//}
 
-void MotorController::close(int id) {
-	setProperty(11 + id, PROP_CMD, CMD_CLOSE);
-}
+//void MotorController::close(int id) {
+//	setProperty(can_id_base_ + id, PROP_CMD, CMD_CLOSE);
+//}
 
 void MotorController::setTargetPos(int puck_id, int32_t pos) {
-	setProperty(11 + puck_id, PROP_E, pos);
+	setProperty(can_id_base_ + puck_id, PROP_E, pos);
 }
-
+/*
 void MotorController::setTargetVel(int puck_id, int32_t vel) {
-	setProperty(11 + puck_id, PROP_V, vel);
+	setProperty(can_id_base_ + puck_id, PROP_V, vel);
 }
-
+*/
 void MotorController::moveAll() {
 	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_TRAPEZOID);
 }
 
-void MotorController::moveAllVel() {
-	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_VELOCITY);
+void MotorController::move(int puck_id) {
+	setProperty(can_id_base_ + puck_id, PROP_MODE, MODE_TRAPEZOID);
+}
+
+//void MotorController::moveAllVel() {
+//	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_VELOCITY);
+//}
+
+void MotorController::sendGetPosition(int puck_id) {
+	reqProperty(can_id_base_ + puck_id, PROP_P);
 }
 
 void MotorController::getPosition(int puck_id, int32_t &p, int32_t &jp) {
-	reqProperty(11 + puck_id, PROP_P);
-	recEncoder2(11 + puck_id, p, jp);
+	recEncoder2(can_id_base_ + puck_id, p, jp);
+}
+
+void MotorController::sendGetStatus(int puck_id) {
+	reqProperty(can_id_base_+puck_id, PROP_MODE);
 }
 
 void MotorController::getStatus(int puck_id, int32_t &mode) {
-	reqProperty(11+puck_id, PROP_MODE);
-	recProperty(11+puck_id, mode);
+	recProperty(can_id_base_+puck_id, mode);
 }
 
-void MotorController::getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4) {
-	reqProperty(GROUP(0, HAND_GROUP), PROP_MODE);
-	recProperty(11, mode1);
-	recProperty(12, mode2);
-	recProperty(13, mode3);
-	recProperty(14, mode4);
+//void MotorController::getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4) {
+//	reqProperty(GROUP(0, HAND_GROUP), PROP_MODE);
+//	recProperty(can_id_base_+0, mode1);
+//	recProperty(can_id_base_+1, mode2);
+//	recProperty(can_id_base_+2, mode3);
+//	recProperty(can_id_base_+3, mode4);
+//}
+
+void MotorController::sendGetCurrent(int puck_id) {
+	reqProperty(can_id_base_+puck_id, PROP_IMOTOR);
 }
 
+void MotorController::getCurrent(int puck_id, double &c) {
+	const double c_factor = 1.0/205.0;
+	int32_t current = 2048;
+	recProperty(can_id_base_+puck_id, current);
+	c = c_factor*(static_cast<double>(current)-2048.0);
+}
+
+/*
 void MotorController::getCurrents(double &c1, double &c2, double &c3, double &c4) {
 	const double c_factor = 1.0/205.0;
 	int32_t current[4] = {2048, 2048, 2048, 2048};
 	reqProperty(GROUP(0, HAND_GROUP), PROP_IMOTOR);
-	recProperty(11, current[0]);
-	recProperty(12, current[1]);
-	recProperty(13, current[2]);
-	recProperty(14, current[3]);
+	recProperty(can_id_base_+0, current[0]);
+	recProperty(can_id_base_+1, current[1]);
+	recProperty(can_id_base_+2, current[2]);
+	recProperty(can_id_base_+3, current[3]);
 	c1 = c_factor*(static_cast<double>(current[0])-2048.0);
 	c2 = c_factor*(static_cast<double>(current[1])-2048.0);
 	c3 = c_factor*(static_cast<double>(current[2])-2048.0);
@@ -264,57 +298,59 @@ void MotorController::getCurrents(double &c1, double &c2, double &c3, double &c4
 void MotorController::getPositionAll(int32_t &p1, int32_t &p2, int32_t &p3, int32_t &jp1, int32_t &jp2, int32_t &jp3, int32_t &s) {
 	int32_t jp;
 	reqProperty(GROUP(0, HAND_GROUP), PROP_P);
-	recEncoder2(11 + 0, p1, jp1);
-	recEncoder2(11 + 1, p2, jp2);
-	recEncoder2(11 + 2, p3, jp3);
-	recEncoder2(11 + 3, s, jp);
+	recEncoder2(can_id_base_ + 0, p1, jp1);
+	recEncoder2(can_id_base_ + 1, p2, jp2);
+	recEncoder2(can_id_base_ + 2, p3, jp3);
+	recEncoder2(can_id_base_ + 3, s, jp);
 }
-
+*/
+/*
 int32_t MotorController::getParameter(int32_t id, int32_t prop_id)
 {
 	int32_t value;
-	reqProperty(11+id, prop_id);
-	recProperty(11+id, value);
+	reqProperty(can_id_base_+id, prop_id);
+	recProperty(can_id_base_+id, value);
 	return value;
-}
-
+}*/
+/*
 void MotorController::setParameter(int32_t id, int32_t prop_id, int32_t value, bool save) {
-	setProperty(11 + id, prop_id, value);
+	setProperty(can_id_base_ + id, prop_id, value);
 	if (save) {
-		setProperty(11 + id, 30, prop_id);
+		setProperty(can_id_base_ + id, 30, prop_id);
 	}
 }
 
 void MotorController::getTemp(int id, int32_t &temp) {
-	reqProperty(11+id, PROP_TEMP);
-	recProperty(11+id, temp);
+	reqProperty(can_id_base_+id, PROP_TEMP);
+	recProperty(can_id_base_+id, temp);
 }
 
 void MotorController::getTherm(int id, int32_t &temp) {
-	reqProperty(11+id, PROP_THERM);
-	recProperty(11+id, temp);
+	reqProperty(can_id_base_+id, PROP_THERM);
+	recProperty(can_id_base_+id, temp);
 }
-
+*/
+/*
 void MotorController::getCts(int id, int32_t &cts) {
 	int32_t cts1, cts2;
-	reqProperty(11+id, PROP_CTS);
-	recProperty(11+id, cts1);
+	reqProperty(can_id_base_+id, PROP_CTS);
+	recProperty(can_id_base_+id, cts1);
 
-	reqProperty(11+id, PROP_CTS2);
-	recProperty(11+id, cts2);
+	reqProperty(can_id_base_+id, PROP_CTS2);
+	recProperty(can_id_base_+id, cts2);
 
 	cts = cts1 | (cts2<<16);
-}
+}*/
 
 void MotorController::setHoldPosition(int id, bool hold) {
 	int32_t value = 0;
 	if (hold)
 		value = 1;
-	setProperty(11 + id, PROP_HOLD, value);
+	setProperty(can_id_base_ + id, PROP_HOLD, value);
 }
 
 bool MotorController::isDevOpened() {
-	return pdev_->isOpened();
+    return can_srv_ && can_srv_->initialize.ready() && can_srv_->readReply.ready() && can_srv_->send.ready();
 }
 
 

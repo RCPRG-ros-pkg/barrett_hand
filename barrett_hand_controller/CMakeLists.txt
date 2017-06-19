@@ -3,7 +3,14 @@ project(barrett_hand_controller)
 
 
 find_package(catkin REQUIRED COMPONENTS
-  roscpp rtt_ros rtt_roscomm barrett_hand_controller_msgs geometry_msgs sensor_msgs cmake_modules can_driver)
+    roscpp
+    rtt_ros
+    rtt_roscomm
+    barrett_hand_controller_msgs
+    geometry_msgs
+    sensor_msgs
+    cmake_modules
+    controller_common)
 
 if(${OROCOS_TARGET} STREQUAL "xenomai" )
   find_package(Xenomai REQUIRED)
@@ -13,9 +20,9 @@ find_package(Eigen REQUIRED)
 
 include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS} ${Eigen_INCLUDE_DIRS})
 
-orocos_component(barrett_hand_controller src/MotorController.cpp src/hand.cpp)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
-orocos_component(barrett_hand_move_action src/barrett_hand_move_action.cpp)
+orocos_component(barrett_hand_controller src/MotorController.cpp src/hand.cpp)
 
 if(${OROCOS_TARGET} STREQUAL "xenomai" )
   target_link_libraries(barrett_hand_controller ${catkin_LIBRARIES} ${Xenomai_RTDM_LIBRARIES})
@@ -30,6 +37,9 @@ if(${OROCOS_TARGET} STREQUAL "xenomai" )
 endif()
 #End of user code
 
-orocos_generate_package()
+orocos_generate_package(
+  INCLUDE_DIRS include
+  DEPENDS_TARGETS controller_common
+)
 
 #catkin_python_setup()
