@@ -529,7 +529,7 @@ public:
             for (int i=0; i<4; ++i) {
                 status_idle(i) = mode_[i];
             }
-            RTT::log(RTT::Info) << status_idle.transpose() << RTT::endlog();
+            //RTT::log(RTT::Info) << status_idle.transpose() << RTT::endlog();
         }
 
         // on 1, 101, 201, 301, 401, ... step
