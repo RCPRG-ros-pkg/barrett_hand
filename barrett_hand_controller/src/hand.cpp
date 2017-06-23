@@ -25,7 +25,7 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <barrett_hand_controller_msgs/BHTemp.h>
+#include <barrett_hand_msgs/BHTemp.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -122,7 +122,7 @@ private:
     int status_read_seq_;
 
     int32_t loop_counter_;
-    MotorController *ctrl_;
+    boost::shared_ptr<MotorController > ctrl_;
 
     int32_t maxStaticTorque_;
     int torqueSwitch_;
@@ -143,9 +143,8 @@ private:
     Joints4 max_measured_pressure_in_;
     Joints8 q_out_;
     Joints8 t_out_;
-    barrett_hand_controller_msgs::BHTemp temp_out_;
+    barrett_hand_msgs::BHTemp temp_out_;
 
-    std_msgs::Empty reset_in_;
     std_msgs::Empty calibrate_in_;
     std_msgs::Int32 filter_in_;
 
@@ -156,17 +155,18 @@ private:
     InputPort<double> port_mp_in_;
     InputPort<int32_t> port_hold_in_;
     InputPort<Joints4 > port_max_measured_pressure_in_;
-    InputPort<std_msgs::Empty> port_reset_in_;
+    InputPort<uint8_t> port_reset_in_;
     OutputPort<uint32_t> port_status_out_;
     OutputPort<Joints8> port_q_out_;
     OutputPort<Joints8> port_t_out_;
-    OutputPort<barrett_hand_controller_msgs::BHTemp> port_temp_out_;
+    OutputPort<barrett_hand_msgs::BHTemp> port_temp_out_;
 
 
     // ROS parameters
     string dev_name_;
     string prefix_;
     int can_id_base_;
+    int new_can_id_base_;
 
     int resetFingersCounter_;
 
@@ -190,9 +190,9 @@ public:
         , resetFingersCounter_(0)
         , maxStaticTorque_(4700)
         , torqueSwitch_(-1)
-        , ctrl_(NULL)
         , p1_(0), p2_(0), p3_(0), jp1_(0), jp2_(0), jp3_(0), jp4_(0), s_(0)
         , can_id_base_(-1)
+        , new_can_id_base_(-1)
         , currents_{0,0,0,0}
         , mode_{0,0,0,0}
     {
@@ -214,20 +214,19 @@ public:
         this->ports()->addPort("BHTemp", port_temp_out_);
 
         this->ports()->addPort("max_measured_pressure_INPORT", port_max_measured_pressure_in_);
-        this->ports()->addPort("reset_fingers_INPORT", port_reset_in_);
+        this->ports()->addPort("reset_INPORT", port_reset_in_);
 
         this->addProperty("device_name", dev_name_);
         this->addProperty("prefix", prefix_);
         this->addProperty("can_id_base", can_id_base_);
+        this->addProperty("new_can_id_base", new_can_id_base_);
     }
 
     ~BarrettHand() {
     }
 
     void cleanupHook() {
-        if (ctrl_ != NULL) {
-            delete ctrl_;
-        }
+        ctrl_.reset();
     }
 
     // RTT configure hook
@@ -246,16 +245,16 @@ public:
             return false;
         }
         
-        if (ctrl_ == NULL) {
-            ctrl_ = new MotorController(this, dev_name_, can_id_base_);
+        ctrl_.reset(new MotorController(this, dev_name_, can_id_base_));
 
-            max_measured_pressure_in_.setZero();
+        max_measured_pressure_in_.setZero();
 
-            if (ctrl_->isDevOpened()) {
-                return true;
-            }
+        if (!ctrl_->isDevOpened()) {
+            RTT::log(RTT::Error) << "could not open CAN bus" << RTT::endlog();
+            return false;
         }
-        return false;
+
+        return true;
     }
 
     // RTT start hook
@@ -408,7 +407,8 @@ public:
         readCan();
         iter_counter_ = (iter_counter_+1)%20;
 
-        if (port_reset_in_.read(reset_in_) == RTT::NewData) {
+        uint8_t reset_in_ = 0;
+        if (port_reset_in_.read(reset_in_) == RTT::NewData && reset_in_ == 1) {
             resetFingersCounter_ = 3000;
         }
 
@@ -430,7 +430,6 @@ public:
             else if (resetFingersCounter_ == 2000) {
                 cmds_.push(BHCanCommand(3, BHCanCommand::CMD_RESET, 0));
             }
-            return;
         }
 
         bool move_hand = false;
@@ -523,14 +522,14 @@ public:
         q_out_[7] = 2.0*M_PI/4096.0*static_cast<double>(p3_)*(1.0/125.0 + 1.0/375.0) - q_out_[6];
         port_q_out_.write(q_out_);
 
-        if (getName() == "rHand") {
+//        if (getName() == "rHand") {
 //            RTT::log(RTT::Info) << q_out_.transpose() << RTT::endlog();
-            Eigen::Matrix<int, 4, 1 > status_idle;
-            for (int i=0; i<4; ++i) {
-                status_idle(i) = mode_[i];
-            }
-            //RTT::log(RTT::Info) << status_idle.transpose() << RTT::endlog();
-        }
+//            Eigen::Matrix<int, 4, 1 > status_idle;
+//            for (int i=0; i<4; ++i) {
+//                status_idle(i) = mode_[i];
+//            }
+//            RTT::log(RTT::Info) << status_idle.transpose() << RTT::endlog();
+//        }
 
         // on 1, 101, 201, 301, 401, ... step
         if ( (loop_counter_%100) == 1)
@@ -619,7 +618,7 @@ public:
             status_out_ &= ~STATUS_IDLE3;
         }
 
-        if (mode_[3] == 0 || (holdEnabled_ && fabs(q_in_[3]-q_out_[3]) < 0.05) && status_read_seq_ == SEQ_STATUS_RECV) {
+        if ((mode_[3] == 0 || (holdEnabled_ && fabs(q_in_[3]-q_out_[3]) < 0.05)) && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE4;
             if (fabs(q_in_[3]-q_out_[3]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT4;

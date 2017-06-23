@@ -19,10 +19,11 @@
   <build_depend>rtt_sensor_msgs</build_depend>
   <build_depend>std_srvs</build_depend>
   <build_depend>roscpp</build_depend>
+  <build_depend>eigen</build_depend>
   <build_depend>sensor_msgs</build_depend>
   <build_depend>rtt_rosclock</build_depend>
   <build_depend>visualization_msgs</build_depend>
-  <build_depend>barrett_hand_controller_msgs</build_depend>
+  <build_depend>barrett_hand_msgs</build_depend>
   <build_depend>rtt_actionlib</build_depend>
   <build_depend>controller_common</build_depend>
 
@@ -33,13 +34,14 @@
   <run_depend>rtt_roscomm</run_depend>
   <run_depend>rtt_sensor_msgs</run_depend>
   <run_depend>roscpp</run_depend>
+  <run_depend>eigen</run_depend>
   <run_depend>visualization_msgs</run_depend>
   <run_depend>message_runtime</run_depend>
   <run_depend>rtt_std_msgs</run_depend>
   <run_depend>rosgraph_msgs</run_depend>
   <run_depend>std_srvs</run_depend> 
   <run_depend>rtt_std_srvs</run_depend> 
-  <run_depend>rtt_barrett_hand_controller_msgs</run_depend>
+  <run_depend>rtt_barrett_hand_msgs</run_depend>
   <run_depend>kdl_parser</run_depend>
   <run_depend>controller_common</run_depend>
 
@@ -51,7 +53,7 @@
       <plugin_depend>rtt_sensor_msgs</plugin_depend>
       <plugin_depend>rtt_std_msgs</plugin_depend>
       <plugin_depend>rtt_std_srvs</plugin_depend>
-      <plugin_depend>rtt_barrett_hand_controller_msgs</plugin_depend>
+      <plugin_depend>rtt_barrett_hand_msgs</plugin_depend>
     </rtt_ros>
   </export>
 </package>

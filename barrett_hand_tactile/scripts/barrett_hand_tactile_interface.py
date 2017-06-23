@@ -31,7 +31,7 @@ import tf
 from std_msgs.msg import *
 from geometry_msgs.msg import *
 from sensor_msgs.msg import *
-from barrett_hand_controller_msgs.msg import *
+from barrett_hand_msgs.msg import *
 from visualization_msgs.msg import *
 import actionlib
 from actionlib_msgs.msg import *
@@ -73,7 +73,7 @@ Class for BarrettHand robot.
             if not self.is_updated:
                 self.pressure_info_tmp = msg
                 self.is_updated = True
-        rospy.Subscriber('/' + self.prefix + '_hand/tactile_info_out', barrett_hand_controller_msgs.msg.BHPressureInfo, tactileInfoCallback)
+        rospy.Subscriber('/' + self.prefix + '_hand/tactile_info_out', barrett_hand_msgs.msg.BHPressureInfo, tactileInfoCallback)
         rospy.sleep(1.0)
         return self.pressure_info_tmp
 

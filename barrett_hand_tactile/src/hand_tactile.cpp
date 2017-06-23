@@ -25,9 +25,9 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <barrett_hand_controller_msgs/BHPressureState.h>
-#include <barrett_hand_controller_msgs/BHTemp.h>
-#include <barrett_hand_controller_msgs/BHPressureInfo.h>
+#include <barrett_hand_msgs/BHPressureState.h>
+#include <barrett_hand_msgs/BHTemp.h>
+#include <barrett_hand_msgs/BHPressureInfo.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -66,19 +66,19 @@ private:
     Tactile *ts_[4];
 
     // port variables
-    barrett_hand_controller_msgs::BHPressureState tactile_out_;
+    barrett_hand_msgs::BHPressureState tactile_out_;
     std_msgs::Empty reset_in_;
     std_msgs::Empty calibrate_in_;
     std_msgs::Int32 filter_in_;
-    barrett_hand_controller_msgs::BHPressureInfo pressure_info_;
+    barrett_hand_msgs::BHPressureInfo pressure_info_;
     Eigen::Vector4d max_pressure_out_;
 
     // OROCOS ports
-    OutputPort<barrett_hand_controller_msgs::BHPressureState> port_tactile_out_;
+    OutputPort<barrett_hand_msgs::BHPressureState> port_tactile_out_;
     InputPort<std_msgs::Empty> port_reset_in_;
     InputPort<std_msgs::Empty> port_calibrate_in_;
     InputPort<std_msgs::Int32> port_filter_in_;
-    OutputPort<barrett_hand_controller_msgs::BHPressureInfo> port_tactile_info_out_;
+    OutputPort<barrett_hand_msgs::BHPressureInfo> port_tactile_info_out_;
     OutputPort<Eigen::Vector4d > port_max_pressure_out_;
 
     // ROS parameters

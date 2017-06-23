@@ -33,7 +33,7 @@ import math
 
 import std_msgs.msg
 from std_msgs.msg import ColorRGBA
-from barrett_hand_controller_msgs.msg import *
+from barrett_hand_msgs.msg import *
 from visualization_msgs.msg import *
 from geometry_msgs.msg import *
 from sensor_msgs.msg import Image

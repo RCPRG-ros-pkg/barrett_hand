@@ -28,6 +28,10 @@
 #ifndef BARRETT_HAND_CONTROLLER_BARRETT_HAND_CAN_H_
 #define BARRETT_HAND_CONTROLLER_BARRETT_HAND_CAN_H_
 
+// CANbus ID
+#define PROP_ID 3
+// CAN save
+#define PROP_SAVE 30
 // For commands w/o values: RESET,HOME,KEEP,PASS,LOOP,HI,IC,IO,TC,TO,C,O,T 5
 #define PROP_CMD 29
 // 32-Bit Position. R=Act, W=Cmd

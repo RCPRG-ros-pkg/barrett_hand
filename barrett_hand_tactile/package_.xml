@@ -23,7 +23,7 @@
   <build_depend>sensor_msgs</build_depend>
   <build_depend>rtt_rosclock</build_depend>
   <build_depend>visualization_msgs</build_depend>
-  <build_depend>barrett_hand_controller_msgs</build_depend>
+  <build_depend>barrett_hand_msgs</build_depend>
   <build_depend>rtt_actionlib</build_depend>
   <build_depend>can_driver</build_depend>
 
@@ -40,7 +40,7 @@
   <run_depend>rosgraph_msgs</run_depend>
   <run_depend>std_srvs</run_depend> 
   <run_depend>rtt_std_srvs</run_depend> 
-  <run_depend>rtt_barrett_hand_controller_msgs</run_depend>
+  <run_depend>rtt_barrett_hand_msgs</run_depend>
   <run_depend>kdl_parser</run_depend>
   <run_depend>can_driver</run_depend>
 
@@ -52,7 +52,7 @@
       <plugin_depend>rtt_sensor_msgs</plugin_depend>
       <plugin_depend>rtt_std_msgs</plugin_depend>
       <plugin_depend>rtt_std_srvs</plugin_depend>
-      <plugin_depend>rtt_barrett_hand_controller_msgs</plugin_depend>
+      <plugin_depend>rtt_barrett_hand_msgs</plugin_depend>
     </rtt_ros>
   </export>
 </package>

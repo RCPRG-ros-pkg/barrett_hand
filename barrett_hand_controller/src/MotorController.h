@@ -53,8 +53,6 @@ public:
 	void setTargetVel(int puck_id, int32_t pos);
 	void getCurrents(double &c1, double &c2, double &c3, double &c4);
 	void setHoldPosition(int id, bool hold);
-	void moveAll();
-	void moveAllVel();
 	void getStatus(int puck_id, int32_t &mode);
 	void getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4);
     void getTemp(int id, int32_t &temp);
@@ -73,7 +71,6 @@ public:
     void setHoldPosition(int id, bool hold);
 	void setMaxTorque(int id, uint32_t vel);
 	void setTargetPos(int puck_id, int32_t pos);
-	void moveAll();
     void move(int puck_id);
 
 	bool isDevOpened();

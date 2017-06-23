@@ -3,7 +3,7 @@ project(barrett_hand_tactile)
 
 
 find_package(catkin REQUIRED COMPONENTS
-  roscpp rtt_ros rtt_roscomm barrett_hand_controller_msgs geometry_msgs sensor_msgs cmake_modules can_driver)
+  roscpp rtt_ros rtt_roscomm barrett_hand_msgs geometry_msgs sensor_msgs cmake_modules can_driver)
 
 if(${OROCOS_TARGET} STREQUAL "xenomai" )
   find_package(Xenomai REQUIRED)

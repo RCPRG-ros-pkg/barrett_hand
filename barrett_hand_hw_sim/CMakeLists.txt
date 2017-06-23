@@ -7,15 +7,15 @@ find_package(catkin REQUIRED COMPONENTS
     cmake_modules
     kdl_parser
     lwr_msgs
-    barrett_hand_common
-    barrett_hand_controller_msgs
+    barrett_hand_tactile
+    barrett_hand_msgs
     velma_core_ve_re_lwr_msgs
     eigen_conversions
     common_behavior
     common_interfaces
-    test_ec_msgs_gen
+    velma_ec_gen_msgs
     shm_comm
-    ec_can_queue
+    velma_common_components
     barrett_hand_controller
 )
 

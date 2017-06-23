@@ -28,35 +28,6 @@
 
 using namespace RTT;
 
-//#define P2RAD(x) ((x)/199111.1/180.0*M_PI*140.0)
-//#define S2RAD(x) ((x)*M_PI/35840.0)
-/*
-class BarrettHandHwCAN {
-public:
-    typedef Eigen::Matrix<double, 4, 1> Dofs;
-    typedef Eigen::Matrix<double, 8, 1> Joints;
-
-    int can_id_base_;
-    int32_t p_[4], jp_[3];
-    bool move_hand_[4];
-    bool status_idle_[4];
-
-    Dofs q_in_;
-    Dofs v_in_;
-    Dofs t_in_;
-//    Joints t_out_;
-
-    bool isSetProperty(uint16_t dlc, int8_t *data, uint8_t property, int32_t &value) const;
-    bool isReqProperty(uint16_t dlc, int8_t *data, uint8_t property) const;
-    void sendPuckPos(int puck_id);
-    void sendPuckProp(int puck_id, int32_t prop, int32_t value);
-    void processPuckMsgs(int puck_id);
-//    void processGroupMsgs();
-    bool configure(RTT::TaskContext *tc);
-
-    boost::shared_ptr<controller_common::CanQueueServiceRequester > can_srv_;
-};
-*/
 bool BarrettHandHwCAN::isSetProperty(uint16_t dlc, int8_t *data, uint8_t property, int32_t &value) const {
     if (dlc == 6 && uint8_t(data[0]) == (0x80|property) && data[1] == 0) {
         value = *reinterpret_cast<int32_t* >(data+2);
@@ -184,8 +155,15 @@ void BarrettHandHwCAN::processPuckMsgs() {
                 if (value == CMD_OPEN) {
                     //TODO: open finger
                 }
-                if (value == CMD_CLOSE) {
+                else if (value == CMD_CLOSE) {
                     //TODO: close finger
+                }
+                else if (value == CMD_HI) {
+                    // reset finger
+                    move_hand_[puck_id] = true;
+                    v_in_(puck_id) = 1.0/1000.0;
+                    q_in_(puck_id) = 0.0;
+                    t_in_(puck_id) = 4000;
                 }
             }
             else if (isSetProperty(dlc, data, PROP_E, value)) {

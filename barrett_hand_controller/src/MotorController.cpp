@@ -108,7 +108,8 @@ MotorController::MotorController(RTT::TaskContext *owner, const std::string &dev
         filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(can_id_base_ + puck_id, PFEEDBACK_GROUP), 0x07FF) );
         filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(can_id_base_ + puck_id, 6), 0x07FF) );
     }
-    filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(0, HAND_GROUP), 0x07FF) );
+// TODO: remove
+//    filters.push_back( std::pair<uint32_t, uint32_t >(GROUP(0, HAND_GROUP), 0x07FF) );
 
     can_srv_ = owner->getProvider<controller_common::CanQueueServiceRequester >("can_queue");
 
@@ -217,14 +218,6 @@ void MotorController::setMaxTorque(int id, uint32_t vel) {
 	setProperty(can_id_base_ + id, PROP_MT, vel);
 }
 
-//void MotorController::open(int id) {
-//	setProperty(can_id_base_ + id, PROP_CMD, CMD_OPEN);
-//}
-
-//void MotorController::close(int id) {
-//	setProperty(can_id_base_ + id, PROP_CMD, CMD_CLOSE);
-//}
-
 void MotorController::setTargetPos(int puck_id, int32_t pos) {
 	setProperty(can_id_base_ + puck_id, PROP_E, pos);
 }
@@ -233,17 +226,10 @@ void MotorController::setTargetVel(int puck_id, int32_t vel) {
 	setProperty(can_id_base_ + puck_id, PROP_V, vel);
 }
 */
-void MotorController::moveAll() {
-	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_TRAPEZOID);
-}
 
 void MotorController::move(int puck_id) {
 	setProperty(can_id_base_ + puck_id, PROP_MODE, MODE_TRAPEZOID);
 }
-
-//void MotorController::moveAllVel() {
-//	setProperty(GROUP(0, HAND_GROUP), PROP_MODE, MODE_VELOCITY);
-//}
 
 void MotorController::sendGetPosition(int puck_id) {
 	reqProperty(can_id_base_ + puck_id, PROP_P);
@@ -260,14 +246,6 @@ void MotorController::sendGetStatus(int puck_id) {
 void MotorController::getStatus(int puck_id, int32_t &mode) {
 	recProperty(can_id_base_+puck_id, mode);
 }
-
-//void MotorController::getStatusAll(int32_t &mode1, int32_t &mode2, int32_t &mode3, int32_t &mode4) {
-//	reqProperty(GROUP(0, HAND_GROUP), PROP_MODE);
-//	recProperty(can_id_base_+0, mode1);
-//	recProperty(can_id_base_+1, mode2);
-//	recProperty(can_id_base_+2, mode3);
-//	recProperty(can_id_base_+3, mode4);
-//}
 
 void MotorController::sendGetCurrent(int puck_id) {
 	reqProperty(can_id_base_+puck_id, PROP_IMOTOR);

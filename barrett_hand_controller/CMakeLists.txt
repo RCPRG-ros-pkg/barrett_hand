@@ -6,7 +6,7 @@ find_package(catkin REQUIRED COMPONENTS
     roscpp
     rtt_ros
     rtt_roscomm
-    barrett_hand_controller_msgs
+    barrett_hand_msgs
     geometry_msgs
     sensor_msgs
     cmake_modules
@@ -16,9 +16,9 @@ if(${OROCOS_TARGET} STREQUAL "xenomai" )
   find_package(Xenomai REQUIRED)
 endif()
 
-find_package(Eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 
-include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS} ${Eigen_INCLUDE_DIRS})
+include_directories(include ${catkin_INCLUDE_DIRS} ${BOOST_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
