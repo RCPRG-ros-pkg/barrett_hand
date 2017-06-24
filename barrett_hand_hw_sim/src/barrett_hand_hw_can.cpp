@@ -161,7 +161,7 @@ void BarrettHandHwCAN::processPuckMsgs() {
                 else if (value == CMD_HI) {
                     // reset finger
                     move_hand_[puck_id] = true;
-                    v_in_(puck_id) = 1.0/1000.0;
+                    v_in_(puck_id) = 1.5/1000.0;
                     q_in_(puck_id) = 0.0;
                     t_in_(puck_id) = 4000;
                 }
