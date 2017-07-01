@@ -254,26 +254,26 @@ public:
             return false;
         }
 
+        holdEnabled_ = false;
+        hold_ = true;
+        status_out_ = 0;
+        iter_counter_ = 0;
+
         return true;
     }
 
     // RTT start hook
     bool startHook()
     {
-        holdEnabled_ = false;
-        hold_ = true;
-        status_out_ = 0;
-        iter_counter_ = 0;
+//        cmds_.push(BHCanCommand(0, BHCanCommand::CMD_HOLD, false));
+//        cmds_.push(BHCanCommand(1, BHCanCommand::CMD_HOLD, false));
+//        cmds_.push(BHCanCommand(2, BHCanCommand::CMD_HOLD, false));
+//        cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, false));
 
-        cmds_.push(BHCanCommand(0, BHCanCommand::CMD_HOLD, false));
-        cmds_.push(BHCanCommand(1, BHCanCommand::CMD_HOLD, false));
-        cmds_.push(BHCanCommand(2, BHCanCommand::CMD_HOLD, false));
-        cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, false));
-
-        cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(1)/1000.0));
-        cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(1)/1000.0));
-        cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MAX_VEL, RAD2P(1)/1000.0));
-        cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MAX_VEL, RAD2S(0.7)/1000.0));
+//        cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(1)/1000.0));
+//        cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(1)/1000.0));
+//        cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MAX_VEL, RAD2P(1)/1000.0));
+//        cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MAX_VEL, RAD2S(0.7)/1000.0));
 
         return true;
     }
@@ -285,114 +285,81 @@ public:
     }
 
     void readCan() {
-        int cnt = iter_counter_;
-        if (cnt == 0) {
+        if (iter_counter_ == 0) {
             ctrl_->getPosition(0, p1_, jp1_);
-        }
-        else if (cnt == 1) {
             ctrl_->getPosition(1, p2_, jp2_);
-        }
-        else if (cnt == 2) {
             ctrl_->getPosition(2, p3_, jp3_);
         }
-        else if (cnt == 3) {
+        else if (iter_counter_ == 1) {
             int32_t tmp;
             ctrl_->getPosition(3, s_, tmp);
-        }
-        else if (cnt == 4) {
             ctrl_->getStatus(0, mode_[0]);
-        }
-        else if (cnt == 5) {
             ctrl_->getStatus(1, mode_[1]);
         }
-        else if (cnt == 6) {
+        else if (iter_counter_ == 2) {
             ctrl_->getStatus(2, mode_[2]);
-        }
-        else if (cnt == 7) {
             ctrl_->getStatus(3, mode_[3]);
-        }
-        else if (cnt == 8) {
             ctrl_->getCurrent(0, currents_[0]);
         }
-        else if (cnt == 9) {
+        else if (iter_counter_ == 3) {
             ctrl_->getCurrent(1, currents_[1]);
-        }
-        else if (cnt == 10) {
             ctrl_->getCurrent(2, currents_[2]);
-        }
-        else if (cnt == 11) {
             ctrl_->getCurrent(3, currents_[3]);
         }
     }
 
     void writeCan() {
-        int cnt = iter_counter_;
-        if (cnt == 0) {
+        if (iter_counter_ == 0) {
             ctrl_->sendGetPosition(0);
-        }
-        else if (cnt == 1) {
             ctrl_->sendGetPosition(1);
-        }
-        else if (cnt == 2) {
             ctrl_->sendGetPosition(2);
         }
-        else if (cnt == 3) {
+        else if (iter_counter_ == 1) {
             ctrl_->sendGetPosition(3);
-        }
-        else if (cnt == 4) {
             ctrl_->sendGetStatus(0);
-        }
-        else if (cnt == 5) {
             ctrl_->sendGetStatus(1);
         }
-        else if (cnt == 6) {
+        else if (iter_counter_ == 2) {
             ctrl_->sendGetStatus(2);
-        }
-        else if (cnt == 7) {
             ctrl_->sendGetStatus(3);
             if (status_read_seq_ == SEQ_CMD_SEND) {
                 status_read_seq_ = SEQ_STATUS_RECV;
             }
-        }
-        else if (cnt == 8) {
             ctrl_->sendGetCurrent(0);
         }
-        else if (cnt == 9) {
+        else if (iter_counter_ == 3) {
             ctrl_->sendGetCurrent(1);
-        }
-        else if (cnt == 10) {
             ctrl_->sendGetCurrent(2);
-        }
-        else if (cnt == 11) {
             ctrl_->sendGetCurrent(3);
         }
         else {
             BHCanCommand cmd;
-            if (cmds_.pop(cmd)) {
-                if (cmd.type_ == BHCanCommand::CMD_MAX_VEL) {
-                    ctrl_->setMaxVel(cmd.id_, cmd.value_);
-                }
-                else if (cmd.type_ == BHCanCommand::CMD_HOLD) {
-                    ctrl_->setHoldPosition(cmd.id_, cmd.value_);
-                }
-                else if (cmd.type_ == BHCanCommand::CMD_RESET) {
-                    ctrl_->resetFinger(cmd.id_);
-                }
-                else if (cmd.type_ == BHCanCommand::CMD_MAX_TORQUE) {
-                    ctrl_->setMaxTorque(cmd.id_, cmd.value_);
-                }
-                else if (cmd.type_ == BHCanCommand::CMD_TARGET_POS) {
-                    ctrl_->setTargetPos(cmd.id_, cmd.value_);
-                }
-                else if (cmd.type_ == BHCanCommand::CMD_STOP) {
-                    ctrl_->stopFinger(cmd.id_);
-                }
-                else if (cmd.type_ == BHCanCommand::CMD_MOVE) {
-                    RTT::log(RTT::Warning) << "sending move command " << cmd.id_ << RTT::endlog();
-                    //ctrl_->moveAll();
-                    ctrl_->move(cmd.id_);
-                    if (cmd.id_ == 3 && status_read_seq_ == SEQ_BEFORE_CMD_SEND) {
-                        status_read_seq_ = SEQ_CMD_SEND;
+            for (int i = 0; i < 3; ++i) {
+                if (cmds_.pop(cmd)) {
+                    if (cmd.type_ == BHCanCommand::CMD_MAX_VEL) {
+                        ctrl_->setMaxVel(cmd.id_, cmd.value_);
+                    }
+                    else if (cmd.type_ == BHCanCommand::CMD_HOLD) {
+                        ctrl_->setHoldPosition(cmd.id_, cmd.value_);
+                    }
+                    else if (cmd.type_ == BHCanCommand::CMD_RESET) {
+                        ctrl_->resetFinger(cmd.id_);
+                    }
+                    else if (cmd.type_ == BHCanCommand::CMD_MAX_TORQUE) {
+                        ctrl_->setMaxTorque(cmd.id_, cmd.value_);
+                    }
+                    else if (cmd.type_ == BHCanCommand::CMD_TARGET_POS) {
+                        ctrl_->setTargetPos(cmd.id_, cmd.value_);
+                    }
+                    else if (cmd.type_ == BHCanCommand::CMD_STOP) {
+                        ctrl_->stopFinger(cmd.id_);
+                    }
+                    else if (cmd.type_ == BHCanCommand::CMD_MOVE) {
+                        RTT::log(RTT::Warning) << "sending move command " << cmd.id_ << RTT::endlog();
+                        ctrl_->move(cmd.id_);
+                        if (cmd.id_ == 3 && status_read_seq_ == SEQ_BEFORE_CMD_SEND) {
+                            status_read_seq_ = SEQ_CMD_SEND;
+                        }
                     }
                 }
             }
@@ -405,7 +372,7 @@ public:
     void updateHook()
     {
         readCan();
-        iter_counter_ = (iter_counter_+1)%20;
+        iter_counter_ = (iter_counter_+1)%6;
 
         uint8_t reset_in_ = 0;
         if (port_reset_in_.read(reset_in_) == RTT::NewData && reset_in_ == 1) {
