@@ -287,23 +287,23 @@ public:
     void readCan() {
         if (iter_counter_ == 0) {
             ctrl_->getPosition(0, p1_, jp1_);
-            ctrl_->getPosition(1, p2_, jp2_);
-            ctrl_->getPosition(2, p3_, jp3_);
-        }
-        else if (iter_counter_ == 1) {
-            int32_t tmp;
-            ctrl_->getPosition(3, s_, tmp);
             ctrl_->getStatus(0, mode_[0]);
-            ctrl_->getStatus(1, mode_[1]);
-        }
-        else if (iter_counter_ == 2) {
-            ctrl_->getStatus(2, mode_[2]);
-            ctrl_->getStatus(3, mode_[3]);
             ctrl_->getCurrent(0, currents_[0]);
         }
-        else if (iter_counter_ == 3) {
+        else if (iter_counter_ == 1) {
+            ctrl_->getPosition(1, p2_, jp2_);
+            ctrl_->getStatus(1, mode_[1]);
             ctrl_->getCurrent(1, currents_[1]);
+        }
+        else if (iter_counter_ == 2) {
+            ctrl_->getPosition(2, p3_, jp3_);
+            ctrl_->getStatus(2, mode_[2]);
             ctrl_->getCurrent(2, currents_[2]);
+        }
+        else if (iter_counter_ == 3) {
+            int32_t tmp;
+            ctrl_->getPosition(3, s_, tmp);
+            ctrl_->getStatus(3, mode_[3]);
             ctrl_->getCurrent(3, currents_[3]);
         }
     }
