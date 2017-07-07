@@ -355,7 +355,7 @@ public:
                         ctrl_->stopFinger(cmd.id_);
                     }
                     else if (cmd.type_ == BHCanCommand::CMD_MOVE) {
-                        RTT::log(RTT::Warning) << "sending move command " << cmd.id_ << RTT::endlog();
+                        //RTT::log(RTT::Warning) << "sending move command " << cmd.id_ << RTT::endlog();
                         ctrl_->move(cmd.id_);
                         if (cmd.id_ == 3 && status_read_seq_ == SEQ_BEFORE_CMD_SEND) {
                             status_read_seq_ = SEQ_CMD_SEND;
@@ -402,33 +402,20 @@ public:
         bool move_hand = false;
 
         if (port_q_in_.read(q_in_) == RTT::NewData) {
-            RTT::log(RTT::Info) << "move_hand" << RTT::endlog();
+            //RTT::log(RTT::Info) << "move_hand" << RTT::endlog();
             
             move_hand = true;
         }
 
         if (port_v_in_.read(v_in_) == RTT::NewData) {
-            if (v_in_.size() == BH_DOF) {
-                cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[0])/1000.0));
-                cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[1])/1000.0));
-                cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[2])/1000.0));
-                cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MAX_VEL, RAD2S(v_in_[3])/1000.0));
-                //ctrl_->setMaxVel(0, RAD2P(v_in_[0])/1000.0);
-                //ctrl_->setMaxVel(1, RAD2P(v_in_[1])/1000.0);
-                //ctrl_->setMaxVel(2, RAD2P(v_in_[2])/1000.0);
-                //ctrl_->setMaxVel(3, RAD2S(v_in_[3])/1000.0);
-            } else {
-                RTT::log(RTT::Warning) << "Size of " << port_v_in_.getName()
-                << " not equal to " << BH_DOF << RTT::endlog();
-            }
+            cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[0])/1000.0));
+            cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[1])/1000.0));
+            cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[2])/1000.0));
+            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MAX_VEL, RAD2S(v_in_[3])/1000.0));
         }
 
         if (port_t_in_.read(t_in_) == RTT::NewData) {
-            if (t_in_.size() == BH_DOF) {
-            } else {
-                RTT::log(RTT::Warning) << "Size of " << port_t_in_.getName()
-                << " not equal to " << BH_DOF << RTT::endlog();
-            }
+            // do nothing
         }
 
         port_mp_in_.read(mp_in_);
@@ -524,12 +511,12 @@ public:
                 hold_ = false;
                 cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, holdEnabled_ && hold_));
                 //ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
-                RTT::log(RTT::Warning) << "Temperature is too high. Disabled spread hold." << RTT::endlog();
+                //RTT::log(RTT::Warning) << "Temperature is too high. Disabled spread hold." << RTT::endlog();
             } else if (!hold_ && allTempOk) {
                 hold_ = true;
                 cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, holdEnabled_ && hold_));
                 //ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
-                RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
+                //RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
             }
 
             port_temp_out_.write(temp_out_);

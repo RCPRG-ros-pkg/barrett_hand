@@ -72,7 +72,7 @@ void BarrettHandHwCAN::sendPuckProp(int puck_id, int32_t prop, int32_t value) {
 }
 
 void BarrettHandHwCAN::processPuckMsgs() {
-    Logger::In in(std::string("BarrettHandHwCAN::processPuckMsgs "));
+//    Logger::In in(std::string("BarrettHandHwCAN::processPuckMsgs "));
     for (int puck_id = 0; puck_id < 4; ++puck_id) {
         int8_t data[8];
         uint16_t dlc = 0;
@@ -102,7 +102,7 @@ void BarrettHandHwCAN::processPuckMsgs() {
     //            Logger::log() << Logger::Info << "req PROP_MODE, puck: " << puck_id << Logger::endl;
             }
             else if (isSetProperty(dlc, data, PROP_MODE, value)) {
-                Logger::log() << Logger::Info << "set PROP_MODE: " << puck_id << Logger::endl;
+//                Logger::log() << Logger::Info << "set PROP_MODE: " << puck_id << Logger::endl;
                 if (value == MODE_TRAPEZOID) {
                     move_hand_[puck_id] = true;
                     
@@ -138,7 +138,7 @@ void BarrettHandHwCAN::processPuckMsgs() {
                 //TODO
             }
             else if (isSetProperty(dlc, data, PROP_MV, value)) {
-                Logger::log() << Logger::Info << "set PROP_MV, puck: " << puck_id << ", v: " << value << Logger::endl;
+//                Logger::log() << Logger::Info << "set PROP_MV, puck: " << puck_id << ", v: " << value << Logger::endl;
                 if (puck_id == 3) {
                     v_in_(puck_id) = S2RAD(value);
                 }
@@ -147,7 +147,7 @@ void BarrettHandHwCAN::processPuckMsgs() {
                 }
             }
             else if (isSetProperty(dlc, data, PROP_MT, value)) {
-                Logger::log() << Logger::Info << "set PROP_MT, puck: " << puck_id << ", v: " << value << Logger::endl;
+//                Logger::log() << Logger::Info << "set PROP_MT, puck: " << puck_id << ", v: " << value << Logger::endl;
                 t_in_(puck_id) = value;
             }
             else if (isSetProperty(dlc, data, PROP_CMD, value)) {
@@ -167,7 +167,7 @@ void BarrettHandHwCAN::processPuckMsgs() {
                 }
             }
             else if (isSetProperty(dlc, data, PROP_E, value)) {
-                Logger::log() << Logger::Info << "set PROP_E, puck: " << puck_id << ", v: " << value << Logger::endl;
+//                Logger::log() << Logger::Info << "set PROP_E, puck: " << puck_id << ", v: " << value << Logger::endl;
                 if (puck_id == 3) {
                     q_in_(puck_id) = S2RAD(value);
                 }
@@ -176,7 +176,7 @@ void BarrettHandHwCAN::processPuckMsgs() {
                 }
             }
             else if (isSetProperty(dlc, data, PROP_V, value)) {
-                Logger::log() << Logger::Info << "set PROP_V, puck: " << puck_id << ", v: " << value << Logger::endl;
+//                Logger::log() << Logger::Info << "set PROP_V, puck: " << puck_id << ", v: " << value << Logger::endl;
                 //TODO: setVel
             }
             else if (isSetProperty(dlc, data, PROP_HOLD, value)) {
