@@ -26,6 +26,7 @@
 */
 
 #include <barrett_hand_msgs/BHTemp.h>
+#include <barrett_hand_msgs/CommandHand.h>
 
 #include <rtt/TaskContext.hpp>
 #include <rtt/Port.hpp>
@@ -130,15 +131,10 @@ private:
     bool hold_;
     bool holdEnabled_;
 
-    typedef Eigen::Matrix<double, 4, 1 > Joints4;
-    typedef Eigen::Matrix<double, 8, 1 > Joints8;
+    typedef boost::array<double, 4 > Joints4;
+    typedef boost::array<double, 8 > Joints8;
 
     // port variables
-    Joints4 q_in_;
-    Joints4 v_in_;
-    Joints4 t_in_;
-    double mp_in_;
-    int32_t hold_in_;
     uint32_t status_out_;
     Joints4 max_measured_pressure_in_;
     Joints8 q_out_;
@@ -149,11 +145,8 @@ private:
     std_msgs::Int32 filter_in_;
 
     // OROCOS ports
-    InputPort<Joints4 > port_q_in_;
-    InputPort<Joints4 > port_v_in_;
-    InputPort<Joints4 > port_t_in_;
-    InputPort<double> port_mp_in_;
-    InputPort<int32_t> port_hold_in_;
+    InputPort<barrett_hand_msgs::CommandHand > port_cmd_in_;
+
     InputPort<Joints4 > port_max_measured_pressure_in_;
     InputPort<uint8_t> port_reset_in_;
     OutputPort<uint32_t> port_status_out_;
@@ -199,13 +192,8 @@ public:
         holdEnabled_ = false;
         hold_ = true;
         status_out_ = 0;
-        mp_in_ = 0;
 
-        this->ports()->addPort("q_INPORT", port_q_in_);
-        this->ports()->addPort("v_INPORT", port_v_in_);
-        this->ports()->addPort("t_INPORT", port_t_in_);
-        this->ports()->addPort("mp_INPORT", port_mp_in_);
-        this->ports()->addPort("hold_INPORT", port_hold_in_);
+        this->ports()->addPort("cmd_INPORT", port_cmd_in_);
 
         this->ports()->addPort("q_OUTPORT", port_q_out_);
         this->ports()->addPort("t_OUTPORT", port_t_out_);
@@ -247,7 +235,9 @@ public:
         
         ctrl_.reset(new MotorController(this, dev_name_, can_id_base_));
 
-        max_measured_pressure_in_.setZero();
+        for (int i = 0; i < max_measured_pressure_in_.size(); ++i) {
+            max_measured_pressure_in_[i] = 0;
+        }
 
         if (!ctrl_->isDevOpened()) {
             RTT::log(RTT::Error) << "could not open CAN bus" << RTT::endlog();
@@ -401,28 +391,15 @@ public:
 
         bool move_hand = false;
 
-        if (port_q_in_.read(q_in_) == RTT::NewData) {
+        barrett_hand_msgs::CommandHand cmd_in = barrett_hand_msgs::CommandHand();
+
+        if (port_cmd_in_.read(cmd_in) == RTT::NewData) {
             //RTT::log(RTT::Info) << "move_hand" << RTT::endlog();
-            
             move_hand = true;
-        }
-
-        if (port_v_in_.read(v_in_) == RTT::NewData) {
-            cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[0])/1000.0));
-            cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[1])/1000.0));
-            cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MAX_VEL, RAD2P(v_in_[2])/1000.0));
-            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MAX_VEL, RAD2S(v_in_[3])/1000.0));
-        }
-
-        if (port_t_in_.read(t_in_) == RTT::NewData) {
-            // do nothing
-        }
-
-        port_mp_in_.read(mp_in_);
-        if (port_hold_in_.read(hold_in_) == RTT::NewData) {
-            holdEnabled_ = static_cast<bool>(hold_in_);
-            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, holdEnabled_ && hold_));
-            //ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
+            cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(cmd_in.dq[0])/1000.0));
+            cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(cmd_in.dq[1])/1000.0));
+            cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MAX_VEL, RAD2P(cmd_in.dq[2])/1000.0));
+            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MAX_VEL, RAD2S(cmd_in.dq[3])/1000.0));
         }
 
         if (move_hand) {
@@ -435,19 +412,16 @@ public:
             }
             torqueSwitch_ = 5;
 
-            cmds_.push(BHCanCommand(0, BHCanCommand::CMD_TARGET_POS, RAD2P(q_in_[0])));
-            cmds_.push(BHCanCommand(1, BHCanCommand::CMD_TARGET_POS, RAD2P(q_in_[1])));
-            cmds_.push(BHCanCommand(2, BHCanCommand::CMD_TARGET_POS, RAD2P(q_in_[2])));
-            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_TARGET_POS, RAD2S(q_in_[3])));
+            holdEnabled_ = static_cast<bool>(cmd_in.hold);
+            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, holdEnabled_ && hold_));
+            cmds_.push(BHCanCommand(0, BHCanCommand::CMD_TARGET_POS, RAD2P(cmd_in.q[0])));
+            cmds_.push(BHCanCommand(1, BHCanCommand::CMD_TARGET_POS, RAD2P(cmd_in.q[1])));
+            cmds_.push(BHCanCommand(2, BHCanCommand::CMD_TARGET_POS, RAD2P(cmd_in.q[2])));
+            cmds_.push(BHCanCommand(3, BHCanCommand::CMD_TARGET_POS, RAD2S(cmd_in.q[3])));
             cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MOVE, 0));
             cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MOVE, 0));
             cmds_.push(BHCanCommand(2, BHCanCommand::CMD_MOVE, 0));
             cmds_.push(BHCanCommand(3, BHCanCommand::CMD_MOVE, 0));
-            //ctrl_->setTargetPos(0, RAD2P(q_in_[0]));
-            //ctrl_->setTargetPos(1, RAD2P(q_in_[1]));
-            //ctrl_->setTargetPos(2, RAD2P(q_in_[2]));
-            //ctrl_->setTargetPos(3, RAD2S(q_in_[3]));
-            //ctrl_->moveAll();
         }
 
         if (torqueSwitch_>0)
@@ -456,16 +430,12 @@ public:
         } else if (torqueSwitch_ == 0)
         {
             for (int i=0; i<BH_DOF; i++) {
-                cmds_.push(BHCanCommand(i, BHCanCommand::CMD_MAX_TORQUE, t_in_[i]));
-                //ctrl_->setMaxTorque(i, t_in_[i]);
+                cmds_.push(BHCanCommand(i, BHCanCommand::CMD_MAX_TORQUE, cmd_in.max_i[i]));
             }
             --torqueSwitch_;
         }
 
         // write current joint positions
-//done
-//        ctrl_->getPosition(0, p1, jp1);
-//        ctrl_->getPositionAll(p1, p2, p3, jp1, jp2, jp3, s);
         q_out_[0] = static_cast<double>(s_) * M_PI/ 35840.0;
         q_out_[1] = 2.0*M_PI/4096.0*static_cast<double>(jp1_)/50.0;
         q_out_[2] = 2.0*M_PI/4096.0*static_cast<double>(p1_)*(1.0/125.0 + 1.0/375.0) - q_out_[1];
@@ -475,15 +445,6 @@ public:
         q_out_[6] = 2.0*M_PI*static_cast<double>(jp3_)/4096.0/50.0;
         q_out_[7] = 2.0*M_PI/4096.0*static_cast<double>(p3_)*(1.0/125.0 + 1.0/375.0) - q_out_[6];
         port_q_out_.write(q_out_);
-
-//        if (getName() == "rHand") {
-//            RTT::log(RTT::Info) << q_out_.transpose() << RTT::endlog();
-//            Eigen::Matrix<int, 4, 1 > status_idle;
-//            for (int i=0; i<4; ++i) {
-//                status_idle(i) = mode_[i];
-//            }
-//            RTT::log(RTT::Info) << status_idle.transpose() << RTT::endlog();
-//        }
 
         // on 1, 101, 201, 301, 401, ... step
         if ( (loop_counter_%100) == 1)
@@ -528,9 +489,6 @@ public:
 //        if (resetFingersCounter_ <= 0) {
 //        }
 
-//done:
-//        ctrl_->getStatusAll(mode[0], mode[1], mode[2], mode[3]);
-
         // chack for torque switch activation
         if (fabs(q_out_[2]*3.0-q_out_[1]) > 0.03) {
             status_out_ |= STATUS_TORQUESWITCH1;
@@ -544,7 +502,7 @@ public:
 
         if (mode_[0] == 0 && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE1;
-            if ((status_out_&STATUS_OVERPRESSURE1) == 0 && fabs(q_in_[0]-q_out_[1]) > 0.03) {
+            if ((status_out_&STATUS_OVERPRESSURE1) == 0 && fabs(cmd_in.q[0]-q_out_[1]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT1;
             }
         }
@@ -554,7 +512,7 @@ public:
 
         if (mode_[1] == 0 && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE2;
-            if ((status_out_&STATUS_OVERPRESSURE2) == 0 && fabs(q_in_[1]-q_out_[4]) > 0.03) {
+            if ((status_out_&STATUS_OVERPRESSURE2) == 0 && fabs(cmd_in.q[1]-q_out_[4]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT2;
             }
         }
@@ -564,7 +522,7 @@ public:
 
         if (mode_[2] == 0 && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE3;
-            if ((status_out_&STATUS_OVERPRESSURE3) == 0 && fabs(q_in_[2]-q_out_[6]) > 0.03) {
+            if ((status_out_&STATUS_OVERPRESSURE3) == 0 && fabs(cmd_in.q[2]-q_out_[6]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT3;
             }
         }
@@ -572,9 +530,9 @@ public:
             status_out_ &= ~STATUS_IDLE3;
         }
 
-        if ((mode_[3] == 0 || (holdEnabled_ && fabs(q_in_[3]-q_out_[3]) < 0.05)) && status_read_seq_ == SEQ_STATUS_RECV) {
+        if ((mode_[3] == 0 || (holdEnabled_ && fabs(cmd_in.q[3]-q_out_[3]) < 0.05)) && status_read_seq_ == SEQ_STATUS_RECV) {
             status_out_ |= STATUS_IDLE4;
-            if (fabs(q_in_[3]-q_out_[3]) > 0.03) {
+            if (fabs(cmd_in.q[3]-q_out_[3]) > 0.03) {
                 status_out_ |= STATUS_OVERCURRENT4;
             }
         }
@@ -585,25 +543,22 @@ public:
         bool f1_stopped(false), f2_stopped(false), f3_stopped(false);
         for (int j=0; j<24; ++j) {
             if ( (status_out_&STATUS_IDLE1) == 0 && !f1_stopped) {
-                if (max_measured_pressure_in_(0) > mp_in_) {
+                if (max_measured_pressure_in_[0] > cmd_in.max_p) {
                     cmds_.push(BHCanCommand(0, BHCanCommand::CMD_STOP, 0));
-                    //ctrl_->stopFinger(0);
                     status_out_ |= STATUS_OVERPRESSURE1;
                     f1_stopped = true;
                 }
             }
             if ( (status_out_&STATUS_IDLE2) == 0 && !f2_stopped) {
-                if (max_measured_pressure_in_(1) > mp_in_) {
+                if (max_measured_pressure_in_[1] > cmd_in.max_p) {
                     cmds_.push(BHCanCommand(1, BHCanCommand::CMD_STOP, 0));
-                    //ctrl_->stopFinger(1);
                     status_out_ |= STATUS_OVERPRESSURE2;
                     f2_stopped = true;
                 }
             }
             if ( (status_out_&STATUS_IDLE3) == 0 && !f3_stopped) {
-                if (max_measured_pressure_in_(2) > mp_in_) {
+                if (max_measured_pressure_in_[2] > cmd_in.max_p) {
                     cmds_.push(BHCanCommand(2, BHCanCommand::CMD_STOP, 0));
-                    //ctrl_->stopFinger(2);
                     status_out_ |= STATUS_OVERPRESSURE3;
                     f3_stopped = true;
                 }
