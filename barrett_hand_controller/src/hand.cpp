@@ -301,26 +301,26 @@ public:
     void writeCan() {
         if (iter_counter_ == 0) {
             ctrl_->sendGetPosition(0);
-            ctrl_->sendGetPosition(1);
-            ctrl_->sendGetPosition(2);
+            ctrl_->sendGetStatus(0);
+            ctrl_->sendGetCurrent(0);
         }
         else if (iter_counter_ == 1) {
-            ctrl_->sendGetPosition(3);
-            ctrl_->sendGetStatus(0);
+            ctrl_->sendGetPosition(1);
             ctrl_->sendGetStatus(1);
+            ctrl_->sendGetCurrent(1);
         }
         else if (iter_counter_ == 2) {
+            ctrl_->sendGetPosition(2);
             ctrl_->sendGetStatus(2);
+            ctrl_->sendGetCurrent(2);
+        }
+        else if (iter_counter_ == 3) {
+            ctrl_->sendGetPosition(3);
             ctrl_->sendGetStatus(3);
+            ctrl_->sendGetCurrent(3);
             if (status_read_seq_ == SEQ_CMD_SEND) {
                 status_read_seq_ = SEQ_STATUS_RECV;
             }
-            ctrl_->sendGetCurrent(0);
-        }
-        else if (iter_counter_ == 3) {
-            ctrl_->sendGetCurrent(1);
-            ctrl_->sendGetCurrent(2);
-            ctrl_->sendGetCurrent(3);
         }
         else {
             BHCanCommand cmd;
@@ -361,8 +361,11 @@ public:
     // Temperature is published every 100 ms (10 Hz).
     void updateHook()
     {
-        readCan();
-        iter_counter_ = (iter_counter_+1)%6;
+        bool can_read_successful = ctrl_->read();
+//        if (can_read_successful) {
+            readCan();
+            iter_counter_ = (iter_counter_+1)%6;
+//        }
 
         uint8_t reset_in_ = 0;
         if (port_reset_in_.read(reset_in_) == RTT::NewData && reset_in_ == 1) {
@@ -580,7 +583,9 @@ public:
         port_status_out_.write(status_out_);
 
         loop_counter_ = (loop_counter_+1)%1000;
-        writeCan();
+//        if (can_read_successful) {
+            writeCan();
+//        }
     }
 };
 ORO_CREATE_COMPONENT(BarrettHand)

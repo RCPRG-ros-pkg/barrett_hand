@@ -122,6 +122,10 @@ MotorController::~MotorController() {
     //delete pdev_;
 }
 
+bool MotorController::read() {
+    return can_srv_->readQueue();
+}
+
 void MotorController::setProperty(int id, uint32_t property, int32_t value) {
 	int can_id = id;
 	int can_dlc = 6;

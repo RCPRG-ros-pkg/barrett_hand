@@ -59,6 +59,8 @@ public:
     void getTherm(int id, int32_t &temp);
 //	void getCts(int id, int32_t &cts);
 */
+    bool read();
+
 	void stopFinger(int32_t id);
     void resetFinger(int id);
     void setMaxVel(int id, uint32_t vel);

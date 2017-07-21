@@ -72,6 +72,7 @@ void BarrettHandHwCAN::sendPuckProp(int puck_id, int32_t prop, int32_t value) {
 }
 
 void BarrettHandHwCAN::processPuckMsgs() {
+    can_srv_->readQueue();
 //    Logger::In in(std::string("BarrettHandHwCAN::processPuckMsgs "));
     for (int puck_id = 0; puck_id < 4; ++puck_id) {
         int8_t data[8];
