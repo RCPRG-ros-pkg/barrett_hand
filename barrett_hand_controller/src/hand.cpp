@@ -25,7 +25,7 @@
  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <barrett_hand_msgs/BHTemp.h>
+//#include <barrett_hand_status_msgs/BHTemp.h>
 #include <barrett_hand_msgs/CommandHand.h>
 
 #include <rtt/TaskContext.hpp>
@@ -139,7 +139,7 @@ private:
     Joints4 max_measured_pressure_in_;
     Joints8 q_out_;
     Joints8 t_out_;
-    barrett_hand_msgs::BHTemp temp_out_;
+//    barrett_hand_msgs::BHTemp temp_out_;
 
     std_msgs::Empty calibrate_in_;
     std_msgs::Int32 filter_in_;
@@ -152,7 +152,7 @@ private:
     OutputPort<uint32_t> port_status_out_;
     OutputPort<Joints8> port_q_out_;
     OutputPort<Joints8> port_t_out_;
-    OutputPort<barrett_hand_msgs::BHTemp> port_temp_out_;
+//    OutputPort<barrett_hand_msgs::BHTemp> port_temp_out_;
 
 
     // ROS parameters
@@ -199,7 +199,7 @@ public:
         this->ports()->addPort("t_OUTPORT", port_t_out_);
         this->ports()->addPort("status_OUTPORT", port_status_out_);
 
-        this->ports()->addPort("BHTemp", port_temp_out_);
+//        this->ports()->addPort("BHTemp", port_temp_out_);
 
         this->ports()->addPort("max_measured_pressure_INPORT", port_max_measured_pressure_in_);
         this->ports()->addPort("reset_INPORT", port_reset_in_);
@@ -456,7 +456,7 @@ public:
             bool allTempOk = true;
             bool oneTempTooHigh = false;
 
-            temp_out_.header.stamp = rtt_rosclock::host_now();
+//            temp_out_.header.stamp = rtt_rosclock::host_now();
 
             for (int i=0; i<4; i++) {
 //TODO:
@@ -468,7 +468,7 @@ public:
                 } else if (temp[i] >= TEMP_MAX_LO || therm[i] >= TEMP_MAX_LO) {
                     allTempOk = false;
                 }
-                temp_out_.temp[i] = temp[i];
+//                temp_out_.temp[i] = temp[i];
             }
 
             if (hold_ && oneTempTooHigh) {
@@ -483,7 +483,7 @@ public:
                 //RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
             }
 
-            port_temp_out_.write(temp_out_);
+//            port_temp_out_.write(temp_out_);
         }
 
         port_max_measured_pressure_in_.read(max_measured_pressure_in_);
