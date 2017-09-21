@@ -7,7 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
     cmake_modules
     kdl_parser
     lwr_msgs
-    barrett_hand_tactile
+#    barrett_hand_tactile
     barrett_hand_msgs
     velma_core_ve_re_lwr_msgs
     eigen_conversions
@@ -69,15 +69,12 @@ orocos_generate_package(
 )
 
 # Install targets
-#install(TARGETS
-#  lwr_controller
-#  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
-#  )
-
-install(DIRECTORY launch/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
+install(TARGETS
+  barrett_hand_hw_sim
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   )
 
-install(DIRECTORY worlds/
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/worlds
-  )
+orocos_install_headers(
+  DIRECTORY include/${PROJECT_NAME}/
+)
+
