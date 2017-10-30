@@ -375,19 +375,19 @@ public:
         if (resetFingersCounter_ > 0)
         {
             --resetFingersCounter_;
-            if (resetFingersCounter_ == 2500)
+            if (resetFingersCounter_ == 2900)
             {
                 cmds_.push(BHCanCommand(0, BHCanCommand::CMD_RESET, 0));
             }
-            else if (resetFingersCounter_ == 2505)
+            else if (resetFingersCounter_ == 2905)
             {
                 cmds_.push(BHCanCommand(1, BHCanCommand::CMD_RESET, 0));
             }
-            else if (resetFingersCounter_ == 2510)
+            else if (resetFingersCounter_ == 2910)
             {
                 cmds_.push(BHCanCommand(2, BHCanCommand::CMD_RESET, 0));
             }
-            else if (resetFingersCounter_ == 2000) {
+            else if (resetFingersCounter_ == 2500) {
                 cmds_.push(BHCanCommand(3, BHCanCommand::CMD_RESET, 0));
             }
         }
