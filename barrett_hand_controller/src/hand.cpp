@@ -210,7 +210,6 @@ public:
         this->addProperty("can_id_base", can_id_base_);
         this->addProperty("new_can_id_base", new_can_id_base_);
         this->addProperty("constant_configuration", constant_configuration_);
-        *((int*)0) = 1;
     }
 
     ~BarrettHand() {
