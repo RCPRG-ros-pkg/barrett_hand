@@ -160,6 +160,7 @@ private:
     string prefix_;
     int can_id_base_;
     int new_can_id_base_;
+    std::vector<double > constant_configuration_;
 
     int resetFingersCounter_;
 
@@ -208,6 +209,8 @@ public:
         this->addProperty("prefix", prefix_);
         this->addProperty("can_id_base", can_id_base_);
         this->addProperty("new_can_id_base", new_can_id_base_);
+        this->addProperty("constant_configuration", constant_configuration_);
+        *((int*)0) = 1;
     }
 
     ~BarrettHand() {
@@ -242,6 +245,19 @@ public:
         if (!ctrl_->isDevOpened()) {
             RTT::log(RTT::Error) << "could not open CAN bus" << RTT::endlog();
             return false;
+        }
+
+        if (constant_configuration_.size() != 0 && constant_configuration_.size() != 4) {
+            RTT::log(RTT::Error) << "wrong size of constant_configuration ROS parameter: " << constant_configuration_.size() << RTT::endlog();
+            return false;
+        }
+
+        RTT::log(RTT::Info) << "constant_configuration size: " << constant_configuration_.size() << RTT::endlog();
+        if (constant_configuration_.size() == 4){
+            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[0] << RTT::endlog();
+            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[1] << RTT::endlog();
+            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[2] << RTT::endlog();
+            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[3] << RTT::endlog();
         }
 
         holdEnabled_ = false;
@@ -439,14 +455,26 @@ public:
         }
 
         // write current joint positions
-        q_out_[0] = static_cast<double>(s_) * M_PI/ 35840.0;
-        q_out_[1] = 2.0*M_PI/4096.0*static_cast<double>(jp1_)/50.0;
-        q_out_[2] = 2.0*M_PI/4096.0*static_cast<double>(p1_)*(1.0/125.0 + 1.0/375.0) - q_out_[1];
-        q_out_[3] = static_cast<double>(s_) * M_PI/ 35840.0;
-        q_out_[4] = 2.0*M_PI*static_cast<double>(jp2_)/4096.0/50.0;
-        q_out_[5] = 2.0*M_PI/4096.0*(double)(p2_)*(1.0/125.0 + 1.0/375.0) - q_out_[4];
-        q_out_[6] = 2.0*M_PI*static_cast<double>(jp3_)/4096.0/50.0;
-        q_out_[7] = 2.0*M_PI/4096.0*static_cast<double>(p3_)*(1.0/125.0 + 1.0/375.0) - q_out_[6];
+        if (constant_configuration_.size() == 4) {
+            q_out_[0] = constant_configuration_[0];
+            q_out_[3] = constant_configuration_[0];
+            q_out_[1] = constant_configuration_[1];
+            q_out_[2] = constant_configuration_[1]*0.3333;
+            q_out_[4] = constant_configuration_[2];
+            q_out_[5] = constant_configuration_[2]*0.3333;
+            q_out_[6] = constant_configuration_[3];
+            q_out_[7] = constant_configuration_[3]*0.3333;
+        }
+        else {
+            q_out_[0] = static_cast<double>(s_) * M_PI/ 35840.0;
+            q_out_[1] = 2.0*M_PI/4096.0*static_cast<double>(jp1_)/50.0;
+            q_out_[2] = 2.0*M_PI/4096.0*static_cast<double>(p1_)*(1.0/125.0 + 1.0/375.0) - q_out_[1];
+            q_out_[3] = static_cast<double>(s_) * M_PI/ 35840.0;
+            q_out_[4] = 2.0*M_PI*static_cast<double>(jp2_)/4096.0/50.0;
+            q_out_[5] = 2.0*M_PI/4096.0*(double)(p2_)*(1.0/125.0 + 1.0/375.0) - q_out_[4];
+            q_out_[6] = 2.0*M_PI*static_cast<double>(jp3_)/4096.0/50.0;
+            q_out_[7] = 2.0*M_PI/4096.0*static_cast<double>(p3_)*(1.0/125.0 + 1.0/375.0) - q_out_[6];
+        }
         port_q_out_.write(q_out_);
 
         // on 1, 101, 201, 301, 401, ... step
