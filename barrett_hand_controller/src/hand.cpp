@@ -56,6 +56,7 @@
 using std::string;
 using RTT::InputPort;
 using RTT::OutputPort;
+using namespace RTT;
 
 class BHCanCommand {
 public:
@@ -223,15 +224,15 @@ public:
     bool configureHook() {
         RTT::Logger::In in(std::string("BarrettHand(") + getName() + ")::configureHook");
         if (can_id_base_ < 0) {
-            RTT::log(RTT::Error) << "the parameter 'can_id_base' is not set " << RTT::endlog();
+            Logger::log() << Logger::Error << "the parameter 'can_id_base' is not set " << Logger::endl;
             return false;
         }
         if (dev_name_.empty()) {
-            RTT::log(RTT::Error) << "the parameter 'dev_name' is not set " << RTT::endlog();
+            Logger::log() << Logger::Error << "the parameter 'dev_name' is not set " << Logger::endl;
             return false;
         }
         if (prefix_.empty()) {
-            RTT::log(RTT::Error) << "the parameter 'prefix' is not set " << RTT::endlog();
+            Logger::log() << Logger::Error << "the parameter 'prefix' is not set " << Logger::endl;
             return false;
         }
         
@@ -242,21 +243,21 @@ public:
         }
 
         if (!ctrl_->isDevOpened()) {
-            RTT::log(RTT::Error) << "could not open CAN bus" << RTT::endlog();
+            Logger::log() << Logger::Error << "could not open CAN bus" << Logger::endl;
             return false;
         }
 
         if (constant_configuration_.size() != 0 && constant_configuration_.size() != 4) {
-            RTT::log(RTT::Error) << "wrong size of constant_configuration ROS parameter: " << constant_configuration_.size() << RTT::endlog();
+            Logger::log() << Logger::Error << "wrong size of constant_configuration ROS parameter: " << constant_configuration_.size() << Logger::endl;
             return false;
         }
 
-        RTT::log(RTT::Info) << "constant_configuration size: " << constant_configuration_.size() << RTT::endlog();
+        Logger::log() << Logger::Info << "constant_configuration size: " << constant_configuration_.size() << Logger::endl;
         if (constant_configuration_.size() == 4){
-            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[0] << RTT::endlog();
-            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[1] << RTT::endlog();
-            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[2] << RTT::endlog();
-            RTT::log(RTT::Info) << "constant_configuration: " << constant_configuration_[3] << RTT::endlog();
+            Logger::log() << Logger::Info << "constant_configuration: " << constant_configuration_[0] << Logger::endl;
+            Logger::log() << Logger::Info << "constant_configuration: " << constant_configuration_[1] << Logger::endl;
+            Logger::log() << Logger::Info << "constant_configuration: " << constant_configuration_[2] << Logger::endl;
+            Logger::log() << Logger::Info << "constant_configuration: " << constant_configuration_[3] << Logger::endl;
         }
 
         holdEnabled_ = false;
@@ -360,7 +361,7 @@ public:
                         ctrl_->stopFinger(cmd.id_);
                     }
                     else if (cmd.type_ == BHCanCommand::CMD_MOVE) {
-                        //RTT::log(RTT::Warning) << "sending move command " << cmd.id_ << RTT::endlog();
+                        //Logger::log() << Logger::Warning << "sending move command " << cmd.id_ << Logger::endl;
                         ctrl_->move(cmd.id_);
                         if (cmd.id_ == 3 && status_read_seq_ == SEQ_BEFORE_CMD_SEND) {
                             status_read_seq_ = SEQ_CMD_SEND;
@@ -412,7 +413,7 @@ public:
         barrett_hand_msgs::CommandHand cmd_in = barrett_hand_msgs::CommandHand();
 
         if (port_cmd_in_.read(cmd_in) == RTT::NewData) {
-            //RTT::log(RTT::Info) << "move_hand" << RTT::endlog();
+            //Logger::log() << Logger::Info << "move_hand" << Logger::endl;
             move_hand = true;
             cmds_.push(BHCanCommand(0, BHCanCommand::CMD_MAX_VEL, RAD2P(cmd_in.dq[0])/1000.0));
             cmds_.push(BHCanCommand(1, BHCanCommand::CMD_MAX_VEL, RAD2P(cmd_in.dq[1])/1000.0));
@@ -502,22 +503,18 @@ public:
                 hold_ = false;
                 cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, holdEnabled_ && hold_));
                 //ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
-                //RTT::log(RTT::Warning) << "Temperature is too high. Disabled spread hold." << RTT::endlog();
+                //Logger::log() << Logger::Warning) << "Temperature is too high. Disabled spread hold." << Logger::endl;
             } else if (!hold_ && allTempOk) {
                 hold_ = true;
                 cmds_.push(BHCanCommand(3, BHCanCommand::CMD_HOLD, holdEnabled_ && hold_));
                 //ctrl_->setHoldPosition(3, holdEnabled_ && hold_);
-                //RTT::log(RTT::Warning) << "Temperature is lower. Enabled spread hold." << RTT::endlog();
+                //Logger::log() << Logger::Warning) << "Temperature is lower. Enabled spread hold." << Logger::endl;
             }
 
 //            port_temp_out_.write(temp_out_);
         }
 
         port_max_measured_pressure_in_.read(max_measured_pressure_in_);
-
-//        std::cout << max_measured_pressure_in_.transpose() << "   " << mp_in_ << std::endl;
-//        if (resetFingersCounter_ <= 0) {
-//        }
 
         // chack for torque switch activation
         if (fabs(q_out_[2]*3.0-q_out_[1]) > 0.03) {
