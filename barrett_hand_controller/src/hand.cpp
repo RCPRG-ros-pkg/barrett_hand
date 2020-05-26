@@ -428,7 +428,6 @@ public:
         // Add commands to queue
         BHCanCommand cmd;
         if (cmds_.pop(cmd)) {
-            printf("reset: pop!\n");
             writeCanCommand(cmd);
         }
 
