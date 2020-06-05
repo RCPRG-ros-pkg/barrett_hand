@@ -147,9 +147,26 @@ private:
         STATUS_IDLE4 = 0x8000
     };
 
+    enum : uint16_t {
+        PROP_STATUS,
+        PROP_CURRENT
+    };
+
     uint16_t current_state_;
+    uint16_t expected_prop_type_;
 
     uint8_t status_read_seq_;
+
+    enum : uint16_t {
+        STATE_CURRENT_FSM_INIT,
+        STATE_CURRENT_FSM_CURRENT_RECV,
+        STATE_CURRENT_FSM_STATUS_RECV,
+        STATE_CURRENT_FSM_POS_RECV,
+    };
+    uint16_t status_current_fsm_;
+    bool recv_currents_[4];
+    bool recv_status_[4];
+    bool recv_pos_[4];
 
     //int16_t loop_counter_;
     std::unique_ptr<MotorController> ctrl_;
@@ -186,6 +203,7 @@ private:
     int32_t mode_[4];
 
     ros::Time initHandTime_;
+    ros::Time sendGetTime_;
     bool initHandF1Sent_;
     bool initHandF2Sent_;
     bool initHandF3Sent_;
@@ -264,6 +282,13 @@ public:
         status_out_ = 0;
         normalOpIterCounter_ = 0;
 
+        for (int i = 0; i < 4; ++i) {
+            recv_status_[i] = false;
+            recv_currents_[i] = false;
+            recv_pos_[i] = false;
+        }
+        status_current_fsm_ = STATE_CURRENT_FSM_INIT;
+
         return true;
     }
 
@@ -278,18 +303,81 @@ public:
     void readCan() {
         // Read all messages form the queue
         int32_t tmp;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getPosition(0, p1_, jp1_)) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getStatus(0, mode_[0])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getCurrent(0, currents_[0])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getPosition(1, p2_, jp2_)) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getStatus(1, mode_[1])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getCurrent(1, currents_[1])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getPosition(2, p3_, jp3_)) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getStatus(2, mode_[2])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getCurrent(2, currents_[2])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getPosition(3, s_, tmp)) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getStatus(3, mode_[3])) break;
-        for (int i=0; i < 20; ++i) if (!ctrl_->getCurrent(3, currents_[3])) break;
+
+        ros::Time now = rtt_rosclock::host_now();
+
+        if (status_current_fsm_ == STATE_CURRENT_FSM_STATUS_RECV) {
+            if (now > sendGetTime_ + ros::Duration(0.05)) {
+                int reads[4] = {0, 0, 0, 0};
+                for (int puck_id = 0; puck_id < 4; ++puck_id) {
+                    for (int i=0; i < 20; ++i) {
+                        ++reads[puck_id];
+                        if (ctrl_->getStatus(puck_id, mode_[puck_id])) {
+                            //std::cout << " <- " << getName() << " " << puck_id << " " << i << std::endl;
+                            recv_status_[puck_id]=true;
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                }
+            }
+            //std::cout << "reads status: " << reads[0] << " " << reads[1] << " " << reads[2] << " " << reads[3] << std::endl;
+        }
+        else if (status_current_fsm_ == STATE_CURRENT_FSM_CURRENT_RECV) {
+            if (now > sendGetTime_ + ros::Duration(0.05)) {
+                int reads[4] = {0, 0, 0, 0};
+                for (int puck_id = 0; puck_id < 4; ++puck_id) {
+                    for (int i=0; i < 20; ++i) {
+                        ++reads[puck_id];
+                        if (ctrl_->getCurrent(puck_id, currents_[puck_id])) {
+                            //std::cout << " <- " << getName() << " " << puck_id << " " << i << std::endl;
+                            recv_currents_[puck_id]=true;
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                    // TODO:
+                    //currents_[puck_id] = 0.0;
+                }
+            //std::cout << "reads current: " << reads[0] << " " << reads[1] << " " << reads[2] << " " << reads[3] << std::endl;
+            }
+        }
+        else if (status_current_fsm_ == STATE_CURRENT_FSM_POS_RECV) {
+            for (int i=0; i < 20; ++i) {
+                if (ctrl_->getPosition(0, p1_, jp1_)) {
+                    recv_pos_[0]=true;
+                }
+                else {
+                    break;
+                }
+            }
+            for (int i=0; i < 20; ++i) {
+                if (ctrl_->getPosition(1, p2_, jp2_)) {
+                    recv_pos_[1]=true;
+                }
+                else {
+                    break;
+                }
+            }
+            for (int i=0; i < 20; ++i) {
+                if (ctrl_->getPosition(2, p3_, jp3_)) {
+                    recv_pos_[2]=true;
+                }
+                else {
+                    break;
+                }
+            }
+            for (int i=0; i < 20; ++i) {
+                if (ctrl_->getPosition(3, s_, tmp)) {
+                    recv_pos_[3]=true;
+                }
+                else {
+                    break;
+                }
+            }
+        }
     }
 
     void writeCanCommand(const BHCanCommand& cmd) {
@@ -338,40 +426,68 @@ public:
     void writeNormaOpDataToCan() {
         // Use this magic with normalOpIterCounter_ to limit number of commands sent to the gripper
         // in every iteration
+        ros::Time now = rtt_rosclock::host_now();
         switch(normalOpIterCounter_) {
             case 0:
-                ctrl_->sendGetPosition(0);
-                ctrl_->sendGetStatus(0);
-                ctrl_->sendGetCurrent(0);
-                break;
-
             case 1:
-                ctrl_->sendGetPosition(1);
-                ctrl_->sendGetStatus(1);
-                ctrl_->sendGetCurrent(1);
-                break;
-
-            case 2:
-                ctrl_->sendGetPosition(2);
-                ctrl_->sendGetStatus(2);
-                ctrl_->sendGetCurrent(2);
-                break;
-
             case 3:
-                ctrl_->sendGetPosition(3);
-                ctrl_->sendGetStatus(3);
-                ctrl_->sendGetCurrent(3);
+                if (status_current_fsm_ == STATE_CURRENT_FSM_INIT) {
+                    status_current_fsm_ = STATE_CURRENT_FSM_STATUS_RECV;
+                    for (int puck_id = 0; puck_id < 4; ++puck_id) {
+                        recv_status_[puck_id] =false;
+                        ctrl_->sendGetStatus(puck_id);
+                    }
+                    //std::cout << getName() << "sendGetStatus" << std::endl;
+                    sendGetTime_ = now;
+                }
+                else if (status_current_fsm_ == STATE_CURRENT_FSM_STATUS_RECV) {
+                    if (recv_status_[0] && recv_status_[1] && recv_status_[2] && recv_status_[3] && now > sendGetTime_ + ros::Duration(0.1)) {
+                        status_current_fsm_ = STATE_CURRENT_FSM_CURRENT_RECV;
+                        for (int puck_id = 0; puck_id < 4; ++puck_id) {
+                            recv_currents_[puck_id] =false;
+                            ctrl_->sendGetCurrent(puck_id);
+                        }
+                        //std::cout << getName() << "sendGetCurrent" << std::endl;
+                        sendGetTime_ = now;
+                    }
+                }
+                else if (status_current_fsm_ == STATE_CURRENT_FSM_CURRENT_RECV) {
+                    if (recv_currents_[0] && recv_currents_[1] && recv_currents_[2] && recv_currents_[3] && recv_status_[3] && now > sendGetTime_ + ros::Duration(0.1)) {
+                        status_current_fsm_ = STATE_CURRENT_FSM_POS_RECV;
+                        for (int puck_id = 0; puck_id < 4; ++puck_id) {
+                            recv_pos_[puck_id] =false;
+                            ctrl_->sendGetPosition(puck_id);
+                        }
+                        //std::cout << getName() << "sendGetPosition" << std::endl;
+                        sendGetTime_ = now;
+                    }
+                }
+                else if (status_current_fsm_ == STATE_CURRENT_FSM_POS_RECV) {
+                    if (recv_pos_[0] && recv_pos_[1] && recv_pos_[2] && recv_pos_[3] && recv_status_[3] && now > sendGetTime_ + ros::Duration(0.1)) {
+                        status_current_fsm_ = STATE_CURRENT_FSM_STATUS_RECV;
+                        for (int puck_id = 0; puck_id < 4; ++puck_id) {
+                            recv_status_[puck_id] =false;
+                            ctrl_->sendGetStatus(puck_id);
+                        }
+                        //std::cout << getName() << "sendGetStatus" << std::endl;
+                        sendGetTime_ = now;
+                    }
+                }
+
+                break;
+
+            case 4:
                 if (status_read_seq_ == SEQ_CMD_SEND) {
                     status_read_seq_ = SEQ_STATUS_RECV;
                 }
                 break;
 
-            case 4:
+            case 2:
             case 5:
                 for (int i = 0; i < 3; ++i) {
                     BHCanCommand cmd;
                     if (!cmds_.pop(cmd))
-                        continue;
+                        break;
                     writeCanCommand(cmd);
                 }
 
@@ -526,8 +642,36 @@ public:
         }
     }
 
+    int iter_counter_;
     void writeOutputPorts() {
         port_q_out_.write(q_out_);
+        /*
+        if (iter_counter_ < 0 || iter_counter_ > 1000) {
+            iter_counter_ = 0;
+
+            std::cout << getName() << " status: " <<
+                    ((status_out_&STATUS_TORQUESWITCH1)?"torque_sw_1 " : "") <<
+                    ((status_out_&STATUS_TORQUESWITCH2)?"torque_sw_2 " : "") <<
+                    ((status_out_&STATUS_TORQUESWITCH3)?"torque_sw_3 " : "") <<
+                    ((status_out_&STATUS_IDLE1)?"idle_1 " : "") <<
+                    ((status_out_&STATUS_IDLE2)?"idle_2 " : "") <<
+                    ((status_out_&STATUS_IDLE3)?"idle_3 " : "") <<
+                    ((status_out_&STATUS_IDLE4)?"idle_4 " : "") <<
+                    ((status_out_&STATUS_OVERCURRENT1)?"o_current_1 " : "") <<
+                    ((status_out_&STATUS_OVERCURRENT2)?"o_current_2 " : "") <<
+                    ((status_out_&STATUS_OVERCURRENT3)?"o_current_3 " : "") <<
+                    ((status_out_&STATUS_OVERCURRENT4)?"o_current_4 " : "") <<
+                    ((status_out_&STATUS_OVERPRESSURE1)?"o_pressure_1 " : "") <<
+                    ((status_out_&STATUS_OVERPRESSURE2)?"o_pressure_2 " : "") <<
+                    ((status_out_&STATUS_OVERPRESSURE3)?"o_pressure_3 " : "") <<
+                    "mode: " << mode_[0] << ", " << mode_[1] << ", " << mode_[2] << ", " << mode_[3] <<
+                    "  currents: " << currents_[0] << ", " << currents_[1] << ", " << currents_[2] << ", " << currents_[3] <<
+                    "  pos: " << q_out_[0] << ", " << q_out_[1] << ", " << q_out_[4] << ", " << q_out_[6] <<
+                    std::endl;
+            //std::cout << getName() << " status: " << status_out_ << std::endl;
+        }
+        iter_counter_++;
+        */
         port_status_out_.write(status_out_);
         port_t_out_.write(t_out_);
     }

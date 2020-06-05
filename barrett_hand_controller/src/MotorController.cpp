@@ -135,7 +135,6 @@ bool MotorController::recProperty(int id, int32_t &value) {
     if (dlc <= 0) {
         return false;
     }
-
 	value = data[dlc-1] & 0x80 ? -1L : 0;
 	for (unsigned int i = dlc-1; i >= 2; i--)
 		value = value << 8 | data[i];
@@ -191,7 +190,8 @@ void MotorController::sendGetStatus(int puck_id) {
 }
 
 bool MotorController::getStatus(int puck_id, int32_t &mode) {
-	return recProperty(can_id_base_+puck_id, mode);
+    bool result = recProperty(can_id_base_+puck_id, mode);
+	return result;
 }
 
 void MotorController::sendGetCurrent(int puck_id) {
