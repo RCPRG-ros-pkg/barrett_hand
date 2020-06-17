@@ -39,10 +39,10 @@
 
 using namespace RTT;
 
-#define RAD2P(x) (((double)(x) * 180.0 * 199111.1) / (3.1416 * 140.0))
-#define RAD2S(x) ((double)(x) * 35840.0 / M_PI)
+#define RAD2P(x) (int(((double)(x) * 180.0 * 199111.1) / (3.1416 * 140.0)))
+#define RAD2S(x) (int((double)(x) * 35840.0 / M_PI))
 
-#define VEL(x) ((x) / 1000.0)
+#define VEL(x) ((double(x)) / 1000.0)
 
 constexpr int BH_DOF = 4;
 constexpr int BH_JOINTS = 8;
@@ -322,7 +322,6 @@ public:
                     }
                 }
             }
-            //std::cout << "reads status: " << reads[0] << " " << reads[1] << " " << reads[2] << " " << reads[3] << std::endl;
         }
         else if (status_current_fsm_ == STATE_CURRENT_FSM_CURRENT_RECV) {
             if (now > sendGetTime_ + ros::Duration(0.05)) {
@@ -338,8 +337,6 @@ public:
                             break;
                         }
                     }
-                    // TODO:
-                    //currents_[puck_id] = 0.0;
                 }
             //std::cout << "reads current: " << reads[0] << " " << reads[1] << " " << reads[2] << " " << reads[3] << std::endl;
             }
@@ -423,6 +420,7 @@ public:
         }
     }
 
+    ros::Time last_read_time_;
     void writeNormaOpDataToCan() {
         // Use this magic with normalOpIterCounter_ to limit number of commands sent to the gripper
         // in every iteration
@@ -431,13 +429,13 @@ public:
             case 0:
             case 1:
             case 3:
-                if (status_current_fsm_ == STATE_CURRENT_FSM_INIT) {
+                if (status_current_fsm_ == STATE_CURRENT_FSM_INIT || now > sendGetTime_ + ros::Duration(0.5)) {
                     status_current_fsm_ = STATE_CURRENT_FSM_STATUS_RECV;
                     for (int puck_id = 0; puck_id < 4; ++puck_id) {
                         recv_status_[puck_id] =false;
                         ctrl_->sendGetStatus(puck_id);
                     }
-                    //std::cout << getName() << "sendGetStatus" << std::endl;
+                    //std::cout << getName() << " sendGetStatus init" << std::endl;
                     sendGetTime_ = now;
                 }
                 else if (status_current_fsm_ == STATE_CURRENT_FSM_STATUS_RECV) {
@@ -447,7 +445,7 @@ public:
                             recv_currents_[puck_id] =false;
                             ctrl_->sendGetCurrent(puck_id);
                         }
-                        //std::cout << getName() << "sendGetCurrent" << std::endl;
+                        //std::cout << getName() << " sendGetCurrent" << std::endl;
                         sendGetTime_ = now;
                     }
                 }
@@ -458,7 +456,7 @@ public:
                             recv_pos_[puck_id] =false;
                             ctrl_->sendGetPosition(puck_id);
                         }
-                        //std::cout << getName() << "sendGetPosition" << std::endl;
+                        //std::cout << getName() << " sendGetPosition" << std::endl;
                         sendGetTime_ = now;
                     }
                 }
@@ -469,7 +467,7 @@ public:
                             recv_status_[puck_id] =false;
                             ctrl_->sendGetStatus(puck_id);
                         }
-                        //std::cout << getName() << "sendGetStatus" << std::endl;
+                        //std::cout << getName() << " sendGetStatus" << std::endl;
                         sendGetTime_ = now;
                     }
                 }
@@ -559,12 +557,19 @@ public:
         normalOpIterCounter_ = 0;
     }
 
+    //int iter_counter_print_;
     void iterateStateNormalOp() {
         ctrl_->read();
 
-        if (cmds_.wasOverloaded()) {
-            printf("%s: cmds queue was overloaded\n", getName().c_str());
-        }
+        //if (cmds_.wasOverloaded()) {
+        //    if (iter_counter_print_ > 1000 || iter_counter_print_ < 0) {
+        //        printf("%s: cmds queue was overloaded\n", getName().c_str());
+        //        iter_counter_print_ = 0;
+        //    }
+        //    else {
+        //        ++iter_counter_print_;
+        //    }
+        //}
         readCan();
         normalOpIterCounter_ = ((normalOpIterCounter_+1) % 6);
 
