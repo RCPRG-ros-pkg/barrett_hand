@@ -208,7 +208,7 @@ private:
     bool initHandF2Sent_;
     bool initHandF3Sent_;
     bool initHandSpSent_;
-    uint8_t normalOpIterCounter_;
+    int normalOpIterCounter_;
 
     // circular buffer for commands
     BHCanCommandFIFO<100> cmds_;
@@ -223,6 +223,7 @@ public:
         , can_id_base_(-1)
         , currents_{0, 0, 0, 0}
         , mode_{0, 0, 0, 0}
+        , normalOpIterCounter_(0)
     {
         holdEnabled_ = false;
         hold_ = true;
@@ -488,7 +489,7 @@ public:
                         break;
                     writeCanCommand(cmd);
                 }
-
+                break;
             default:
                 Logger::log() << Logger::Warning << "writeNormaOpDataToCan: Unknown normalOpIterCounter_ " << normalOpIterCounter_ << Logger::endl;
                 break;
