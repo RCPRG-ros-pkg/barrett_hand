@@ -599,16 +599,16 @@ public:
     void handleCommand(const barrett_hand_msgs::CommandHand& cmd_in)
     {
         //Logger::log() << Logger::Info << "move_hand" << Logger::endl;
-        cmds_.push(BHCanCommand{0, BHCanCommand::CMD_MAX_VEL, VEL(RAD2P(cmd_in.dq[0]))});
-        cmds_.push(BHCanCommand{1, BHCanCommand::CMD_MAX_VEL, VEL(RAD2P(cmd_in.dq[1]))});
-        cmds_.push(BHCanCommand{2, BHCanCommand::CMD_MAX_VEL, VEL(RAD2P(cmd_in.dq[2]))});
-        cmds_.push(BHCanCommand{3, BHCanCommand::CMD_MAX_VEL, VEL(RAD2S(cmd_in.dq[3]))});
+        cmds_.push(BHCanCommand{0, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[0])))});
+        cmds_.push(BHCanCommand{1, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[1])))});
+        cmds_.push(BHCanCommand{2, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[2])))});
+        cmds_.push(BHCanCommand{3, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2S(cmd_in.dq[3])))});
 
         status_out_ = 0;        // clear the status
         status_read_seq_ = SEQ_BEFORE_CMD_SEND;
 
         for (int i = 0; i < BH_DOF; i++)
-            cmds_.push(BHCanCommand{i, BHCanCommand::CMD_MAX_TORQUE, STATIC_TORQUE_MAX});
+            cmds_.push(BHCanCommand{static_cast<uint8_t>(i), BHCanCommand::CMD_MAX_TORQUE, STATIC_TORQUE_MAX});
         torqueSwitch_ = 5;
 
         holdEnabled_ = cmd_in.hold;
@@ -630,7 +630,7 @@ public:
         }
         else if (torqueSwitch_ == 0) {
             for (int i = 0; i < BH_DOF; i++) {
-                cmds_.push(BHCanCommand{i, BHCanCommand::CMD_MAX_TORQUE, cmd_in.max_i[i]});
+                cmds_.push(BHCanCommand{static_cast<uint8_t>(i), BHCanCommand::CMD_MAX_TORQUE, static_cast<int32_t>(cmd_in.max_i[i])});
             }
 
             --torqueSwitch_;
