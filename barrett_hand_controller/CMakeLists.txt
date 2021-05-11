@@ -10,7 +10,9 @@ find_package(catkin REQUIRED COMPONENTS
     geometry_msgs
     sensor_msgs
     cmake_modules
-    controller_common)
+    controller_common
+    fabric_logger
+)
 
 find_package(Eigen3 REQUIRED)
 

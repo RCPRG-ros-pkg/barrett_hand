@@ -37,6 +37,11 @@
 
 #include "MotorController.h"
 
+#include "fabric_logger/fabric_logger.h"
+
+using fabric_logger::FabricLoggerInterfaceRtPtr;
+using fabric_logger::FabricLogger;
+
 using namespace RTT;
 
 #define RAD2P(x) (int(((double)(x) * 180.0 * 199111.1) / (3.1416 * 140.0)))
@@ -213,6 +218,8 @@ private:
     // circular buffer for commands
     BHCanCommandFIFO<100> cmds_;
 
+    FabricLoggerInterfaceRtPtr m_fabric_logger;
+
 public:
     explicit BarrettHand(const std::string& name)
         : TaskContext(name, PreOperational)
@@ -224,6 +231,7 @@ public:
         , currents_{0, 0, 0, 0}
         , mode_{0, 0, 0, 0}
         , normalOpIterCounter_(0)
+        , m_fabric_logger( FabricLogger::createNewInterfaceRt( name, 10000) )
     {
         holdEnabled_ = false;
         hold_ = true;
@@ -598,6 +606,12 @@ public:
 
     void handleCommand(const barrett_hand_msgs::CommandHand& cmd_in)
     {
+        m_fabric_logger << "handleCommand: q=[" << cmd_in.q[0] << ", " << cmd_in.q[1] << ", "
+                << cmd_in.q[2] << ", " << cmd_in.q[3] << "]"
+                << ", dq=[" << cmd_in.dq[0] << ", " << cmd_in.dq[1] << ", "
+                << cmd_in.dq[2] << ", " << cmd_in.dq[3] << "], "
+                << FabricLogger::End();
+
         //Logger::log() << Logger::Info << "move_hand" << Logger::endl;
         cmds_.push(BHCanCommand{0, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[0])))});
         cmds_.push(BHCanCommand{1, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[1])))});
