@@ -520,6 +520,7 @@ public:
         // Clear all commands in the command buffer.
         // We cannot communicate with the gripper during the initialization procedure.
         cmds_.clear();
+        m_fabric_logger << "switchToStateInitHand" << FabricLogger::End();
     }
 
     void iterateStateInitHand() {
@@ -564,6 +565,7 @@ public:
     void switchToStateNormalOp() {
         current_state_ = STATE_NORMAL_OP;
         normalOpIterCounter_ = 0;
+        m_fabric_logger << "switchToStateNormalOp" << FabricLogger::End();
     }
 
     //int iter_counter_print_;
