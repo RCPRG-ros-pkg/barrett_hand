@@ -115,6 +115,10 @@ public:
         return overloaded_;
     }
 
+    int size() const {
+        return cmd_buf_len_;
+    }
+
 private:
     uint8_t cmd_buf_len_;
     uint8_t cmd_buf_first_;
@@ -322,7 +326,7 @@ public:
                     for (int i=0; i < 20; ++i) {
                         ++reads[puck_id];
                         if (ctrl_->getStatus(puck_id, mode_[puck_id])) {
-                            //std::cout << " <- " << getName() << " " << puck_id << " " << i << std::endl;
+                            m_fabric_logger << "write can: getStatus " << puck_id << FabricLogger::End();
                             recv_status_[puck_id]=true;
                         }
                         else {
@@ -339,6 +343,7 @@ public:
                     for (int i=0; i < 20; ++i) {
                         ++reads[puck_id];
                         if (ctrl_->getCurrent(puck_id, currents_[puck_id])) {
+                            m_fabric_logger << "write can: getCurrent " << puck_id << FabricLogger::End();
                             //std::cout << " <- " << getName() << " " << puck_id << " " << i << std::endl;
                             recv_currents_[puck_id]=true;
                         }
@@ -353,6 +358,7 @@ public:
         else if (status_current_fsm_ == STATE_CURRENT_FSM_POS_RECV) {
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(0, p1_, jp1_)) {
+                    m_fabric_logger << "write can: getPosition " << 0 << FabricLogger::End();
                     recv_pos_[0]=true;
                 }
                 else {
@@ -361,6 +367,7 @@ public:
             }
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(1, p2_, jp2_)) {
+                    m_fabric_logger << "write can: getPosition " << 1 << FabricLogger::End();
                     recv_pos_[1]=true;
                 }
                 else {
@@ -369,6 +376,7 @@ public:
             }
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(2, p3_, jp3_)) {
+                    m_fabric_logger << "write can: getPosition " << 2 << FabricLogger::End();
                     recv_pos_[2]=true;
                 }
                 else {
@@ -377,6 +385,7 @@ public:
             }
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(3, s_, tmp)) {
+                    m_fabric_logger << "write can: getPosition " << 3 << FabricLogger::End();
                     recv_pos_[3]=true;
                 }
                 else {
@@ -390,34 +399,42 @@ public:
         switch(cmd.type) {
             case BHCanCommand::CMD_MAX_VEL:
                 ctrl_->setMaxVel(cmd.id, cmd.value);
+                m_fabric_logger << "write can: setMaxVel " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_HOLD:
                 ctrl_->setHoldPosition(cmd.id, cmd.value);
+                m_fabric_logger << "write can: setHoldPosition " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_RESET:
                 ctrl_->resetFinger(cmd.id);
+                m_fabric_logger << "write can: resetFinger " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_INIT:
                 ctrl_->initFinger(cmd.id);
+                m_fabric_logger << "write can: initFinger " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_MAX_TORQUE:
                 ctrl_->setMaxTorque(cmd.id, cmd.value);
+                m_fabric_logger << "write can: setMaxTorque " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_TARGET_POS:
                 ctrl_->setTargetPos(cmd.id, cmd.value);
+                m_fabric_logger << "write can: setTargetPos " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_STOP:
                 ctrl_->stopFinger(cmd.id);
+                m_fabric_logger << "write can: stopFinger " << cmd.id << FabricLogger::End();
                 break;
 
             case BHCanCommand::CMD_MOVE:
                 ctrl_->move(cmd.id);
+                m_fabric_logger << "write can: move " << cmd.id << FabricLogger::End();
                 if (cmd.id == 3 && status_read_seq_ == SEQ_BEFORE_CMD_SEND) {
                     status_read_seq_ = SEQ_CMD_SEND;
                 }
@@ -425,6 +442,8 @@ public:
 
             default:
                 Logger::log() << Logger::Warning << "Unknown command " << cmd.id << Logger::endl;
+                m_fabric_logger << "WARNING: Unknown command for " << cmd.id << ": " << cmd.type
+                                << FabricLogger::End();
                 break;
         }
     }
@@ -443,6 +462,7 @@ public:
                     for (int puck_id = 0; puck_id < 4; ++puck_id) {
                         recv_status_[puck_id] =false;
                         ctrl_->sendGetStatus(puck_id);
+                        m_fabric_logger << "write can: sendGetStatus " << puck_id << FabricLogger::End();
                     }
                     //std::cout << getName() << " sendGetStatus init" << std::endl;
                     sendGetTime_ = now;
@@ -453,6 +473,7 @@ public:
                         for (int puck_id = 0; puck_id < 4; ++puck_id) {
                             recv_currents_[puck_id] =false;
                             ctrl_->sendGetCurrent(puck_id);
+                            m_fabric_logger << "write can: sendGetCurrent " << puck_id << FabricLogger::End();
                         }
                         //std::cout << getName() << " sendGetCurrent" << std::endl;
                         sendGetTime_ = now;
@@ -464,6 +485,7 @@ public:
                         for (int puck_id = 0; puck_id < 4; ++puck_id) {
                             recv_pos_[puck_id] =false;
                             ctrl_->sendGetPosition(puck_id);
+                            m_fabric_logger << "write can: sendGetPosition " << puck_id << FabricLogger::End();
                         }
                         //std::cout << getName() << " sendGetPosition" << std::endl;
                         sendGetTime_ = now;
@@ -475,6 +497,7 @@ public:
                         for (int puck_id = 0; puck_id < 4; ++puck_id) {
                             recv_status_[puck_id] =false;
                             ctrl_->sendGetStatus(puck_id);
+                            m_fabric_logger << "write can: sendGetStatus " << puck_id << FabricLogger::End();
                         }
                         //std::cout << getName() << " sendGetStatus" << std::endl;
                         sendGetTime_ = now;
@@ -493,9 +516,15 @@ public:
             case 5:
                 for (int i = 0; i < 3; ++i) {
                     BHCanCommand cmd;
-                    if (!cmds_.pop(cmd))
+                    if (cmds_.pop(cmd)) {
+                        m_fabric_logger << "popped command" << FabricLogger::End();
+                        writeCanCommand(cmd);
+                        m_fabric_logger << "wrote command, size: " << cmds_.size() << FabricLogger::End();
+                    }
+                    else {
+                        m_fabric_logger << "could not pop command, size: " << cmds_.size() << FabricLogger::End();
                         break;
-                    writeCanCommand(cmd);
+                    }
                 }
                 break;
             default:
@@ -520,6 +549,7 @@ public:
         // Clear all commands in the command buffer.
         // We cannot communicate with the gripper during the initialization procedure.
         cmds_.clear();
+        m_fabric_logger << "cleared all commands" << FabricLogger::End();
         m_fabric_logger << "switchToStateInitHand" << FabricLogger::End();
     }
 
@@ -532,18 +562,22 @@ public:
         if (now > initHandTime_ + ros::Duration(0.1) && !initHandF1Sent_) {
             initHandF1Sent_ = true;
             cmds_.push(BHCanCommand{0, BHCanCommand::CMD_INIT, 0});
+            m_fabric_logger << "added command 0 CMD_INIT" << FabricLogger::End();
         }
         else if (now > initHandTime_ + ros::Duration(0.2) && !initHandF2Sent_) {
             initHandF2Sent_ = true;
             cmds_.push(BHCanCommand{1, BHCanCommand::CMD_INIT, 0});
+            m_fabric_logger << "added command 1 CMD_INIT" << FabricLogger::End();
         }
         else if (now > initHandTime_ + ros::Duration(0.3) && !initHandF3Sent_) {
             initHandF3Sent_ = true;
             cmds_.push(BHCanCommand{2, BHCanCommand::CMD_INIT, 0});
+            m_fabric_logger << "added command 2 CMD_INIT" << FabricLogger::End();
         }
         else if (now > initHandTime_ + ros::Duration(1.5) && !initHandSpSent_) {
             initHandSpSent_ = true;
             cmds_.push(BHCanCommand{3, BHCanCommand::CMD_INIT, 0});
+            m_fabric_logger << "added command 3 CMD_INIT" << FabricLogger::End();
         }
         else if (now > initHandTime_ + ros::Duration(3)) {
             switchToStateNormalOp();
@@ -552,9 +586,13 @@ public:
         // Add commands to queue
         BHCanCommand cmd;
         if (cmds_.pop(cmd)) {
+            m_fabric_logger << "popped command" << FabricLogger::End();
             writeCanCommand(cmd);
+            m_fabric_logger << "wrote command, size: " << cmds_.size() << FabricLogger::End();
         }
-
+        else {
+            m_fabric_logger << "could not pop command, size: " << cmds_.size() << FabricLogger::End();
+        }
         // Write output ports
         calculateJointPositions();
         port_status_out_.write(status_out_);
@@ -604,7 +642,7 @@ public:
             switchToStateInitHand();
             return;
         }
-    }    
+    }
 
     void handleCommand(const barrett_hand_msgs::CommandHand& cmd_in)
     {
@@ -619,12 +657,18 @@ public:
         cmds_.push(BHCanCommand{1, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[1])))});
         cmds_.push(BHCanCommand{2, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2P(cmd_in.dq[2])))});
         cmds_.push(BHCanCommand{3, BHCanCommand::CMD_MAX_VEL, static_cast<int32_t>(VEL(RAD2S(cmd_in.dq[3])))});
+        m_fabric_logger << "added command: 0 CMD_MAX_VEL" << FabricLogger::End();
+        m_fabric_logger << "added command: 1 CMD_MAX_VEL" << FabricLogger::End();
+        m_fabric_logger << "added command: 2 CMD_MAX_VEL" << FabricLogger::End();
+        m_fabric_logger << "added command: 3 CMD_MAX_VEL" << FabricLogger::End();
 
         status_out_ = 0;        // clear the status
         status_read_seq_ = SEQ_BEFORE_CMD_SEND;
 
-        for (int i = 0; i < BH_DOF; i++)
+        for (int i = 0; i < BH_DOF; i++) {
             cmds_.push(BHCanCommand{static_cast<uint8_t>(i), BHCanCommand::CMD_MAX_TORQUE, STATIC_TORQUE_MAX});
+            m_fabric_logger << "added command: " << i << " CMD_MAX_TORQUE" << FabricLogger::End();
+        }
         torqueSwitch_ = 5;
 
         holdEnabled_ = cmd_in.hold;
@@ -637,6 +681,15 @@ public:
         cmds_.push(BHCanCommand{1, BHCanCommand::CMD_MOVE, 0});
         cmds_.push(BHCanCommand{2, BHCanCommand::CMD_MOVE, 0});
         cmds_.push(BHCanCommand{3, BHCanCommand::CMD_MOVE, 0});
+        m_fabric_logger << "added command: 3 CMD_HOLD" << FabricLogger::End();
+        m_fabric_logger << "added command: 0 CMD_TARGET_POS" << FabricLogger::End();
+        m_fabric_logger << "added command: 1 CMD_TARGET_POS" << FabricLogger::End();
+        m_fabric_logger << "added command: 2 CMD_TARGET_POS" << FabricLogger::End();
+        m_fabric_logger << "added command: 3 CMD_TARGET_POS" << FabricLogger::End();
+        m_fabric_logger << "added command: 0 CMD_MOVE" << FabricLogger::End();
+        m_fabric_logger << "added command: 1 CMD_MOVE" << FabricLogger::End();
+        m_fabric_logger << "added command: 2 CMD_MOVE" << FabricLogger::End();
+        m_fabric_logger << "added command: 3 CMD_MOVE" << FabricLogger::End();
     }
 
     void handleTorqueSwitch(const barrett_hand_msgs::CommandHand& cmd_in)
@@ -647,6 +700,7 @@ public:
         else if (torqueSwitch_ == 0) {
             for (int i = 0; i < BH_DOF; i++) {
                 cmds_.push(BHCanCommand{static_cast<uint8_t>(i), BHCanCommand::CMD_MAX_TORQUE, static_cast<int32_t>(cmd_in.max_i[i])});
+                m_fabric_logger << "added command: " << i << " CMD_MAX_TORQUE" << FabricLogger::End();
             }
 
             --torqueSwitch_;
@@ -793,30 +847,33 @@ public:
         }
 
         port_max_measured_pressure_in_.read(max_measured_pressure_in_);
-        bool f1_stopped(false), f2_stopped(false), f3_stopped(false);
-        for (int j = 0; j < 24; ++j) {
-            if ( (status_out_&STATUS_IDLE1) == 0 && !f1_stopped) {
-                if (max_measured_pressure_in_[0] > cmd_in.max_p) {
-                    cmds_.push(BHCanCommand{0, BHCanCommand::CMD_STOP, 0});
-                    status_out_ |= STATUS_OVERPRESSURE1;
-                    f1_stopped = true;
-                }
-            }
-            if ( (status_out_&STATUS_IDLE2) == 0 && !f2_stopped) {
-                if (max_measured_pressure_in_[1] > cmd_in.max_p) {
-                    cmds_.push(BHCanCommand{1, BHCanCommand::CMD_STOP, 0});
-                    status_out_ |= STATUS_OVERPRESSURE2;
-                    f2_stopped = true;
-                }
-            }
-            if ( (status_out_&STATUS_IDLE3) == 0 && !f3_stopped) {
-                if (max_measured_pressure_in_[2] > cmd_in.max_p) {
-                    cmds_.push(BHCanCommand{2, BHCanCommand::CMD_STOP, 0});
-                    status_out_ |= STATUS_OVERPRESSURE3;
-                    f3_stopped = true;
-                }
-            }
-        }
+        // bool f1_stopped(false), f2_stopped(false), f3_stopped(false);
+        // for (int j = 0; j < 24; ++j) {
+        //     if ( (status_out_&STATUS_IDLE1) == 0 && !f1_stopped) {
+        //         if (max_measured_pressure_in_[0] > cmd_in.max_p) {
+        //             cmds_.push(BHCanCommand{0, BHCanCommand::CMD_STOP, 0});
+        //             m_fabric_logger << "added command: " << 0 << " CMD_STOP" << FabricLogger::End();
+        //             status_out_ |= STATUS_OVERPRESSURE1;
+        //             f1_stopped = true;
+        //         }
+        //     }
+        //     if ( (status_out_&STATUS_IDLE2) == 0 && !f2_stopped) {
+        //         if (max_measured_pressure_in_[1] > cmd_in.max_p) {
+        //             cmds_.push(BHCanCommand{1, BHCanCommand::CMD_STOP, 0});
+        //             m_fabric_logger << "added command: " << 1 << " CMD_STOP" << FabricLogger::End();
+        //             status_out_ |= STATUS_OVERPRESSURE2;
+        //             f2_stopped = true;
+        //         }
+        //     }
+        //     if ( (status_out_&STATUS_IDLE3) == 0 && !f3_stopped) {
+        //         if (max_measured_pressure_in_[2] > cmd_in.max_p) {
+        //             cmds_.push(BHCanCommand{2, BHCanCommand::CMD_STOP, 0});
+        //             m_fabric_logger << "added command: " << 2 << " CMD_STOP" << FabricLogger::End();
+        //             status_out_ |= STATUS_OVERPRESSURE3;
+        //             f3_stopped = true;
+        //         }
+        //     }
+        // }
     }
 
     void handleCurrents()
@@ -843,6 +900,7 @@ public:
             iterateStateInitHand();
         }
         else {
+            m_fabric_logger << "ERROR: Wrong internal state of the component: " << current_state_ << FabricLogger::End();
             Logger::log() << Logger::Error << "Wrong internal state of the component: " << current_state_ << Logger::endl;
             error();
         }
