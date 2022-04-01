@@ -236,7 +236,7 @@ public:
         , currents_{0, 0, 0, 0}
         , mode_{0, 0, 0, 0}
         , normalOpIterCounter_(0)
-        , m_fabric_logger( FabricLogger::createNewInterfaceRt( name, 10000) )
+        , m_fabric_logger( FabricLogger::createNewInterfaceRt( name, 100000) )
     {
         sendGetTime_ = rtt_rosclock::host_now();
         startupTime_ = rtt_rosclock::host_now();
@@ -330,7 +330,9 @@ public:
                     for (int i=0; i < 20; ++i) {
                         ++reads[puck_id];
                         if (ctrl_->getStatus(puck_id, mode_[puck_id])) {
-                            m_fabric_logger << "write can: getStatus " << puck_id << FabricLogger::End();
+                            m_fabric_logger << "read can: getStatus " << puck_id << ": "
+                                                        << mode_[puck_id] << FabricLogger::End();
+                            m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
                             recv_status_[puck_id]=true;
                         }
                         else {
@@ -347,8 +349,10 @@ public:
                     for (int i=0; i < 20; ++i) {
                         ++reads[puck_id];
                         if (ctrl_->getCurrent(puck_id, currents_[puck_id])) {
-                            m_fabric_logger << "write can: getCurrent " << puck_id << FabricLogger::End();
+                            m_fabric_logger << "read can: getCurrent " << puck_id << ": "
+                                                    << currents_[puck_id] << FabricLogger::End();
                             //std::cout << " <- " << getName() << " " << puck_id << " " << i << std::endl;
+                            m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
                             recv_currents_[puck_id]=true;
                         }
                         else {
@@ -362,7 +366,8 @@ public:
         else if (status_current_fsm_ == STATE_CURRENT_FSM_POS_RECV) {
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(0, p1_, jp1_)) {
-                    m_fabric_logger << "write can: getPosition " << 0 << FabricLogger::End();
+                    m_fabric_logger << "read can: getPosition " << 0 << ": " << p1_ << ", " << jp1_ << FabricLogger::End();
+                    m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
                     recv_pos_[0]=true;
                 }
                 else {
@@ -371,7 +376,8 @@ public:
             }
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(1, p2_, jp2_)) {
-                    m_fabric_logger << "write can: getPosition " << 1 << FabricLogger::End();
+                    m_fabric_logger << "read can: getPosition " << 1 << ": " << p2_ << ", " << jp2_ << FabricLogger::End();
+                    m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
                     recv_pos_[1]=true;
                 }
                 else {
@@ -380,7 +386,8 @@ public:
             }
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(2, p3_, jp3_)) {
-                    m_fabric_logger << "write can: getPosition " << 2 << FabricLogger::End();
+                    m_fabric_logger << "read can: getPosition " << 2 << ": " << p3_ << ", " << jp3_ << FabricLogger::End();
+                    m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
                     recv_pos_[2]=true;
                 }
                 else {
@@ -389,7 +396,8 @@ public:
             }
             for (int i=0; i < 20; ++i) {
                 if (ctrl_->getPosition(3, s_, tmp)) {
-                    m_fabric_logger << "write can: getPosition " << 3 << FabricLogger::End();
+                    m_fabric_logger << "read can: getPosition " << 3 << ": " << s_ << FabricLogger::End();
+                    m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
                     recv_pos_[3]=true;
                 }
                 else {
