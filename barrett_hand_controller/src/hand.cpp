@@ -237,6 +237,8 @@ public:
         , normalOpIterCounter_(0)
         , m_fabric_logger( FabricLogger::createNewInterfaceRt( name, 10000) )
     {
+        sendGetTime_ = rtt_rosclock::host_now();
+
         holdEnabled_ = false;
         hold_ = true;
         status_out_ = 0;
