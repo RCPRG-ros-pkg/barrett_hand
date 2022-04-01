@@ -48,6 +48,7 @@ public:
 	~MotorController();
 
     bool read();
+    int getFramesCount() const;
 
 	void stopFinger(int32_t id);
     void resetFinger(int id);

@@ -558,6 +558,8 @@ public:
     void iterateStateInitHand() {
         ctrl_->read();
 
+        m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
+
         readCan();
 
         ros::Time now = rtt_rosclock::host_now();
