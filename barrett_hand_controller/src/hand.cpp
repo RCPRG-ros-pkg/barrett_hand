@@ -135,6 +135,7 @@ private:
     };
 
     enum : uint16_t {
+        STATE_PRE_INIT,
         STATE_INIT_HAND,
         STATE_NORMAL_OP
     };
@@ -213,6 +214,7 @@ private:
 
     ros::Time initHandTime_;
     ros::Time sendGetTime_;
+    ros::Time startupTime_;
     bool initHandF1Sent_;
     bool initHandF2Sent_;
     bool initHandF3Sent_;
@@ -227,8 +229,7 @@ private:
 public:
     explicit BarrettHand(const std::string& name)
         : TaskContext(name, PreOperational)
-        //, loop_counter_(0)
-        , current_state_(STATE_NORMAL_OP)
+        , current_state_(STATE_PRE_INIT)
         , torqueSwitch_(-1)
         , p1_(0), p2_(0), p3_(0), jp1_(0), jp2_(0), jp3_(0), jp4_(0), s_(0)
         , can_id_base_(-1)
@@ -238,6 +239,7 @@ public:
         , m_fabric_logger( FabricLogger::createNewInterfaceRt( name, 10000) )
     {
         sendGetTime_ = rtt_rosclock::host_now();
+        startupTime_ = rtt_rosclock::host_now();
 
         holdEnabled_ = false;
         hold_ = true;
@@ -614,6 +616,8 @@ public:
     void iterateStateNormalOp() {
         ctrl_->read();
 
+        m_fabric_logger << "input frames: " << ctrl_->getFramesCount() << FabricLogger::End();
+
         //if (cmds_.wasOverloaded()) {
         //    if (iter_counter_print_ > 1000 || iter_counter_print_ < 0) {
         //        printf("%s: cmds queue was overloaded\n", getName().c_str());
@@ -899,6 +903,11 @@ public:
     {
         if (current_state_ == STATE_NORMAL_OP) {
             iterateStateNormalOp();
+        }
+        else if (current_state_ == STATE_PRE_INIT) {
+            if (rtt_rosclock::host_now() > startupTime_ + ros::Duration(2.0)) {
+                current_state_ = STATE_NORMAL_OP;
+            }
         }
         else if (current_state_ == STATE_INIT_HAND) {
             iterateStateInitHand();
